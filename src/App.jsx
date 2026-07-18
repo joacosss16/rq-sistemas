@@ -1401,19 +1401,31 @@ export default function App() {
   }, []);
 
   const cargarTodo = useCallback(async () => {
+    // Supabase devuelve máximo 1,000 filas por consulta: traer por lotes
+    // hasta completar (el catálogo tiene 1,740 materiales).
+    const LOTE = 1000;
+    const fetchAll = async crearQuery => {
+      const filas = [];
+      for (let desde = 0; ; desde += LOTE) {
+        const { data, error } = await crearQuery().range(desde, desde + LOTE - 1);
+        if (error) return { error };
+        filas.push(...data);
+        if (data.length < LOTE) return { data: filas };
+      }
+    };
     const q = [
-      supabase.from('proyectos').select('*').order('codigo'),
-      supabase.from('usuarios').select('*'),
-      supabase.from('materiales').select('*').eq('activo', true).order('codigo'),
-      supabase.from('proveedores').select('*').order('razon_social'),
-      supabase.from('rqs').select('*').order('numero'),
-      supabase.from('rq_items').select('*').order('creado_en'),
-      supabase.from('facturas').select('*').order('numero'),
-      supabase.from('factura_items').select('*'),
-      supabase.from('salidas').select('*').order('numero'),
-      supabase.from('prestamos').select('*').order('numero'),
-      supabase.from('solicitudes_material').select('*').order('numero'),
-      supabase.from('familias').select('*').order('iu'),
+      fetchAll(() => supabase.from('proyectos').select('*').order('codigo')),
+      fetchAll(() => supabase.from('usuarios').select('*').order('id')),
+      fetchAll(() => supabase.from('materiales').select('*').eq('activo', true).order('codigo')),
+      fetchAll(() => supabase.from('proveedores').select('*').order('razon_social').order('ruc')),
+      fetchAll(() => supabase.from('rqs').select('*').order('numero')),
+      fetchAll(() => supabase.from('rq_items').select('*').order('creado_en').order('id')),
+      fetchAll(() => supabase.from('facturas').select('*').order('numero')),
+      fetchAll(() => supabase.from('factura_items').select('*').order('factura_id').order('rq_item_id')),
+      fetchAll(() => supabase.from('salidas').select('*').order('numero')),
+      fetchAll(() => supabase.from('prestamos').select('*').order('numero')),
+      fetchAll(() => supabase.from('solicitudes_material').select('*').order('numero')),
+      fetchAll(() => supabase.from('familias').select('*').order('iu')),
     ];
     const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR] = await Promise.all(q);
     const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR].find(r => r.error);
