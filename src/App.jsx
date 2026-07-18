@@ -897,7 +897,7 @@ function Compras({ user, db, api }) {
 }
 
 function Almacen({ user, db, api }) {
-  const { rqs, salidas, prestamos } = db;
+  const { rqs, salidas, prestamos, stockInicial } = db;
   const esAlm = user.rol === 'almacen';
   const [form, setForm] = useState({});
   const [aviso, setAviso] = useState('');
@@ -938,24 +938,24 @@ function Almacen({ user, db, api }) {
 
   const salidasProy = salidas.filter(s => s.proyecto === proy);
   const stockMap = {};
+  const entrada = (cod, desc, und) => {
+    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0 };
+    return stockMap[cod];
+  };
+  // saldo inicial por inventario físico (tabla stock_inicial)
+  stockInicial.filter(si => si.proyecto === proy).forEach(si => { entrada(si.cod, si.desc, si.und).inicial += si.cant; });
   rqs.filter(r => r.proyecto === proy).forEach(r => r.items.forEach(i => {
     if (i.decision !== 'Aprobado') return;
     const rec = Number(i.cantRecibida || 0);
-    if (rec > 0) {
-      if (!stockMap[i.cod]) stockMap[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, recibido: 0, salido: 0, prestNeto: 0 };
-      stockMap[i.cod].recibido += rec;
-    }
+    if (rec > 0) entrada(i.cod, i.desc, i.und).recibido += rec;
   }));
   salidasProy.filter(s => !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += Number(s.cant); });
   prestamos.forEach(p => {
     if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
     if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
-    if (p.destino === proy) {
-      if (!stockMap[p.cod]) stockMap[p.cod] = { cod: p.cod, desc: p.desc, und: p.und, recibido: 0, salido: 0, prestNeto: 0 };
-      stockMap[p.cod].prestNeto += Number(p.cant);
-    }
+    if (p.destino === proy) entrada(p.cod, p.desc, p.und).prestNeto += Number(p.cant);
   });
-  const stock = Object.values(stockMap).map(s => ({ ...s, stock: s.recibido - s.salido + s.prestNeto }));
+  const stock = Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto }));
 
   const darSalida = async (s, f) => {
     const r = await api.darSalida({ proyecto: proy, cod: s.cod, cant: Number(f.cant), hoja: f.hoja.trim(), zona: f.zona.trim() });
@@ -1063,7 +1063,7 @@ function Almacen({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Código', 'Material', 'Und', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Código', 'Material', 'Und', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {stock.map(s => {
                   const f = fSal[s.cod] || { cant: '', hoja: '', zona: '' };
@@ -1074,6 +1074,7 @@ function Almacen({ user, db, api }) {
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
                       <td className="py-2 px-1.5 text-slate-200">{s.desc}</td>
                       <td className="py-2 px-1.5 text-slate-500">{s.und}</td>
+                      <td className={`py-2 px-1.5 font-mono ${s.inicial > 0 ? 'text-sky-400' : 'text-slate-500'}`}>{s.inicial}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.recibido}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
@@ -1091,7 +1092,7 @@ function Almacen({ user, db, api }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = recibido − salidas ± préstamos.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = inicial (inventario físico) + recibido − salidas ± préstamos.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
@@ -1429,9 +1430,10 @@ export default function App() {
       fetchAll(() => supabase.from('prestamos').select('*').order('numero')),
       fetchAll(() => supabase.from('solicitudes_material').select('*').order('numero')),
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
+      fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
     ];
-    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR] = await Promise.all(q);
-    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR].find(r => r.error);
+    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR] = await Promise.all(q);
+    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
     const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
@@ -1508,6 +1510,13 @@ export default function App() {
       registradoPor: usrMap[p.registrado_por] ? usrMap[p.registrado_por].nombre : '',
     }));
 
+    const stockInicial = siR.data.map(si => ({
+      proyecto: nomProy[si.proyecto] || si.proyecto, cod: si.codigo,
+      desc: matMap[si.codigo] ? matMap[si.codigo].descripcion : si.codigo,
+      und: matMap[si.codigo] ? matMap[si.codigo].und : '',
+      cant: Number(si.cant), fecha: si.fecha_inventario,
+    }));
+
     const solicitudes = solR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, desc: s.descripcion, und: s.und,
       fam: s.familia_iu ? (famMap[s.familia_iu] || s.familia_iu) : '', famIu: s.familia_iu || '',
@@ -1516,7 +1525,7 @@ export default function App() {
     }));
 
     const nuevo = {
-      rqs, facturas, salidas, prestamos, solicitudes,
+      rqs, facturas, salidas, prestamos, solicitudes, stockInicial,
       catalogo: mats.map(m => [m.codigo, m.descripcion, m.und, famMap[m.codigo.slice(0, 2)] || '']),
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
