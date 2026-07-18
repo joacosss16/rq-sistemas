@@ -186,13 +186,20 @@ function FechaInput({ value, onChange, className, min }) {
   );
 }
 
+// Búsqueda por palabras: ignora espacios extra y encuentra materiales que
+// contengan TODAS las palabras escritas, en cualquier orden.
+function buscarEnCatalogo(catalogo, q, max) {
+  const palabras = q.toUpperCase().split(/\s+/).filter(Boolean);
+  if (!palabras.length || q.trim().length < 2) return [];
+  return catalogo.filter(m => {
+    const texto = m[1].toUpperCase() + ' ' + m[0] + ' ' + (m[3] || '').toUpperCase();
+    return palabras.every(p => texto.includes(p));
+  }).slice(0, max);
+}
+
 function Buscador({ catalogo, onPick }) {
   const [q, setQ] = useState('');
-  const res = useMemo(() => {
-    if (q.length < 2) return [];
-    const t = q.toUpperCase();
-    return catalogo.filter(m => m[1].toUpperCase().includes(t) || m[0].includes(t)).slice(0, 8);
-  }, [q, catalogo]);
+  const res = useMemo(() => buscarEnCatalogo(catalogo, q, 8), [q, catalogo]);
   return (
     <div className="relative">
       <label className={lblCls}>Buscar material en catálogo · {catalogo.length} materiales</label>
@@ -538,11 +545,7 @@ function Catalogo({ user, db, api }) {
     const r2 = { ...rech }; delete r2[s.n]; setRech(r2);
   };
 
-  const res = useMemo(() => {
-    if (q.length < 2) return [];
-    const t = q.toUpperCase();
-    return catalogo.filter(m => m[1].toUpperCase().includes(t) || m[0].includes(t)).slice(0, 15);
-  }, [q, catalogo]);
+  const res = useMemo(() => buscarEnCatalogo(catalogo, q, 15), [q, catalogo]);
 
   return (
     <div>
