@@ -19,10 +19,11 @@ Personas clave: Lucía Arana (logística/compras centralizada, dueña del catál
 Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactualizado en decenas de copias de Excel, compras identificado como el principal dolor al escalar de 2 a 5 obras. Regla de adopción acordada: **"RQ que no entra por el sistema, no se compra".**
 
 ## Estado actual
-- `prototipo/sistema_rq.html`: prototipo funcional standalone (doble clic, offline). React 18 + Tailwind precompilados inline. Probado con 140+ corridas automatizadas (jsdom).
-- `prototipo/sistema_rq.jsx`: fuente React del prototipo.
-- Persistencia: localStorage (`sistema_rq_copacabana_v1`). Mono-usuario, mono-máquina.
-- **Siguiente fase: migrar a React + Supabase + Tailwind (multi-usuario real).** Alcance CONGELADO: replicar el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
+- **App multi-usuario en producción**: Vite + React + Tailwind + Supabase (`src/App.jsx`), desplegada en Vercel (https://rq-sistemas.vercel.app) desde el repo GitHub `joacosss16/rq-sistemas`. Login con Supabase Auth, datos compartidos vía Postgres + RLS. Migraciones en `supabase/migrations/`.
+- `prototipo/sistema_rq.html`: prototipo standalone original (localStorage, mono-usuario). Se conserva como referencia; probado con 140+ corridas automatizadas (jsdom).
+- Alcance CONGELADO: la app replica el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
+- Diferencias deliberadas con el prototipo: solo los residentes crean RQs (RLS); solo Compras registra facturas y aprueba materiales; "Reiniciar datos" se hace con `supabase/reset_pruebas.sql`; gerencia ve todo en modo consulta donde no tiene permiso de escritura.
+- Pendiente: seed de catálogo completo (1,740) y proveedores (255) desde los Excel de `datos/`.
 
 ## Modelo de negocio del sistema
 
