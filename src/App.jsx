@@ -263,7 +263,6 @@ function Residente({ user, db, api }) {
   const ch = canalDe(items);
   const urgente = ch && ch.k === 'URGENTE';
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
-  const fams = useMemo(() => [...new Set(catalogo.map(m => m[3]).filter(Boolean))].sort(), [catalogo]);
 
   const setC = (k, v) => setCab({ ...cab, [k]: v });
   const add = m => setItems(p => [...p, { id: Date.now() + Math.random(), cod: m[0], desc: m[1], und: m[2], cant: '', fecha: '', destino: '', color: '', obs: '' }]);
@@ -288,10 +287,10 @@ function Residente({ user, db, api }) {
   };
 
   const enviarSolicitud = async () => {
-    if (!solForm.desc.trim() || !solForm.und) return;
+    if (!solForm.desc.trim() || !solForm.und || !solForm.famIu) return;
     const r = await api.crearSolicitud({
       desc: solForm.desc.trim().toUpperCase(), und: solForm.und,
-      fam: solForm.fam.trim().toUpperCase(), proyecto: cab.proyecto,
+      famIu: solForm.famIu, proyecto: cab.proyecto,
     });
     if (r.error) { setAviso('⚠ ' + r.error); return; }
     setSolForm(null);
@@ -328,7 +327,7 @@ function Residente({ user, db, api }) {
         <Buscador catalogo={catalogo} onPick={add} />
         <div className="mt-2">
           {!solForm ? (
-            <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', fam: '' })}
+            <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', famIu: '' })}
               className="text-[11px] text-yellow-400 hover:text-yellow-300 underline underline-offset-2">
               ¿No encuentras el material? Solicitar material nuevo</button>
           ) : (
@@ -338,13 +337,13 @@ function Residente({ user, db, api }) {
                 <input value={solForm.desc} onChange={e => setSolForm({ ...solForm, desc: e.target.value })} placeholder="Descripción exacta del material" className={inputCls} />
                 <select value={solForm.und} onChange={e => setSolForm({ ...solForm, und: e.target.value })} className={inputCls}>
                   {unds.map(u => <option key={u}>{u}</option>)}</select>
-                <div>
-                  <input list="fams" value={solForm.fam} onChange={e => setSolForm({ ...solForm, fam: e.target.value })} placeholder="Familia sugerida" className={`w-full ${inputCls}`} />
-                  <datalist id="fams">{fams.map(f => <option key={f} value={f} />)}</datalist>
-                </div>
+                <select value={solForm.famIu} onChange={e => setSolForm({ ...solForm, famIu: e.target.value })} className={`w-full ${inputCls}`}>
+                  <option value="">— Familia sugerida * —</option>
+                  {db.familias.map(([iu, n]) => <option key={iu} value={iu}>{iu} · {n}</option>)}
+                </select>
               </div>
               <div className="flex gap-2 mt-2">
-                <button onClick={enviarSolicitud} disabled={!solForm.desc.trim()} className={btnOk(!!solForm.desc.trim())}>Enviar solicitud</button>
+                <button onClick={enviarSolicitud} disabled={!solForm.desc.trim() || !solForm.famIu} className={btnOk(!!(solForm.desc.trim() && solForm.famIu))}>Enviar solicitud</button>
                 <button onClick={() => setSolForm(null)} className="px-3 py-1.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 hover:text-slate-200">Cancelar</button>
               </div>
             </div>
@@ -463,32 +462,45 @@ function Residente({ user, db, api }) {
 }
 
 function Catalogo({ user, db, api }) {
-  const { catalogo, solicitudes } = db;
+  const { catalogo, solicitudes, familias } = db;
   const puedeAprobar = user.rol === 'compras';
-  const [edit, setEdit] = useState({});
+  const [edit, setEdit] = useState({});   // n -> { desc, und, famIu, cod }
   const [rech, setRech] = useState({});
   const [q, setQ] = useState('');
   const [aviso, setAviso] = useState('');
   const pend = solicitudes.filter(s => s.estado === 'Pendiente');
+  const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
 
-  const sugerirCodigo = s => {
-    const delaFam = catalogo.filter(m => m[3] === s.fam);
+  // Correlativo por familia: máximo código de la familia + 1
+  const sugerirCodigo = famIu => {
+    if (!famIu) return '';
+    const delaFam = catalogo.filter(m => m[0].startsWith(famIu));
     if (delaFam.length) {
       const max = Math.max(...delaFam.map(m => Number(m[0])));
       return String(max + 1).padStart(6, '0');
     }
-    const maxIU = Math.max(...catalogo.map(m => Number(m[0].slice(0, 2))));
-    return String(maxIU + 1).padStart(2, '0') + '0101';
+    return famIu + '0101';
+  };
+
+  const getEdit = s => edit[s.n] || { desc: s.desc, und: s.und, famIu: s.famIu || '', cod: sugerirCodigo(s.famIu) };
+  const setEditCampo = (s, k, v) => {
+    const e = { ...getEdit(s), [k]: v };
+    if (k === 'famIu') e.cod = sugerirCodigo(v);   // al reasignar familia se recalcula el correlativo
+    setEdit({ ...edit, [s.n]: e });
   };
 
   const aprobar = async s => {
-    const cod = (edit[s.n] ?? sugerirCodigo(s)).trim();
+    const e = getEdit(s);
+    const cod = e.cod.trim();
+    if (!e.famIu) { setAviso('⚠ Asigna una familia antes de aprobar.'); return; }
+    if (!e.desc.trim()) { setAviso('⚠ La descripción no puede quedar vacía.'); return; }
     if (!/^\d{6}$/.test(cod)) { setAviso('⚠ El código debe tener exactamente 6 dígitos.'); return; }
+    if (!cod.startsWith(e.famIu)) { setAviso(`⚠ El código ${cod} no corresponde a la familia ${e.famIu} (debe empezar con ${e.famIu}).`); return; }
     if (catalogo.some(m => m[0] === cod)) { setAviso('⚠ Ese código ya existe en el catálogo.'); return; }
-    const r = await api.aprobarSolicitud(s, cod);
+    const r = await api.aprobarSolicitud(s, { codigo: cod, desc: e.desc.trim().toUpperCase(), und: e.und, famIu: e.famIu });
     if (r.error) { setAviso('⚠ ' + r.error); return; }
     const e2 = { ...edit }; delete e2[s.n]; setEdit(e2);
-    setAviso(`Material "${s.desc}" aprobado con código ${cod}.`);
+    setAviso(`Material "${e.desc.trim()}" aprobado con código ${cod}.`);
     setTimeout(() => setAviso(''), 4000);
   };
 
@@ -525,13 +537,24 @@ function Catalogo({ user, db, api }) {
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.n}</td>
                       <td className="py-2 px-1.5 text-slate-400">{fmt(s.fecha)}</td>
                       <td className="py-2 px-1.5 text-slate-400">{s.solicitante} · {s.proyecto}</td>
-                      <td className="py-2 px-1.5 text-slate-200">{s.desc}</td>
-                      <td className="py-2 px-1.5 text-slate-500">{s.und}</td>
-                      <td className="py-2 px-1.5 text-slate-400">{s.fam || '—'}</td>
                       <td className="py-2 px-1.5">
-                        <input value={edit[s.n] ?? sugerirCodigo(s)} onChange={e => setEdit({ ...edit, [s.n]: e.target.value })}
+                        {puedeAprobar ? <input value={getEdit(s).desc} onChange={e => setEditCampo(s, 'desc', e.target.value)} className={`w-52 ${inputCls}`} />
+                          : <span className="text-slate-200">{s.desc}</span>}</td>
+                      <td className="py-2 px-1.5">
+                        {puedeAprobar ? (
+                          <select value={getEdit(s).und} onChange={e => setEditCampo(s, 'und', e.target.value)} className={inputCls}>
+                            {[...new Set([getEdit(s).und, ...unds])].map(u => <option key={u}>{u}</option>)}</select>
+                        ) : <span className="text-slate-500">{s.und}</span>}</td>
+                      <td className="py-2 px-1.5">
+                        {puedeAprobar ? (
+                          <select value={getEdit(s).famIu} onChange={e => setEditCampo(s, 'famIu', e.target.value)} className={inputCls} style={{ maxWidth: '180px' }}>
+                            <option value="">— Asignar familia —</option>
+                            {familias.map(([iu, n]) => <option key={iu} value={iu}>{iu} · {n}</option>)}</select>
+                        ) : <span className="text-slate-400">{s.fam || '—'}</span>}</td>
+                      <td className="py-2 px-1.5">
+                        <input value={getEdit(s).cod} onChange={e => setEditCampo(s, 'cod', e.target.value)}
                           className={`w-24 ${inputCls} font-mono`} maxLength={6} disabled={!puedeAprobar} />
-                        <div className="text-[9px] text-slate-500 mt-1">Sugerido por familia; editable.</div></td>
+                        <div className="text-[9px] text-slate-500 mt-1">Correlativo por familia; editable.</div></td>
                       <td className="py-2 px-1.5">
                         {!puedeAprobar ? <span className="text-slate-500 text-[10px]">Solo Compras aprueba</span> : !enRech ? (
                           <div className="flex gap-1">
@@ -553,7 +576,7 @@ function Catalogo({ user, db, api }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Solo el dueño del catálogo aprueba y codifica. Antes de aprobar, busca abajo si el material ya existe con otro nombre — evita duplicados.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">Solo el dueño del catálogo aprueba y codifica. Puedes corregir la descripción, la unidad y reasignar la familia antes de aprobar — el código correlativo se recalcula solo. Antes de aprobar, busca abajo si el material ya existe con otro nombre — evita duplicados.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -1334,12 +1357,14 @@ export default function App() {
       supabase.from('salidas').select('*').order('numero'),
       supabase.from('prestamos').select('*').order('numero'),
       supabase.from('solicitudes_material').select('*').order('numero'),
+      supabase.from('familias').select('*').order('iu'),
     ];
-    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR] = await Promise.all(q);
-    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR].find(r => r.error);
+    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR] = await Promise.all(q);
+    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
-    const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data;
+    const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
+    const famMap = {}; fams.forEach(f => { famMap[f.iu] = f.nombre; });
     const nomProy = {}, codProy = {};
     prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; });
     PROYECTOS = prj.filter(p => p.activo).map(p => [p.codigo, p.nombre]);
@@ -1413,15 +1438,17 @@ export default function App() {
     }));
 
     const solicitudes = solR.data.map(s => ({
-      id: s.id, n: s.numero, fecha: s.fecha, desc: s.descripcion, und: s.und, fam: s.familia,
+      id: s.id, n: s.numero, fecha: s.fecha, desc: s.descripcion, und: s.und,
+      fam: s.familia_iu ? (famMap[s.familia_iu] || s.familia_iu) : '', famIu: s.familia_iu || '',
       solicitante: usrMap[s.solicitante_id] ? usrMap[s.solicitante_id].nombre : '', solicitanteId: s.solicitante_id,
       proyecto: nomProy[s.proyecto] || s.proyecto, estado: s.estado, motivo: s.motivo || '', codigo: s.codigo_asignado,
     }));
 
     const nuevo = {
       rqs, facturas, salidas, prestamos, solicitudes,
-      catalogo: mats.map(m => [m.codigo, m.descripcion, m.und, m.familia]),
+      catalogo: mats.map(m => [m.codigo, m.descripcion, m.und, famMap[m.codigo.slice(0, 2)] || '']),
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
+      familias: fams.map(f => [f.iu, f.nombre]),
       nomProy, codProy,
     };
     dbRef.current = nuevo;
@@ -1518,18 +1545,19 @@ export default function App() {
         });
       }),
       updPrestamo: (id, patch) => wrap(async () => await supabase.from('prestamos').update(patch).eq('id', id)),
-      crearSolicitud: ({ desc, und, fam, proyecto }) => wrap(async () => {
+      crearSolicitud: ({ desc, und, famIu, proyecto }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('solicitudes_material').insert({
-          descripcion: desc, und, familia: fam || 'SIN FAMILIA', solicitante_id: u.id, proyecto: cod(proyecto),
+          descripcion: desc, und, familia_iu: famIu, solicitante_id: u.id, proyecto: cod(proyecto),
         });
       }),
-      aprobarSolicitud: (s, codigo) => wrap(async () => {
-        const { error } = await supabase.from('materiales').insert({
-          codigo, descripcion: s.desc, und: s.und, familia: s.fam || 'SIN FAMILIA',
-        });
+      aprobarSolicitud: (s, { codigo, desc, und, famIu }) => wrap(async () => {
+        const { error } = await supabase.from('materiales').insert({ codigo, descripcion: desc, und });
         if (error) return { error };
-        return await supabase.from('solicitudes_material').update({ estado: 'Aprobado', codigo_asignado: codigo }).eq('id', s.id);
+        // la solicitud guarda la versión final que aprobó Compras (con familia reasignada)
+        return await supabase.from('solicitudes_material').update({
+          estado: 'Aprobado', codigo_asignado: codigo, descripcion: desc, und, familia_iu: famIu,
+        }).eq('id', s.id);
       }),
       rechazarSolicitud: (s, motivo) => wrap(async () =>
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),

@@ -23,7 +23,8 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 - `prototipo/sistema_rq.html`: prototipo standalone original (localStorage, mono-usuario). Se conserva como referencia; probado con 140+ corridas automatizadas (jsdom).
 - Alcance CONGELADO: la app replica el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
 - Diferencias deliberadas con el prototipo: solo los residentes crean RQs (RLS); solo Compras registra facturas y aprueba materiales; "Reiniciar datos" se hace con `supabase/reset_pruebas.sql`; gerencia ve todo en modo consulta donde no tiene permiso de escritura.
-- Pendiente: seed de catálogo completo (1,740) y proveedores (255) desde los Excel de `datos/`.
+- Catálogo completo cargado: tabla `familias` (58, IU de 2 dígitos) + 1,740 materiales desde `datos/codificacion_de_almacen.xlsx` (hoja "Materiales 3.0"); la familia de un material se deriva de los 2 primeros dígitos del código. Compras puede editar solicitudes de material nuevo (descripción, unidad, familia) antes de aprobar; código correlativo por familia.
+- Pendiente: seed de proveedores (255) desde CONTROL_RQ_LUZ.xlsx.
 
 ## Modelo de negocio del sistema
 

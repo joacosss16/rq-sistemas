@@ -4,7 +4,10 @@ MIGRACIONES SUPABASE — SISTEMA RQ
 Contenido:
   migrations/20260717000001_esquema_inicial.sql  -> tablas, checks, funcion stock(), triggers
   migrations/20260717000002_rls.sql              -> Row Level Security por rol y proyecto
+  migrations/20260718000003_familias.sql         -> tabla familias + familia derivada del codigo
   seed.sql                                       -> proyectos + plantilla de usuarios
+  seed_catalogo.sql                              -> 58 familias + 1,740 materiales (generado del Excel)
+  reset_pruebas.sql                              -> limpia movimientos de prueba
 
 COMO APLICAR (opcion simple, sin instalar nada):
 1. Crear cuenta/proyecto en https://supabase.com (region: South America - Sao Paulo).
@@ -17,8 +20,11 @@ COMO APLICAR (opcion simple, sin instalar nada):
    y completar sus perfiles con la plantilla comentada en seed.sql.
 
 PENDIENTE:
-- Seed de catalogo (1,740 materiales) y proveedores (255): se genera
-  cuando NUEVO_RQ.xlsx y CONTROL_RQ_LUZ.xlsx esten en datos/.
+- Seed de proveedores (255): se genera cuando CONTROL_RQ_LUZ.xlsx
+  este en datos/.
+- Catalogo LISTO: fuente datos/codificacion_de_almacen.xlsx, hoja
+  "Materiales 3.0". Familias 62/73/91 con nombre propuesto (editar
+  en tabla familias si Compras decide otro).
 
 NOTAS DE DISENO (difiere levemente de docs/04):
 - Tabla extra `proyectos`: da integridad referencial (antes "proyecto"
