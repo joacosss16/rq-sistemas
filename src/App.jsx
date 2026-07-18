@@ -489,6 +489,32 @@ function Catalogo({ user, db, api }) {
     setEdit({ ...edit, [s.n]: e });
   };
 
+  const [famForm, setFamForm] = useState(null);   // null | { iu, nombre }
+
+  // Primer IU libre entre 01 y 99
+  const sugerirIU = () => {
+    const usados = new Set(familias.map(f => f[0]));
+    for (let i = 1; i <= 99; i++) {
+      const iu = String(i).padStart(2, '0');
+      if (!usados.has(iu)) return iu;
+    }
+    return '';
+  };
+
+  const crearFamilia = async () => {
+    const iu = famForm.iu.trim();
+    const nombre = famForm.nombre.trim().toUpperCase();
+    if (!/^\d{2}$/.test(iu)) { setAviso('⚠ El IU debe tener exactamente 2 dígitos.'); return; }
+    if (familias.some(f => f[0] === iu)) { setAviso(`⚠ El IU ${iu} ya está usado por "${familias.find(f => f[0] === iu)[1]}".`); return; }
+    if (!nombre) return;
+    if (familias.some(f => f[1].toUpperCase() === nombre)) { setAviso('⚠ Ya existe una familia con ese nombre.'); return; }
+    const r = await api.crearFamilia({ iu, nombre });
+    if (r.error) { setAviso('⚠ ' + r.error); return; }
+    setFamForm(null);
+    setAviso(`Familia ${iu} · "${nombre}" creada. Ya aparece en las listas de familia.`);
+    setTimeout(() => setAviso(''), 4000);
+  };
+
   const aprobar = async s => {
     const e = getEdit(s);
     const cod = e.cod.trim();
@@ -578,6 +604,36 @@ function Catalogo({ user, db, api }) {
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Solo el dueño del catálogo aprueba y codifica. Puedes corregir la descripción, la unidad y reasignar la familia antes de aprobar — el código correlativo se recalcula solo. Antes de aprobar, busca abajo si el material ya existe con otro nombre — evita duplicados.</div>
       </div>
+
+      {puedeAprobar && (
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Familias del catálogo · {familias.length}</div>
+            {!famForm && (
+              <button onClick={() => setFamForm({ iu: sugerirIU(), nombre: '' })}
+                className="ml-auto text-[11px] text-yellow-400 hover:text-yellow-300 underline underline-offset-2">＋ Nueva familia</button>
+            )}
+          </div>
+          {famForm && (
+            <div className="mt-3 bg-slate-950 border border-slate-700 rounded p-3">
+              <div className={lblCls}>Nueva familia (IU de 2 dígitos + nombre)</div>
+              <div className="flex gap-2 mt-1 flex-wrap items-start">
+                <div>
+                  <input value={famForm.iu} onChange={e => setFamForm({ ...famForm, iu: e.target.value })}
+                    maxLength={2} className={`w-16 ${inputCls} font-mono`} />
+                  <div className="text-[9px] text-slate-500 mt-1">Sugerido: primer IU libre.</div>
+                </div>
+                <input value={famForm.nombre} onChange={e => setFamForm({ ...famForm, nombre: e.target.value })}
+                  placeholder="Nombre de la familia (ej: TUBERIA HDPE)" className={`flex-1 ${inputCls}`} style={{ minWidth: '220px' }} />
+                <button onClick={crearFamilia} disabled={!famForm.nombre.trim() || !/^\d{2}$/.test(famForm.iu.trim())}
+                  className={btnOk(!!(famForm.nombre.trim() && /^\d{2}$/.test(famForm.iu.trim())))}>Crear familia</button>
+                <button onClick={() => setFamForm(null)} className="px-3 py-1.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 hover:text-slate-200">Cancelar</button>
+              </div>
+              <div className="text-[10px] text-slate-500 mt-2">Los materiales de esta familia llevarán códigos que empiezan con su IU. Crear una familia no se puede deshacer desde la app si ya tiene materiales.</div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Catálogo maestro · {catalogo.length} materiales</div>
@@ -1561,6 +1617,8 @@ export default function App() {
       }),
       rechazarSolicitud: (s, motivo) => wrap(async () =>
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
+      crearFamilia: ({ iu, nombre }) => wrap(async () =>
+        await supabase.from('familias').insert({ iu, nombre })),
     };
   }, [cargarTodo]);
 
