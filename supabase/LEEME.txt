@@ -1,1 +1,32 @@
-Aquí vivirán las migraciones SQL del proyecto Supabase.
+MIGRACIONES SUPABASE — SISTEMA RQ
+=================================
+
+Contenido:
+  migrations/20260717000001_esquema_inicial.sql  -> tablas, checks, funcion stock(), triggers
+  migrations/20260717000002_rls.sql              -> Row Level Security por rol y proyecto
+  seed.sql                                       -> proyectos + plantilla de usuarios
+
+COMO APLICAR (opcion simple, sin instalar nada):
+1. Crear cuenta/proyecto en https://supabase.com (region: South America - Sao Paulo).
+2. En el proyecto: SQL Editor -> New query.
+3. Pegar y ejecutar EN ORDEN:
+   a) 20260717000001_esquema_inicial.sql
+   b) 20260717000002_rls.sql
+   c) seed.sql
+4. Crear los 6 usuarios en Authentication -> Users -> Add user,
+   y completar sus perfiles con la plantilla comentada en seed.sql.
+
+PENDIENTE:
+- Seed de catalogo (1,740 materiales) y proveedores (255): se genera
+  cuando NUEVO_RQ.xlsx y CONTROL_RQ_LUZ.xlsx esten en datos/.
+
+NOTAS DE DISENO (difiere levemente de docs/04):
+- Tabla extra `proyectos`: da integridad referencial (antes "proyecto"
+  era texto libre) y simplifica la RLS.
+- `rq_items.canal` ademas del canal del RQ: soporta RQ mixto
+  multi-canal desde el dia 1 (docs/03, caso 2). Lo fija un trigger.
+- Estados con el mismo texto del prototipo (incluye '—') para que el
+  port a Supabase no cambie el shape de datos.
+- Validaciones criticas viven en la base (triggers con advisory lock):
+  sobre-recepcion, stock insuficiente, devolucion con destino que ya
+  consumio, Pagado sin factura, edicion silenciosa de salidas/prestamos.
