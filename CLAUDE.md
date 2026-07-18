@@ -83,9 +83,10 @@ Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `
 
 ## Estructura del repo
 ```
-proyecto-rq/
+rq-sistema-proyecto/
 ├── CLAUDE.md            ← este archivo (contexto maestro)
 ├── README.md            ← guía de uso rápida
+├── index.html           ← copia del prototipo en raíz (para GitHub Pages)
 ├── prototipo/
 │   ├── sistema_rq.html  ← app funcional (doble clic para abrir)
 │   └── sistema_rq.jsx   ← fuente React
