@@ -1,0 +1,106 @@
+# Sistema RQ — Grupo Copacabana
+
+Contexto maestro del proyecto. Leer completo antes de tocar código.
+
+## Qué es
+Sistema digital de requerimientos de materiales (RQ) para Grupo Copacabana: grupo de construcción e inmobiliaria de Cusco, Perú. 4 razones sociales, ~65 trabajadores, 5 proyectos activos:
+
+| Código | Proyecto | Residente | Almacenero |
+|---|---|---|---|
+| 2501 | EMPERATRIZ | — | — |
+| 2502 | DANAUS | Andrés Chino (benchmark interno) | — |
+| 2503 | MAIA | Edwin Salas | Anton Taucca |
+| 2504 | LUZ | — | Brayan Huamán |
+| 2601 | TORRE COPACABANA | — | — |
+
+Personas clave: Lucía Arana (logística/compras centralizada, dueña del catálogo), Mónica Del Castillo (administración), Yheyson Ccoiccosi (contabilidad), Rodrigo Curo (BIM).
+
+## Problema que resuelve
+Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactualizado en decenas de copias de Excel, compras identificado como el principal dolor al escalar de 2 a 5 obras. Regla de adopción acordada: **"RQ que no entra por el sistema, no se compra".**
+
+## Estado actual
+- `prototipo/sistema_rq.html`: prototipo funcional standalone (doble clic, offline). React 18 + Tailwind precompilados inline. Probado con 140+ corridas automatizadas (jsdom).
+- `prototipo/sistema_rq.jsx`: fuente React del prototipo.
+- Persistencia: localStorage (`sistema_rq_copacabana_v1`). Mono-usuario, mono-máquina.
+- **Siguiente fase: migrar a React + Supabase + Tailwind (multi-usuario real).** Alcance CONGELADO: replicar el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
+
+## Modelo de negocio del sistema
+
+### Catálogo
+1,740 materiales (145 en el prototipo como muestra), 56 familias. Código de 6 dígitos: IU(2) + GRUPO(2) + correlativo(2). Solo el dueño del catálogo (Arana) aprueba materiales nuevos; los residentes los solicitan desde su vista. Código sugerido automático por familia; validación de 6 dígitos únicos. El catálogo completo está en `datos/NUEVO_RQ.xlsx`, hoja "Materiales 3.0".
+
+### Canales de RQ (automático por fecha necesitada mínima vs hoy)
+- **URGENTE**: < 2 días → justificación obligatoria ("¿por qué no se previó?")
+- **GENERAL**: ≤ 7 días
+- **ESPECIAL LIMA**: > 7 días (compras en Lima / importación, 1-4 semanas)
+
+### Flujo por ítem
+1. Residente crea RQ (proyecto fijo por login, partida auto-prefijada con código de obra, fecha necesitada ≥ hoy obligatoria, destino detallado obligatorio, color opcional con nota "dejar vacío si no aplica"). Al enviar se genera PDF formal (réplica de la HOJA RQ con membrete y bloque de 4 firmas: Residente → V°B° Gerente de Operaciones → Recepción en obra → Entregado por). El PDF también se puede regenerar desde "Mis requerimientos" y desde Compras (clic en RQ-xxx).
+2. Compras decide: **Aprobar / Rechazar (motivo obligatorio, se comunica al residente, cierra el ítem)**. La decisión es PASO PREVIO separado del estado logístico.
+3. Aprobado → estado logístico: — / En camino / Entregado / Incompleto. Pago: — / Pagado / Crédito / Falta.
+4. **Pagado exige factura completa**: serie, proveedor (maestro de 255 con RUC; los nuevos se agregan automáticamente al maestro), RUC 11 dígitos validado, fecha, monto total, forma de pago. **Una factura puede cubrir varios ítems** del mismo proyecto (checkboxes "¿Esta factura cubre otros ítems?"). Duplicados serie+RUC bloqueados. El monto se registra UNA sola vez por factura.
+5. Almacén recibe: solo cantidad + observaciones. Parcial → Incompleto automático (visible en Compras y Almacén); al llegar el saldo se registra otra recepción → Entregado. **Sobre-recepción bloqueada** (no se puede recibir más de lo pedido; si el proveedor entregó de más, se corrige con Compras).
+6. Ítem Entregado + Pagado → se CIERRA (sale de la vista de Compras, queda solo en Tablero).
+7. Salidas de almacén: exigen N° de hoja de trabajo + zona de trabajo; no exceden stock. Verificación de uso: Correcto / Incorrecto (motivos: No se completó el trabajo / Se encontró botado / Uso inadecuado / Otro con texto obligatorio).
+8. Préstamos entre almacenes: material + cantidad + destino + quién autoriza. Estados: Prestado → Devuelto (BLOQUEADO si el destino ya consumió el material → el sistema obliga "Transferir al costo", que es lo contablemente correcto) / Transferido al costo / Anulado.
+
+### Anulaciones (nunca edición silenciosa)
+Ítems de RQ (desde Compras), salidas y préstamos se anulan con motivo obligatorio + usuario + fecha. La salida anulada restaura stock. El préstamo solo se anula si el destino no consumió. Todo queda visible tachado con rastro completo en tablas, Tablero y CSV.
+
+### Stock
+stock = recibido − salidas (no anuladas) ± préstamos netos (activos). Por almacén/obra. Los ítems rechazados o anulados no generan stock.
+
+### Roles y login (demo: contraseña 1234 para todos)
+- `gerencia` → todas las vistas, entra al Tablero. Único con "Reiniciar datos".
+- `compras` (Lucía Arana) → Compras + Catálogo + Tablero
+- `residente.danaus` (Andrés Chino), `residente.maia` (Edwin Salas) → solo su vista; proyecto y nombre fijos (no puede pedir para otra obra)
+- `almacen.luz` (Brayan Huamán), `almacen.maia` (Anton Taucca) → solo su almacén, sin selector de proyecto
+
+### Tablero
+14 KPIs: RQs, ítems, % urgentes, entregados, llegaron tarde, rechazados, anulados, incompletos, facturado S/, préstamos activos, holgura promedio, entrega a tiempo %, uso incorrecto %, falta de pago más antiguo. KPIs clicables Pago Crédito / Pago Falta filtran el consolidado. Tablas: **Planificación por residente** (% urgentes con semáforo: verde <25%, amarillo <50%, rojo ≥50% — mide quién planifica y quién apaga incendios) y **Resumen por proyecto** (RQs, % urg, facturado, holgura, uso incorrecto, préstamos). Descarga CSV: botón global + botón por proyecto (25 columnas, BOM UTF-8, abre directo en Excel).
+
+Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) + (compras urgentes × sobreprecio) + (saldos incompletos × días de obra parada).
+
+## Fórmulas de días
+- Llegó en = fechaEntrega − fechaRQ
+- Holgura = fechaNecesitada − fechaEntrega (negativa = llegó tarde, en rojo)
+- Saldo en = fechaEntregaSaldo − fechaEntrega
+
+## Decisiones tomadas (NO reabrir)
+- ERP solo después de definir procesos. Este sistema ES la definición del proceso de compras.
+- Almacén de excedentes → se convierte en Almacén Central de Tránsito.
+- Logística centralizada en Arana.
+- Tres tipos de RQ con sus plazos (General ≤3 días, Urgente 1-6 horas, Especial Lima 1-4 semanas).
+- Alcance congelado hasta terminar piloto: 1 obra, 2 residentes, 2 semanas.
+
+## Casos especiales pendientes (por fase)
+**Diseñar en el esquema Supabase desde el día 1:** stock inicial de almacenes existentes, RQ mixto multi-canal (gestión de tiempos por ítem), compra consolidada multi-RQ/multi-proyecto (factura ya soporta multi-ítem mono-proyecto).
+**Fase 2 tras piloto:** rechazo en recepción por material dañado/equivocado, notas de crédito y devoluciones al proveedor, etapa "Cotizado" (existía en CONTROL_RQ_LUZ: PENDIENTE→COTIZADO→COMPRADO→ATENDIDO), merma en granel con tolerancia % por tipo de material.
+**Arquitectura:** idempotencia (doble clic no duplica), concurrencia (dos compradores mismo ítem), facturación intercompany entre las 4 razones sociales para "Transferir al costo" (asiento contable para Yheyson), días hábiles vs calendario en el cálculo del canal.
+
+## Esquema Supabase propuesto (siguiente tarea)
+Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.
+
+## Estructura del repo
+```
+proyecto-rq/
+├── CLAUDE.md            ← este archivo (contexto maestro)
+├── README.md            ← guía de uso rápida
+├── prototipo/
+│   ├── sistema_rq.html  ← app funcional (doble clic para abrir)
+│   └── sistema_rq.jsx   ← fuente React
+├── docs/
+│   ├── 01_contexto_negocio.md
+│   ├── 02_modelo_datos.md
+│   ├── 03_casos_especiales.md
+│   └── 04_roadmap_supabase.md
+├── datos/               ← COPIAR AQUÍ: NUEVO_RQ.xlsx, CONTROL_RQ_LUZ.xlsx (catálogo 1,740 + proveedores 255)
+└── supabase/            ← aquí vivirán migraciones SQL y el proyecto nuevo
+```
+
+## Reglas para trabajar en este repo
+- Idioma: español en UI, commits y docs.
+- No agregar funciones fuera del alcance congelado sin aprobación explícita del dueño.
+- Toda regla de negocio nueva debe probarse (el prototipo se validó con un harness jsdom: 20 tests dirigidos + 120 corridas aleatorias).
+- El HTML standalone se compila así: babel (preset-react, runtime classic, React UMD global) + tailwindcss v3 escaneando el fuente; todo se empaqueta inline en un solo HTML. No usar CDNs en runtime (debe funcionar offline).
+- Formato de moneda: S/ (soles peruanos). Fechas: es-PE.

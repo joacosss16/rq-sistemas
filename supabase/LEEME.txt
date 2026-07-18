@@ -1,0 +1,1 @@
+Aquí vivirán las migraciones SQL del proyecto Supabase.
