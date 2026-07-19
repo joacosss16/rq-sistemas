@@ -30,13 +30,19 @@ const canalClases = {
   'ESPECIAL LIMA': 'bg-yellow-950 text-yellow-400 border-yellow-800',
 };
 
-function canalDe(items) {
-  const fs = items.filter(i => i.fecha).map(i => diasHoy(i.fecha));
-  if (!fs.length) return null;
-  const m = Math.min(...fs);
+function canalDeFecha(f) {
+  if (!f) return null;
+  const m = diasHoy(f);
   const k = m < 2 ? 'URGENTE' : m <= 7 ? 'GENERAL' : 'ESPECIAL LIMA';
   return { k, cls: canalClases[k] };
 }
+
+// Niveles de obra para análisis de gasto por piso
+const PISOS = [
+  'PLATEA / CIMENTACIÓN', 'SÓTANO 3', 'SÓTANO 2', 'SÓTANO 1',
+  ...Array.from({ length: 20 }, (_, i) => `PISO ${i + 1}`),
+  'AZOTEA', 'ÁREAS COMUNES', 'TODA LA OBRA',
+];
 
 const pillEstado = e =>
   e === 'Pendiente' ? 'bg-yellow-950 text-yellow-400'
@@ -86,13 +92,13 @@ function AnularBox({ label = 'Anular', onConfirm }) {
 }
 
 function descargarCSV(items, nombre) {
-  const cab = ['Canal', 'RQ', 'Partida', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
+  const cab = ['Canal', 'RQ', 'Partida', 'Piso', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
   const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const filas = items.map(i => {
     const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : '';
     const holg = i.fechaEntrega && i.fecha ? dias(i.fecha, i.fechaEntrega) : '';
     const saldo = i.fechaEntregaSaldo && i.fechaEntrega ? dias(i.fechaEntregaSaldo, i.fechaEntrega) : '';
-    return [i.canal, 'RQ-' + String(i.rq).padStart(3, '0'), i.partida, i.proyecto, i.residente || '', i.cod, i.desc, i.destino, i.und, i.cant, i.fechaRQ, i.fecha, i.decision, i.estado, i.motivoRechazo || '', i.motivoAnulacion || '', i.anuladoPor || '', i.pago, i.factura || '', i.fechaEntrega || '', i.cantRecibida ?? '', i.obsAlmacen || '', llego, holg, saldo].map(esc).join(',');
+    return [i.canal, 'RQ-' + String(i.rq).padStart(3, '0'), i.partida, i.piso || '', i.proyecto, i.residente || '', i.cod, i.desc, i.destino, i.und, i.cant, i.fechaRQ, i.fecha, i.decision, i.estado, i.motivoRechazo || '', i.motivoAnulacion || '', i.anuladoPor || '', i.pago, i.factura || '', i.fechaEntrega || '', i.cantRecibida ?? '', i.obsAlmacen || '', llego, holg, saldo].map(esc).join(',');
   });
   const csv = '﻿' + cab.join(',') + '\n' + filas.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -105,7 +111,9 @@ function descargarCSV(items, nombre) {
 
 function imprimirRQ(r) {
   const colorCanal = r.canal === 'URGENTE' ? '#b91c1c' : r.canal === 'GENERAL' ? '#15803d' : '#a16207';
-  const filas = r.items.map((i, idx) => `
+  // El PDF formal solo lleva los ítems aprobados por Compras
+  const aprobados = r.items.filter(i => i.decision === 'Aprobado');
+  const filas = aprobados.map((i, idx) => `
     <tr>
       <td class="c">${idx + 1}</td>
       <td class="c mono">${i.cod}</td>
@@ -154,6 +162,7 @@ function imprimirRQ(r) {
   <table class="meta">
     <tr><td class="l">Proyecto</td><td>${r.proyecto}</td><td class="l">Partida</td><td>${r.partida}</td></tr>
     <tr><td class="l">Residente de obra</td><td>${r.residente}</td><td class="l">Adm. de almacén</td><td>${r.almacen}</td></tr>
+    <tr><td class="l">Piso / nivel</td><td>${r.piso || '—'}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
   </table>
   ${r.just ? `<div class="just"><b>Justificación (¿por qué no se previó?):</b> ${r.just}</div>` : ''}
   <table class="items">
@@ -261,24 +270,24 @@ function Residente({ user, db, api }) {
   const esRes = user.rol === 'residente';
   const proyIni = esRes ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : '');
   const codIni = codProy[proyIni] || '';
-  const [cab, setCab] = useState({ proyecto: proyIni, partida: codIni ? codIni + '.02.02' : '', residente: user.nombre, almacen: ALMACENEROS[proyIni] || '' });
+  const [cab, setCab] = useState({ proyecto: proyIni, partida: codIni ? codIni + '.02.02' : '', residente: user.nombre, almacen: ALMACENEROS[proyIni] || '', piso: '', fecha: '' });
   const [items, setItems] = useState([]);
   const [just, setJust] = useState('');
   const [solForm, setSolForm] = useState(null);
   const [aviso, setAviso] = useState('');
   const [enviando, setEnviando] = useState(false);
-  const ch = canalDe(items);
+  const ch = canalDeFecha(cab.fecha);
   const urgente = ch && ch.k === 'URGENTE';
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
 
   const setC = (k, v) => setCab({ ...cab, [k]: v });
-  const add = m => setItems(p => [...p, { id: Date.now() + Math.random(), cod: m[0], desc: m[1], und: m[2], cant: '', fecha: '', destino: '', color: '', obs: '' }]);
+  const add = m => setItems(p => [...p, { id: Date.now() + Math.random(), cod: m[0], desc: m[1], und: m[2], cant: '', destino: '', color: '', obs: '' }]);
   const upd = (id, k, v) => setItems(p => p.map(i => i.id === id ? { ...i, [k]: v } : i));
   const del = id => setItems(p => p.filter(i => i.id !== id));
 
-  const cabOk = cab.residente.trim() && cab.almacen.trim();
-  const itemsOk = items.length > 0 && items.every(i => Number(i.cant) > 0 && i.fecha && i.fecha >= HOY_ISO && i.destino.trim());
-  const hayFechaPasada = items.some(i => i.fecha && i.fecha < HOY_ISO);
+  const cabOk = cab.residente.trim() && cab.almacen.trim() && cab.piso && cab.fecha && cab.fecha >= HOY_ISO;
+  const itemsOk = items.length > 0 && items.every(i => Number(i.cant) > 0 && i.destino.trim());
+  const hayFechaPasada = cab.fecha && cab.fecha < HOY_ISO;
   const ok = esRes && cabOk && itemsOk && (!urgente || just.trim()) && !enviando;
 
   const enviar = async () => {
@@ -286,11 +295,9 @@ function Residente({ user, db, api }) {
     const r = await api.crearRq({ cab, items, just: just.trim(), canal: ch.k });
     setEnviando(false);
     if (r.error) { setAviso('⚠ ' + r.error); return; }
-    const nuevo = { n: r.numero, ...cab, canal: ch.k, items, just: just.trim(), fechaRQ: HOY_ISO };
     setItems([]); setJust('');
-    setAviso(`RQ-${String(r.numero).padStart(3, '0')} enviado. Compras ya lo puede ver.`);
-    setTimeout(() => setAviso(''), 5000);
-    imprimirRQ(nuevo);
+    setAviso(`RQ-${String(r.numero).padStart(3, '0')} enviado. Compras ya lo puede ver. El PDF estará disponible cuando Compras decida todos los ítems.`);
+    setTimeout(() => setAviso(''), 7000);
   };
 
   const enviarSolicitud = async () => {
@@ -325,11 +332,18 @@ function Residente({ user, db, api }) {
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
           <div><label className={lblCls}>Adm. de almacén *</label>
             <input value={cab.almacen} onChange={e => setC('almacen', e.target.value)} placeholder="Responsable" className={`w-full ${inputCls}`} /></div>
+          <div><label className={lblCls}>Piso / nivel donde se utilizará *</label>
+            <select value={cab.piso} onChange={e => setC('piso', e.target.value)} className={`w-full ${inputCls}`}>
+              <option value="">— Elegir nivel —</option>
+              {PISOS.map(p => <option key={p}>{p}</option>)}</select></div>
+          <div><label className={lblCls}>Fecha necesitada (todo el RQ) *</label>
+            <FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setC('fecha', e.target.value)} className={`w-full ${inputCls}`} />
+            {hayFechaPasada && <div className="text-[9px] text-red-400 mt-1">Fecha en el pasado</div>}</div>
           <div><label className={lblCls}>Fecha del RQ</label>
             <div className={`${inputCls} bg-slate-800 text-slate-400`}>{fmt(HOY_ISO)} (automática)</div></div>
           <div><label className={lblCls}>Canal (automático)</label>
             <div className={`px-2 py-1.5 rounded text-[11px] font-bold tracking-widest uppercase text-center border ${ch ? ch.cls : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
-              {ch ? ch.k : 'sin ítems'}</div></div>
+              {ch ? ch.k : 'sin fecha'}</div></div>
         </div>
         <Buscador catalogo={catalogo} onPick={add} />
         <div className="mt-2">
@@ -374,7 +388,7 @@ function Residente({ user, db, api }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr>
-                {['Código', 'Descripción', 'Und', 'Cant', 'Fecha necesitada', 'Destino', 'Color', 'Obs (marca)', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}
+                {['Código', 'Descripción', 'Und', 'Cant', 'Destino', 'Color', 'Obs (marca)', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {items.map(i => (
@@ -383,8 +397,6 @@ function Residente({ user, db, api }) {
                     <td className="py-2 px-1.5 text-slate-200">{i.desc}</td>
                     <td className="py-2 px-1.5 text-slate-500">{i.und}</td>
                     <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={i.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) upd(i.id, 'cant', v); }} className={`w-16 ${inputCls}`} /></td>
-                    <td className="py-2 px-1.5"><FechaInput value={i.fecha} min={HOY_ISO} onChange={e => upd(i.id, 'fecha', e.target.value)} className={`w-32 ${inputCls}`} />
-                      {i.fecha && i.fecha < HOY_ISO && <div className="text-[9px] text-red-400 mt-1">Fecha en el pasado</div>}</td>
                     <td className="py-2 px-1.5">
                       <textarea rows={2} value={i.destino} onChange={e => upd(i.id, 'destino', e.target.value)}
                         placeholder="¿Dónde será utilizado? Especificar con detalle: piso, dpto, ambiente, partida…"
@@ -404,7 +416,7 @@ function Residente({ user, db, api }) {
               className={`px-5 py-2.5 rounded text-xs font-bold tracking-wider uppercase ${ok ? 'bg-yellow-400 text-slate-950 hover:bg-yellow-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
               {enviando ? 'Enviando…' : 'Enviar requerimiento'}</button>
             {!ok && !enviando && <span className="text-slate-500 text-[11px]">
-              {!cabOk ? 'Completa residente y adm. de almacén' : hayFechaPasada ? 'Hay fechas necesitadas en el pasado — corrígelas' : !itemsOk ? 'Completa cantidad, fecha y destino en cada ítem' : 'Falta la justificación del canal urgente'}</span>}
+              {!cabOk ? 'Completa adm. de almacén, piso y fecha necesitada (no puede ser pasada)' : !itemsOk ? 'Completa cantidad y destino en cada ítem' : 'Falta la justificación del canal urgente'}</span>}
           </div>
         </div>
       )}
@@ -433,15 +445,23 @@ function Residente({ user, db, api }) {
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Mis requerimientos · estado (solo lectura — lo gestiona Compras)</div>
         {misRqs.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Aún no has enviado requerimientos.</div>
-        ) : misRqs.map(r => (
+        ) : misRqs.map(r => {
+          const decidido = r.items.length > 0 && r.items.every(i => i.decision !== 'Pendiente');
+          const hayAprobados = r.items.some(i => i.decision === 'Aprobado');
+          return (
           <div key={r.n} className="mb-3 border border-slate-800 rounded p-3">
             <div className="flex items-center gap-2.5 mb-2 flex-wrap">
               <b className="font-mono text-sm text-slate-100">RQ-{String(r.n).padStart(3, '0')}</b>
               <span className={`px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase border ${canalClases[r.canal] || ''}`}>{r.canal}</span>
-              <span className="text-slate-500 text-[11px]">{r.proyecto} · {r.partida} · {fmt(r.fechaRQ)}</span>
-              <button onClick={() => imprimirRQ(r)}
-                className="ml-auto px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">
-                ⤓ PDF</button>
+              <span className="text-slate-500 text-[11px]">{r.proyecto} · {r.partida} · {r.piso || '—'} · {fmt(r.fechaRQ)}</span>
+              {decidido && hayAprobados ? (
+                <button onClick={() => imprimirRQ(r)}
+                  className="ml-auto px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">
+                  ⤓ PDF</button>
+              ) : (
+                <span className="ml-auto text-[9px] text-slate-600 uppercase" title="El PDF lleva solo los ítems aprobados; se emite cuando Compras decide todos.">
+                  {decidido ? 'Sin ítems aprobados' : 'PDF al cerrar decisiones'}</span>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -462,7 +482,8 @@ function Residente({ user, db, api }) {
               </table>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -677,7 +698,7 @@ function Compras({ user, db, api }) {
   };
 
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
-  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto })));
+  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso })));
   const flat = flatBase
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
     .filter(i => !(i.estado === 'Entregado' && i.pago === 'Pagado'))
@@ -757,7 +778,7 @@ function Compras({ user, db, api }) {
       {flat.length > 0 && (
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead><tr>{['RQ', 'Proyecto', 'Canal', 'Residente', 'Descripción', 'Cant', 'Necesitada', 'Decisión', 'Estado', 'Pago', 'Fecha entrega', 'Llegó en', 'Holgura', 'Recojo saldo', 'Entrega saldo', 'Saldo en', '¿Comunicó residente?', 'Destino saldo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+          <thead><tr>{['RQ', 'Proyecto', 'Piso', 'Canal', 'Residente', 'Descripción', 'Cant', 'Necesitada', 'Decisión', 'Estado', 'Pago', 'Fecha entrega', 'Llegó en', 'Holgura', 'Recojo saldo', 'Entrega saldo', 'Saldo en', '¿Comunicó residente?', 'Destino saldo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
           <tbody>
             {flat.map(i => {
               const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : null;
@@ -770,14 +791,24 @@ function Compras({ user, db, api }) {
               const ff = fFact[i.id];
               const factOk = ff && ff.serie.trim() && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0;
               const candidatosExtra = enFact ? flatBase.filter(x => x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && x.pago !== 'Pagado') : [];
+              const rqDe = rqMap[i.rq];
+              const pdfListo = rqDe.items.length > 0 && rqDe.items.every(x => x.decision !== 'Pendiente') && rqDe.items.some(x => x.decision === 'Aprobado');
               return (
                 <tr key={i.id} className="border-b border-slate-800 align-top">
                   <td className="py-2 px-1.5 whitespace-nowrap">
-                    <button onClick={() => imprimirRQ(rqMap[i.rq])} title="Ver PDF del requerimiento"
-                      className="font-mono text-[11px] text-slate-200 underline decoration-dotted underline-offset-2 hover:text-yellow-400">
-                      RQ-{String(i.rq).padStart(3, '0')}</button>
-                    <span className="text-yellow-400 text-[10px] ml-1">⤓</span></td>
+                    {pdfListo ? (
+                      <>
+                        <button onClick={() => imprimirRQ(rqDe)} title="Ver PDF del requerimiento (solo ítems aprobados)"
+                          className="font-mono text-[11px] text-slate-200 underline decoration-dotted underline-offset-2 hover:text-yellow-400">
+                          RQ-{String(i.rq).padStart(3, '0')}</button>
+                        <span className="text-yellow-400 text-[10px] ml-1">⤓</span>
+                      </>
+                    ) : (
+                      <span className="font-mono text-[11px] text-slate-400" title="El PDF se emite cuando todos los ítems del RQ estén decididos (solo lleva los aprobados).">
+                        RQ-{String(i.rq).padStart(3, '0')}</span>
+                    )}</td>
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.proyecto}</td>
+                  <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap text-[10px]">{i.piso || '—'}</td>
                   <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 ${i.canal === 'URGENTE' ? 'text-red-400' : i.canal === 'GENERAL' ? 'text-green-400' : 'text-yellow-400'}`}>{i.canal}</span></td>
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.residente}</td>
                   <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
@@ -1215,7 +1246,7 @@ function Tablero({ db }) {
   const [proy, setProy] = useState('TODOS');
   const [pagoF, setPagoF] = useState(null);
   const rqsF = rqs.filter(r => proy === 'TODOS' || r.proyecto === proy);
-  const flatAll = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, canal: r.canal, proyecto: r.proyecto, partida: r.partida, fechaRQ: r.fechaRQ, residente: r.residente })));
+  const flatAll = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, canal: r.canal, proyecto: r.proyecto, partida: r.partida, piso: r.piso, fechaRQ: r.fechaRQ, residente: r.residente })));
   const flat = flatAll.filter(i => proy === 'TODOS' || i.proyecto === proy);
   const urg = rqsF.filter(r => r.canal === 'URGENTE').length;
   const pctUrg = rqsF.length ? Math.round(urg / rqsF.length * 100) : 0;
@@ -1347,7 +1378,7 @@ function Tablero({ db }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Canal', 'RQ', 'Partida', 'Proyecto', 'Código', 'Descripción', 'Destino', 'Und', 'Cant', 'F. Req', 'F. Nec', 'Decisión', 'Estado', 'M. rechazo / anulación', 'Pago', 'Factura', 'F. entrega', 'Recibido', 'Obs. almacén', 'Llegó', 'Holgura', 'Saldo'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Canal', 'RQ', 'Partida', 'Piso', 'Proyecto', 'Código', 'Descripción', 'Destino', 'Und', 'Cant', 'F. Req', 'F. Nec', 'Decisión', 'Estado', 'M. rechazo / anulación', 'Pago', 'Factura', 'F. entrega', 'Recibido', 'Obs. almacén', 'Llegó', 'Holgura', 'Saldo'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {flatShown.map((i, k) => {
                   const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : null;
@@ -1358,6 +1389,7 @@ function Tablero({ db }) {
                       <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 ${i.canal === 'URGENTE' ? 'text-red-400' : i.canal === 'GENERAL' ? 'text-green-400' : 'text-yellow-400'}`}>{i.canal}</span></td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-200">{String(i.rq).padStart(3, '0')}</td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{i.partida}</td>
+                      <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap text-[10px]">{i.piso || '—'}</td>
                       <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.proyecto}</td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{i.cod}</td>
                       <td className="py-2 px-1.5 text-slate-200 whitespace-nowrap">{i.desc}</td>
@@ -1474,7 +1506,7 @@ export default function App() {
     const rqs = rqsR.data.map(r => ({
       id: r.id, n: r.numero, proyecto: nomProy[r.proyecto] || r.proyecto, partida: r.partida,
       residente: usrMap[r.residente_id] ? usrMap[r.residente_id].nombre : '', almacen: r.almacen_resp || '',
-      canal: r.canal, just: r.justificacion || '', fechaRQ: r.fecha_rq,
+      piso: r.piso || '', canal: r.canal, just: r.justificacion || '', fechaRQ: r.fecha_rq,
       creadoPor: usrMap[r.creado_por] ? usrMap[r.creado_por].nombre : '', items: itemsPorRq[r.id] || [],
     }));
 
@@ -1572,11 +1604,11 @@ export default function App() {
         const u = (await supabase.auth.getUser()).data.user;
         const { data: rq, error } = await supabase.from('rqs').insert({
           proyecto: cod(cab.proyecto), partida: cab.partida, residente_id: u.id,
-          almacen_resp: cab.almacen, canal, justificacion: just || null, creado_por: u.id,
+          almacen_resp: cab.almacen, piso: cab.piso, canal, justificacion: just || null, creado_por: u.id,
         }).select().single();
         if (error) return { error };
         const rows = items.map(i => ({
-          rq_id: rq.id, codigo: i.cod, cant: Number(i.cant), fecha_necesitada: i.fecha,
+          rq_id: rq.id, codigo: i.cod, cant: Number(i.cant), fecha_necesitada: cab.fecha,
           destino: i.destino.trim(), color: i.color.trim() || null, obs: i.obs.trim() || null,
         }));
         const { error: e2 } = await supabase.from('rq_items').insert(rows);
