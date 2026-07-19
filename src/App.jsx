@@ -343,7 +343,7 @@ function Residente({ user, db, api }) {
     if (!solForm.desc.trim() || !solForm.und || !solForm.famIu) return;
     const r = await api.crearSolicitud({
       desc: solForm.desc.trim().toUpperCase(), und: solForm.und,
-      famIu: solForm.famIu, proyecto: cab.proyecto,
+      famIu: solForm.famIu, perecedero: !!solForm.perecedero, proyecto: cab.proyecto,
     });
     if (r.error) { setAviso('⚠ ' + r.error); return; }
     setSolForm(null);
@@ -387,7 +387,7 @@ function Residente({ user, db, api }) {
         <Buscador catalogo={catalogo} onPick={add} />
         <div className="mt-2">
           {!solForm ? (
-            <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', famIu: '' })}
+            <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', famIu: '', perecedero: false })}
               className="text-[11px] text-yellow-400 hover:text-yellow-300 underline underline-offset-2">
               ¿No encuentras el material? Solicitar material nuevo</button>
           ) : (
@@ -402,6 +402,10 @@ function Residente({ user, db, api }) {
                   {db.familias.map(([iu, n]) => <option key={iu} value={iu}>{iu} · {n}</option>)}
                 </select>
               </div>
+              <label className="flex items-center gap-2 mt-2 cursor-pointer text-[11px] text-slate-300">
+                <input type="checkbox" checked={!!solForm.perecedero} onChange={e => setSolForm({ ...solForm, perecedero: e.target.checked })} />
+                <span>¿Es perecedero? (tiene fecha de vencimiento: pinturas, pegamentos, aditivos, cemento…)</span>
+              </label>
               <div className="flex gap-2 mt-2">
                 <button onClick={enviarSolicitud} disabled={!solForm.desc.trim() || !solForm.famIu} className={btnOk(!!(solForm.desc.trim() && solForm.famIu))}>Enviar solicitud</button>
                 <button onClick={() => setSolForm(null)} className="px-3 py-1.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 hover:text-slate-200">Cancelar</button>
@@ -549,7 +553,7 @@ function Catalogo({ user, db, api }) {
     return famIu + '0101';
   };
 
-  const getEdit = s => edit[s.n] || { desc: s.desc, und: s.und, famIu: s.famIu || '', cod: sugerirCodigo(s.famIu) };
+  const getEdit = s => edit[s.n] || { desc: s.desc, und: s.und, famIu: s.famIu || '', cod: sugerirCodigo(s.famIu), perecedero: !!s.perecedero };
   const setEditCampo = (s, k, v) => {
     const e = { ...getEdit(s), [k]: v };
     if (k === 'famIu') e.cod = sugerirCodigo(v);   // al reasignar familia se recalcula el correlativo
@@ -590,7 +594,7 @@ function Catalogo({ user, db, api }) {
     if (!/^\d{6}$/.test(cod)) { setAviso('⚠ El código debe tener exactamente 6 dígitos.'); return; }
     if (!cod.startsWith(e.famIu)) { setAviso(`⚠ El código ${cod} no corresponde a la familia ${e.famIu} (debe empezar con ${e.famIu}).`); return; }
     if (catalogo.some(m => m[0] === cod)) { setAviso('⚠ Ese código ya existe en el catálogo.'); return; }
-    const r = await api.aprobarSolicitud(s, { codigo: cod, desc: e.desc.trim().toUpperCase(), und: e.und, famIu: e.famIu });
+    const r = await api.aprobarSolicitud(s, { codigo: cod, desc: e.desc.trim().toUpperCase(), und: e.und, famIu: e.famIu, perecedero: !!e.perecedero });
     if (r.error) { setAviso('⚠ ' + r.error); return; }
     const e2 = { ...edit }; delete e2[s.n]; setEdit(e2);
     setAviso(`Material "${e.desc.trim()}" aprobado con código ${cod}.`);
@@ -631,9 +635,15 @@ function Catalogo({ user, db, api }) {
                           : <span className="text-slate-200">{s.desc}</span>}</td>
                       <td className="py-2 px-1.5">
                         {puedeAprobar ? (
-                          <select value={getEdit(s).und} onChange={e => setEditCampo(s, 'und', e.target.value)} className={inputCls}>
-                            {[...new Set([getEdit(s).und, ...unds])].map(u => <option key={u}>{u}</option>)}</select>
-                        ) : <span className="text-slate-500">{s.und}</span>}</td>
+                          <div>
+                            <select value={getEdit(s).und} onChange={e => setEditCampo(s, 'und', e.target.value)} className={inputCls}>
+                              {[...new Set([getEdit(s).und, ...unds])].map(u => <option key={u}>{u}</option>)}</select>
+                            <label className="flex items-center gap-1 mt-1 cursor-pointer text-[9px] text-slate-400">
+                              <input type="checkbox" checked={!!getEdit(s).perecedero} onChange={e => setEditCampo(s, 'perecedero', e.target.checked)} />
+                              <span>Perecedero</span>
+                            </label>
+                          </div>
+                        ) : <span className="text-slate-500">{s.und}{s.perecedero ? ' · perecedero' : ''}</span>}</td>
                       <td className="py-2 px-1.5">
                         {puedeAprobar ? (
                           <select value={getEdit(s).famIu} onChange={e => setEditCampo(s, 'famIu', e.target.value)} className={inputCls} style={{ maxWidth: '180px' }}>
@@ -1865,6 +1875,7 @@ export default function App() {
 
     const solicitudes = solR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, desc: s.descripcion, und: s.und,
+      perecedero: !!s.perecedero,
       fam: s.familia_iu ? (famMap[s.familia_iu] || s.familia_iu) : '', famIu: s.familia_iu || '',
       solicitante: usrMap[s.solicitante_id] ? usrMap[s.solicitante_id].nombre : '', solicitanteId: s.solicitante_id,
       proyecto: nomProy[s.proyecto] || s.proyecto, estado: s.estado, motivo: s.motivo || '', codigo: s.codigo_asignado,
@@ -1979,18 +1990,18 @@ export default function App() {
         });
       }),
       updPrestamo: (id, patch) => wrap(async () => await supabase.from('prestamos').update(patch).eq('id', id)),
-      crearSolicitud: ({ desc, und, famIu, proyecto }) => wrap(async () => {
+      crearSolicitud: ({ desc, und, famIu, perecedero, proyecto }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('solicitudes_material').insert({
-          descripcion: desc, und, familia_iu: famIu, solicitante_id: u.id, proyecto: cod(proyecto),
+          descripcion: desc, und, familia_iu: famIu, perecedero, solicitante_id: u.id, proyecto: cod(proyecto),
         });
       }),
-      aprobarSolicitud: (s, { codigo, desc, und, famIu }) => wrap(async () => {
-        const { error } = await supabase.from('materiales').insert({ codigo, descripcion: desc, und });
+      aprobarSolicitud: (s, { codigo, desc, und, famIu, perecedero }) => wrap(async () => {
+        const { error } = await supabase.from('materiales').insert({ codigo, descripcion: desc, und, perecedero });
         if (error) return { error };
         // la solicitud guarda la versión final que aprobó Compras (con familia reasignada)
         return await supabase.from('solicitudes_material').update({
-          estado: 'Aprobado', codigo_asignado: codigo, descripcion: desc, und, familia_iu: famIu,
+          estado: 'Aprobado', codigo_asignado: codigo, descripcion: desc, und, familia_iu: famIu, perecedero,
         }).eq('id', s.id);
       }),
       rechazarSolicitud: (s, motivo) => wrap(async () =>
