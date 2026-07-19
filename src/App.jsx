@@ -220,7 +220,7 @@ function Buscador({ catalogo, onPick }) {
             <div key={m[0]} onClick={() => { onPick(m); setQ(''); }}
               className="px-3 py-2 cursor-pointer border-b border-slate-800 hover:bg-slate-800">
               <div className="text-xs font-medium text-slate-100">{m[1]}</div>
-              <div className="text-[10px] font-mono text-slate-500">{m[0]} · {m[2]} · {m[3]}</div>
+              <div className="text-[10px] font-mono text-slate-500">{m[0]} · {m[4] ? `${m[5]} de ${m[4]} ${m[2]}` : m[2]} · {m[3]}</div>
             </div>
           ))}
         </div>
@@ -720,7 +720,7 @@ function Compras({ user, db, api }) {
   const cambiarPago = (i, v) => {
     if (v === 'Pagado') {
       if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
-      setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [] } });
+      setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {} } });
     } else {
       const f2 = { ...fFact }; delete f2[i.id]; setFFact(f2);
       updItem(i, { pago: v });
@@ -744,7 +744,10 @@ function Compras({ user, db, api }) {
 
   const registrarFactura = async i => {
     const f = fFact[i.id];
-    const ok = f.serie.trim() && f.prov.trim() && /^\d{11}$/.test(f.ruc) && f.fecha && Number(f.monto) > 0;
+    const cubiertos = [i, ...flatBase.filter(x => f.extras.includes(x.id))];
+    const suma = cubiertos.reduce((a, x) => a + (Number(f.precios[x.id]) || 0) * x.cant, 0);
+    const ok = f.serie.trim() && f.prov.trim() && /^\d{11}$/.test(f.ruc) && f.fecha && Number(f.monto) > 0
+      && cubiertos.every(x => Number(f.precios[x.id]) > 0) && Math.abs(suma - Number(f.monto)) <= 0.1;
     if (!ok) return;
     const serie = f.serie.trim().toUpperCase();
     if (facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
@@ -752,11 +755,10 @@ function Compras({ user, db, api }) {
       setTimeout(() => setAviso(''), 6000);
       return;
     }
-    const cubiertos = [i, ...flatBase.filter(x => f.extras.includes(x.id))];
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
       monto: Number(f.monto), forma: f.forma, proyecto: i.proyecto,
-      itemIds: cubiertos.map(x => x.id),
+      lineas: cubiertos.map(x => ({ id: x.id, precio: Number(f.precios[x.id]) })),
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fFact }; delete f2[i.id]; setFFact(f2);
@@ -789,7 +791,11 @@ function Compras({ user, db, api }) {
               const enFact = fFact[i.id] !== undefined;
               const post = i.decision === 'Aprobado';
               const ff = fFact[i.id];
-              const factOk = ff && ff.serie.trim() && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0;
+              const cubiertosFF = enFact ? [i, ...flatBase.filter(x => ff.extras.includes(x.id))] : [];
+              const sumaDesglose = cubiertosFF.reduce((a, x) => a + (Number(ff.precios[x.id]) || 0) * x.cant, 0);
+              const cuadra = enFact && Number(ff.monto) > 0 && Math.abs(sumaDesglose - Number(ff.monto)) <= 0.1;
+              const factOk = ff && ff.serie.trim() && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
+                && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
               const candidatosExtra = enFact ? flatBase.filter(x => x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && x.pago !== 'Pagado') : [];
               const rqDe = rqMap[i.rq];
               const pdfListo = rqDe.items.length > 0 && rqDe.items.every(x => x.decision !== 'Pendiente') && rqDe.items.some(x => x.decision === 'Aprobado');
@@ -869,6 +875,22 @@ function Compras({ user, db, api }) {
                               </div>
                             </div>
                           )}
+                          <div className="mb-1.5 border-t border-slate-700 pt-1.5">
+                            <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">Desglose: S/ por unidad de cada ítem (según factura)</div>
+                            {cubiertosFF.map(x => (
+                              <div key={x.id} className="flex items-center gap-1 mb-1">
+                                <span className="flex-1 text-[10px] text-slate-300 leading-tight">{x.desc.length > 26 ? x.desc.slice(0, 26) + '…' : x.desc} × {x.cant} {x.und}</span>
+                                <input type="number" min="0.01" step="any" value={ff.precios[x.id] || ''}
+                                  onChange={e => setFF(i.id, 'precios', { ...ff.precios, [x.id]: e.target.value })}
+                                  placeholder="S/ und" className={`w-16 ${inputCls} font-mono`} />
+                                <span className="text-[10px] font-mono text-slate-400 w-14 text-right">{((Number(ff.precios[x.id]) || 0) * x.cant).toFixed(2)}</span>
+                              </div>
+                            ))}
+                            <div className={`text-[10px] font-mono text-right ${cuadra ? 'text-green-400' : 'text-red-400'}`}>
+                              Desglosado S/ {sumaDesglose.toFixed(2)} de S/ {(Number(ff.monto) || 0).toFixed(2)}
+                              {!cuadra && Number(ff.monto) > 0 ? ` · falta cuadrar S/ ${(Number(ff.monto) - sumaDesglose).toFixed(2)}` : ''}
+                            </div>
+                          </div>
                           <button onClick={() => registrarFactura(i)} disabled={!factOk} className={`w-full ${btnOk(!!factOk)}`}>Registrar factura ({1 + ff.extras.length} ítem{ff.extras.length ? 's' : ''}) y marcar pagado</button>
                         </div>
                       )}
@@ -928,7 +950,7 @@ function Compras({ user, db, api }) {
 }
 
 function Almacen({ user, db, api }) {
-  const { rqs, salidas, prestamos, stockInicial } = db;
+  const { rqs, salidas, prestamos, stockInicial, factorMap } = db;
   const esAlm = user.rol === 'almacen';
   const [form, setForm] = useState({});
   const [aviso, setAviso] = useState('');
@@ -949,7 +971,8 @@ function Almacen({ user, db, api }) {
 
   const recibir = async i => {
     const f = getF(i.id);
-    const rec = Number(f.cant);
+    const fc = factorMap[i.cod];
+    const rec = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? fc.factor) || 0) : Number(f.cant);
     if (!(rec > 0)) return;
     const yaRecibido = Number(i.cantRecibida || 0);
     const pedido = Number(i.cant);
@@ -1058,9 +1081,11 @@ function Almacen({ user, db, api }) {
               <tbody>
                 {porRecibir.map(i => {
                   const f = getF(i.id);
+                  const fc = factorMap[i.cod];
+                  const llega = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? fc.factor) || 0) : Number(f.cant);
                   const rec = Number(i.cantRecibida || 0);
                   const falta = Number(i.cant) - rec;
-                  const listo = esAlm && Number(f.cant) > 0 && Number(f.cant) <= falta;
+                  const listo = esAlm && llega > 0 && llega <= falta;
                   return (
                     <tr key={i.id} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-200">RQ-{String(i.rq).padStart(3, '0')}</td>
@@ -1069,8 +1094,20 @@ function Almacen({ user, db, api }) {
                       <td className="py-2 px-1.5 font-mono text-slate-300">{rec}</td>
                       <td className={`py-2 px-1.5 font-mono ${falta > 0 ? 'text-orange-400' : 'text-green-400'}`}>{falta}</td>
                       <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}>{i.estado}</span></td>
-                      <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setF(i.id, 'cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
-                        {Number(f.cant) > falta && <div className="text-[9px] text-red-400 mt-1">Excede lo pedido</div>}</td>
+                      <td className="py-2 px-1.5">
+                        {fc ? (
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <input type="number" min="1" step="any" value={f.cajas || ''} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setF(i.id, 'cajas', v); }} disabled={!esAlm} placeholder={fc.undCompra.toLowerCase() + 's'} className={`w-14 ${inputCls}`} />
+                              <span className="text-slate-500 text-[10px]">×</span>
+                              <input type="number" min="1" step="any" value={f.upc ?? fc.factor} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setF(i.id, 'upc', v); }} disabled={!esAlm} title={`${i.und} por ${fc.undCompra.toLowerCase()} (precargado del catálogo; ajústalo si la ${fc.undCompra.toLowerCase()} vino distinta)`} className={`w-14 ${inputCls}`} />
+                            </div>
+                            <div className="text-[9px] text-slate-400 mt-1">= {llega > 0 ? llega : '—'} {i.und}</div>
+                          </div>
+                        ) : (
+                          <input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setF(i.id, 'cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
+                        )}
+                        {llega > falta && <div className="text-[9px] text-red-400 mt-1">Excede lo pedido</div>}</td>
                       <td className="py-2 px-1.5">
                         <textarea rows={2} value={f.obs} onChange={e => setF(i.id, 'obs', e.target.value)} disabled={!esAlm}
                           placeholder="Estado del material, faltantes, daños…" className={`w-48 ${inputCls} resize-y`} />
@@ -1477,6 +1514,10 @@ export default function App() {
     usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { ALMACENEROS[nomProy[u.proyecto_asignado]] = u.nombre; });
 
     const matMap = {}; mats.forEach(m => { matMap[m.codigo] = m; });
+    // unidad de consumo: si el material se compra en caja, la base es und_base
+    const undDe = m => (m && (m.und_base || m.und)) || '';
+    const factorMap = {};
+    mats.forEach(m => { if (m.factor_caja) factorMap[m.codigo] = { factor: Number(m.factor_caja), undCompra: m.und, undBase: m.und_base || 'UND' }; });
     const usrMap = {}; usrs.forEach(u => { usrMap[u.id] = u; });
     const provMap = {}; provs.forEach(p => { provMap[p.ruc] = p; });
     const factMap = {}; factR.data.forEach(f => { factMap[f.id] = f; });
@@ -1490,7 +1531,7 @@ export default function App() {
     itemR.data.forEach(r => {
       const m = matMap[r.codigo] || {};
       const it = {
-        id: r.id, cod: r.codigo, desc: m.descripcion || r.codigo, und: m.und || '',
+        id: r.id, cod: r.codigo, desc: m.descripcion || r.codigo, und: undDe(m),
         cant: Number(r.cant), fecha: r.fecha_necesitada, destino: r.destino, color: r.color || '', obs: r.obs || '',
         canal: r.canal, decision: r.decision, estado: r.estado, motivoRechazo: r.motivo_rechazo || '',
         motivoAnulacion: r.anulacion ? r.anulacion.motivo : '', anuladoPor: r.anulacion ? r.anulacion.por : '',
@@ -1525,7 +1566,7 @@ export default function App() {
     const salidas = salR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, proyecto: nomProy[s.proyecto] || s.proyecto,
       cod: s.codigo, desc: matMap[s.codigo] ? matMap[s.codigo].descripcion : s.codigo,
-      und: matMap[s.codigo] ? matMap[s.codigo].und : '', cant: Number(s.cant),
+      und: undDe(matMap[s.codigo]), cant: Number(s.cant),
       hoja: s.hoja_trabajo, zona: s.zona, uso: s.uso, motivoUso: s.motivo_uso || '',
       registradoPor: usrMap[s.registrado_por] ? usrMap[s.registrado_por].nombre : '',
       anulada: !!s.anulacion, motivoAnulacion: s.anulacion ? s.anulacion.motivo : '',
@@ -1536,7 +1577,7 @@ export default function App() {
       id: p.id, n: p.numero, fecha: p.fecha,
       origen: nomProy[p.origen] || p.origen, destino: nomProy[p.destino] || p.destino,
       cod: p.codigo, desc: matMap[p.codigo] ? matMap[p.codigo].descripcion : p.codigo,
-      und: matMap[p.codigo] ? matMap[p.codigo].und : '', cant: Number(p.cant),
+      und: undDe(matMap[p.codigo]), cant: Number(p.cant),
       autoriza: p.autoriza, estado: p.estado, fechaCierre: p.fecha_cierre,
       motivoAnulacion: p.anulacion ? p.anulacion.motivo : '', anuladoPor: p.anulacion ? p.anulacion.por : '',
       registradoPor: usrMap[p.registrado_por] ? usrMap[p.registrado_por].nombre : '',
@@ -1545,7 +1586,7 @@ export default function App() {
     const stockInicial = siR.data.map(si => ({
       proyecto: nomProy[si.proyecto] || si.proyecto, cod: si.codigo,
       desc: matMap[si.codigo] ? matMap[si.codigo].descripcion : si.codigo,
-      und: matMap[si.codigo] ? matMap[si.codigo].und : '',
+      und: undDe(matMap[si.codigo]),
       cant: Number(si.cant), fecha: si.fecha_inventario,
     }));
 
@@ -1558,9 +1599,10 @@ export default function App() {
 
     const nuevo = {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial,
-      catalogo: mats.map(m => [m.codigo, m.descripcion, m.und, famMap[m.codigo.slice(0, 2)] || '']),
+      catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null]),
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
+      factorMap,
       nomProy, codProy,
     };
     dbRef.current = nuevo;
@@ -1616,7 +1658,8 @@ export default function App() {
         return { numero: rq.numero };
       }),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
-      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, itemIds }) => wrap(async () => {
+      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, lineas }) => wrap(async () => {
+        const itemIds = lineas.map(l => l.id);
         const existe = dbRef.current.proveedores.some(p => p[0] === ruc);
         if (!existe) {
           const { error: eP } = await supabase.from('proveedores').insert({ ruc, razon_social: prov });
@@ -1628,7 +1671,7 @@ export default function App() {
           proyecto: cod(proyecto), registrado_por: u.id,
         }).select().single();
         if (error) return { error: error.code === '23505' ? { message: `La factura ${serie} de ese RUC ya está registrada.` } : error };
-        const { error: e2 } = await supabase.from('factura_items').insert(itemIds.map(id => ({ factura_id: fact.id, rq_item_id: id })));
+        const { error: e2 } = await supabase.from('factura_items').insert(lineas.map(l => ({ factura_id: fact.id, rq_item_id: l.id, precio_unitario: l.precio })));
         if (e2) return { error: e2 };
         const { error: e3 } = await supabase.from('rq_items').update({ pago: 'Pagado' }).in('id', itemIds);
         if (e3) return { error: e3 };
