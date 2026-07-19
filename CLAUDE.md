@@ -40,7 +40,7 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 1. Residente crea RQ (proyecto fijo por login, partida auto-prefijada con código de obra, fecha necesitada ≥ hoy obligatoria, destino detallado obligatorio, color opcional con nota "dejar vacío si no aplica"). Al enviar se genera PDF formal (réplica de la HOJA RQ con membrete y bloque de 4 firmas: Residente → V°B° Gerente de Operaciones → Recepción en obra → Entregado por). El PDF también se puede regenerar desde "Mis requerimientos" y desde Compras (clic en RQ-xxx).
 2. Compras decide: **Aprobar / Rechazar (motivo obligatorio, se comunica al residente, cierra el ítem)**. La decisión es PASO PREVIO separado del estado logístico.
 3. Aprobado → estado logístico: — / En camino / Entregado / Incompleto. Pago: — / Pagado / Crédito / Falta.
-4. **Pagado exige factura completa**: serie, proveedor (maestro de 255 con RUC; los nuevos se agregan automáticamente al maestro), RUC 11 dígitos validado, fecha, monto total, forma de pago. **Una factura puede cubrir varios ítems** del mismo proyecto (checkboxes "¿Esta factura cubre otros ítems?"). Duplicados serie+RUC bloqueados. El monto se registra UNA sola vez por factura.
+4. **Facturación y pago separados** (desde jul 2026): Compras registra la factura completa — serie, proveedor (maestro con RUC; los nuevos se agregan solos), RUC 11 dígitos, fecha, monto total, forma de pago, y **desglose de precio unitario por ítem** (la suma debe cuadrar con el total; trigger lo valida, tolerancia S/ 0.50). **Una factura puede cubrir varios ítems** del mismo proyecto. Duplicados serie+RUC bloqueados. El **pago lo ejecuta el rol `pagos`** en su propia vista: banco + N° de operación + fecha, filtrable por proyecto (cada obra su cuenta). El estado de pago vive en la FACTURA; los ítems lo heredan: sin factura "—", factura pendiente a crédito "Crédito", pendiente contado "Falta", pagada "Pagado". Factura pagada queda congelada (trigger).
 5. Almacén recibe: solo cantidad + observaciones. Parcial → Incompleto automático (visible en Compras y Almacén); al llegar el saldo se registra otra recepción → Entregado. **Sobre-recepción bloqueada** (no se puede recibir más de lo pedido; si el proveedor entregó de más, se corrige con Compras).
 6. Ítem Entregado + Pagado → se CIERRA (sale de la vista de Compras, queda solo en Tablero).
 7. Salidas de almacén: exigen N° de hoja de trabajo + zona de trabajo; no exceden stock. Verificación de uso: Correcto / Incorrecto (motivos: No se completó el trabajo / Se encontró botado / Uso inadecuado / Otro con texto obligatorio).
@@ -57,6 +57,7 @@ stock = recibido − salidas (no anuladas) ± préstamos netos (activos). Por al
 - `compras` (Lucía Arana) → Compras + Catálogo + Tablero
 - `residente.danaus` (Andrés Chino), `residente.maia` (Edwin Salas) → solo su vista; proyecto y nombre fijos (no puede pedir para otra obra)
 - `almacen.luz` (Brayan Huamán), `almacen.maia` (Anton Taucca) → solo su almacén, sin selector de proyecto
+- `pagos` (área de pagos) → solo vista Pagos: ejecuta el pago de facturas (banco, N° operación, fecha); no edita datos comerciales
 
 ### Tablero
 14 KPIs: RQs, ítems, % urgentes, entregados, llegaron tarde, rechazados, anulados, incompletos, facturado S/, préstamos activos, holgura promedio, entrega a tiempo %, uso incorrecto %, falta de pago más antiguo. KPIs clicables Pago Crédito / Pago Falta filtran el consolidado. Tablas: **Planificación por residente** (% urgentes con semáforo: verde <25%, amarillo <50%, rojo ≥50% — mide quién planifica y quién apaga incendios) y **Resumen por proyecto** (RQs, % urg, facturado, holgura, uso incorrecto, préstamos). Descarga CSV: botón global + botón por proyecto (25 columnas, BOM UTF-8, abre directo en Excel).
@@ -79,6 +80,16 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
 **Diseñar en el esquema Supabase desde el día 1:** stock inicial de almacenes existentes, RQ mixto multi-canal (gestión de tiempos por ítem), compra consolidada multi-RQ/multi-proyecto (factura ya soporta multi-ítem mono-proyecto).
 **Fase 2 tras piloto:** rechazo en recepción por material dañado/equivocado, notas de crédito y devoluciones al proveedor, etapa "Cotizado" (existía en CONTROL_RQ_LUZ: PENDIENTE→COTIZADO→COMPRADO→ATENDIDO), merma en granel con tolerancia % por tipo de material.
 **Arquitectura:** idempotencia (doble clic no duplica), concurrencia (dos compradores mismo ítem), facturación intercompany entre las 4 razones sociales para "Transferir al costo" (asiento contable para Yheyson), días hábiles vs calendario en el cálculo del canal.
+
+## Backlog acordado (18 jul 2026) — orden aprobado por el dueño
+1. ✅ Desglose de precios por ítem en facturas + unidades base/factor caja (migración 5)
+2. ✅ Módulo de Pagos: rol `pagos`, estado de pago a nivel factura (migración 6)
+3. Vista "Consolidado por comprar" en Compras (agrupa ítems aprobados por material entre obras; factura sigue individual por obra) + caducidad de perecederos (flag en catálogo, fecha por recepción, semáforo 30/7 días, vencido bloqueado)
+4. Historial/comparativa de precios por material y proveedor con CSV
+5. Post-piloto: bitácora de cambios (historial), auditoría cíclica ciega de almacén, liquidación de transferencia intercompany
+Nuevos RQs: piso/nivel obligatorio (lista cerrada), fecha necesitada única por RQ (Compras gestiona por ítem), PDF solo cuando todos los ítems están decididos y solo con aprobados.
+
+**Pendientes de Lucía (lunes):** equivalencias caja→unidades de los ~29 materiales "CAJA" (y PQT/ROLLO/PAR), su hoja de control de almacenes (inventarios iniciales por obra, ideal con precios), confirmar nombres de familias 62/73/91, y CONTROL_RQ_LUZ.xlsx (255 proveedores). Falta crear usuario del rol `pagos` en Auth + tabla usuarios.
 
 ## Esquema Supabase propuesto (siguiente tarea)
 Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.

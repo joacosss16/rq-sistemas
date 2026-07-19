@@ -12,17 +12,18 @@ let PROYECTOS = [];
 let ALMACENEROS = {};
 
 const ESTADOS_LOGISTICA = ['—', 'En camino', 'Entregado', 'Incompleto'];
-const ESTADOS_PAGO = ['—', 'Pagado', 'Crédito', 'Falta'];
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
+const BANCOS = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'BanBif', 'Banco de la Nación', 'Otro'];
 
 const TABS_POR_ROL = {
-  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['tab', 'Tablero']],
+  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['tab', 'Tablero']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['tab', 'Tablero']],
   residente: [['res', 'Mis requerimientos']],
   almacen: [['alm', 'Mi almacén']],
+  pagos: [['pag', 'Pagos']],
 };
-const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm' };
+const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag' };
 
 const canalClases = {
   URGENTE: 'bg-red-950 text-red-400 border-red-800',
@@ -55,6 +56,9 @@ const pillEstado = e =>
   : e === 'Prestado' ? 'bg-purple-950 text-purple-400'
   : e === 'Devuelto' ? 'bg-green-950 text-green-400'
   : e === 'Transferido' ? 'bg-sky-950 text-sky-400'
+  : e === 'Pagado' || e === 'Pagada' ? 'bg-green-950 text-green-400'
+  : e === 'Crédito' ? 'bg-sky-950 text-sky-400'
+  : e === 'Falta' ? 'bg-red-950 text-red-400'
   : 'bg-slate-800 text-slate-500';
 
 const inputCls = "bg-slate-950 border border-slate-700 text-slate-100 px-2 py-1.5 rounded text-xs outline-none focus:border-yellow-400";
@@ -717,15 +721,11 @@ function Compras({ user, db, api }) {
       `Ítem "${i.desc}" anulado por ${user.nombre}. Queda registrado en el Tablero con motivo.`);
   };
 
-  const cambiarPago = (i, v) => {
-    if (v === 'Pagado') {
-      if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
-      setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {} } });
-    } else {
-      const f2 = { ...fFact }; delete f2[i.id]; setFFact(f2);
-      updItem(i, { pago: v });
-    }
+  const abrirFactura = i => {
+    if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
+    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {} } });
   };
+  const cerrarFactura = id => { const f2 = { ...fFact }; delete f2[id]; setFFact(f2); };
 
   const setFF = (id, k, v) => {
     const f = { ...fFact[id], [k]: v };
@@ -847,11 +847,17 @@ function Compras({ user, db, api }) {
                   </td>
                   <td className="py-2 px-1.5">{post ? (
                     <div>
-                      <select value={enFact ? 'Pagado' : i.pago} onChange={e => cambiarPago(i, e.target.value)} className={inputCls}>
-                        {ESTADOS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
+                      {!i.factura && !enFact && (
+                        puedeFacturar
+                          ? <button onClick={() => abrirFactura(i)} className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">＋ Factura</button>
+                          : <span className="text-slate-600">Sin factura</span>
+                      )}
                       {enFact && (
                         <div className="mt-1.5 w-56 bg-slate-950 border border-yellow-400 rounded p-2">
-                          <div className="text-[9px] font-bold text-yellow-400 uppercase mb-1.5">Datos de factura (obligatorios)</div>
+                          <div className="flex items-center mb-1.5">
+                            <div className="text-[9px] font-bold text-yellow-400 uppercase">Datos de factura (obligatorios)</div>
+                            <button onClick={() => cerrarFactura(i.id)} className="ml-auto text-[10px] text-slate-500 hover:text-slate-200">✕</button>
+                          </div>
                           <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} placeholder="N° factura: F001-000123" className={`w-full mb-1 ${inputCls} font-mono`} />
                           <input list={`fprov-${i.id}`} value={ff.prov} onChange={e => setFF(i.id, 'prov', e.target.value)} placeholder="Proveedor (razón social)" className={`w-full mb-1 ${inputCls}`} />
                           <datalist id={`fprov-${i.id}`}>{proveedores.map(p => <option key={p[0]} value={p[1]} />)}</datalist>
@@ -891,10 +897,16 @@ function Compras({ user, db, api }) {
                               {!cuadra && Number(ff.monto) > 0 ? ` · falta cuadrar S/ ${(Number(ff.monto) - sumaDesglose).toFixed(2)}` : ''}
                             </div>
                           </div>
-                          <button onClick={() => registrarFactura(i)} disabled={!factOk} className={`w-full ${btnOk(!!factOk)}`}>Registrar factura ({1 + ff.extras.length} ítem{ff.extras.length ? 's' : ''}) y marcar pagado</button>
+                          <button onClick={() => registrarFactura(i)} disabled={!factOk} className={`w-full ${btnOk(!!factOk)}`}>Registrar factura ({1 + ff.extras.length} ítem{ff.extras.length ? 's' : ''})</button>
+                          <div className="text-[9px] text-slate-500 mt-1">El pago lo ejecuta el área de Pagos con banco y N° de operación.</div>
                         </div>
                       )}
-                      {i.factura && !enFact && <div className="text-[9px] font-mono text-green-400 mt-1">{i.factura}</div>}
+                      {i.factura && !enFact && (
+                        <div>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.pago)}`}>{i.pago}</span>
+                          <div className="text-[9px] font-mono text-green-400 mt-1">{i.factura}</div>
+                        </div>
+                      )}
                     </div>
                   ) : <span className="text-slate-600">—</span>}</td>
                   <td className="py-2 px-1.5">{post ? <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">—</span>}</td>
@@ -915,7 +927,7 @@ function Compras({ user, db, api }) {
         </table>
       </div>
       )}
-      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: estado logístico solo para aprobados. Pagado exige factura (una factura puede cubrir varios ítems). Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado y Pagado se cierra y pasa solo al Tablero.</div>
+      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: estado logístico solo para aprobados. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
     </div>
 
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -925,7 +937,7 @@ function Compras({ user, db, api }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {factProy.map(f => (
                 <tr key={f.n} className="border-b border-slate-800 align-top">
@@ -937,6 +949,10 @@ function Compras({ user, db, api }) {
                   <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
                   <td className="py-2 px-1.5 text-slate-400">{f.forma}</td>
+                  <td className="py-2 px-1.5">
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(f.estadoPago)}`}>{f.estadoPago}</span>
+                    {f.estadoPago === 'Pagada' && <div className="text-[9px] text-slate-500 mt-1">{f.banco} · op. {f.numOp} · {fmt(f.fechaPago)}</div>}
+                  </td>
                   <td className="py-2 px-1.5 text-slate-500 text-[10px]">{f.registradoPor}</td>
                 </tr>
               ))}
@@ -1278,6 +1294,118 @@ function Almacen({ user, db, api }) {
   );
 }
 
+function Pagos({ user, db, api }) {
+  const { facturas } = db;
+  const puede = user.rol === 'pagos';
+  const [proy, setProy] = useState('TODOS');
+  const [fPago, setFPago] = useState({});
+  const [aviso, setAviso] = useState('');
+
+  const fs = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
+  const pend = fs.filter(f => f.estadoPago !== 'Pagada');
+  const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
+
+  // vencimiento: fecha de factura + días de crédito (contado vence el mismo día)
+  const vencimiento = f => {
+    const d = new Date(f.fecha + 'T00:00:00');
+    d.setDate(d.getDate() + (f.forma === 'Crédito 15 días' ? 15 : f.forma === 'Crédito 30 días' ? 30 : 0));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const getP = id => fPago[id] || { banco: '', op: '', fecha: HOY_ISO };
+  const setP = (id, k, v) => setFPago({ ...fPago, [id]: { ...getP(id), [k]: v } });
+
+  const pagar = async f => {
+    const p = getP(f.id);
+    if (!p.banco || !p.op.trim() || !p.fecha) return;
+    const r = await api.pagarFactura(f.id, { banco: p.banco, op: p.op.trim(), fecha: p.fecha });
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    const f2 = { ...fPago }; delete f2[f.id]; setFPago(f2);
+    setAviso(`Factura ${f.serie} pagada (${p.banco} · op. ${p.op}).`);
+    setTimeout(() => setAviso(''), 5000);
+  };
+
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+            Pagos · facturas por pagar · {pend.length}{pend.length > 0 ? ` · S/ ${pend.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+          <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
+        </div>
+        {!puede && <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: los pagos los registra el área de Pagos.</div>}
+        <Aviso msg={aviso} />
+        {pend.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Sin facturas pendientes de pago{proy !== 'TODOS' ? ' en ' + proy : ''}. Aparecen aquí cuando Compras las registra.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Banco', 'N° operación', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {pend.map(f => {
+                  const p = getP(f.id);
+                  const venc = vencimiento(f);
+                  const atrasada = diasHoy(venc) < 0;
+                  const listo = puede && p.banco && p.op.trim() && p.fecha;
+                  return (
+                    <tr key={f.n} className="border-b border-slate-800 align-top">
+                      <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                      <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
+                      <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
+                      <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.proyecto}</td>
+                      <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                      <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.forma}</td>
+                      <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${atrasada ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(venc)}{atrasada ? ` · ${-diasHoy(venc)}d atraso` : ''}</td>
+                      <td className="py-2 px-1.5">
+                        <select value={p.banco} onChange={e => setP(f.id, 'banco', e.target.value)} disabled={!puede} className={inputCls}>
+                          <option value="">— Banco —</option>
+                          {BANCOS.map(b => <option key={b}>{b}</option>)}</select></td>
+                      <td className="py-2 px-1.5"><input value={p.op} onChange={e => setP(f.id, 'op', e.target.value)} disabled={!puede} placeholder="N° operación" className={`w-24 ${inputCls} font-mono`} /></td>
+                      <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setP(f.id, 'fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
+                      <td className="py-2 px-1.5"><button onClick={() => pagar(f)} disabled={!listo} className={btnOk(!!listo)}>Registrar pago</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Cada obra paga desde su propia cuenta: filtra por proyecto para trabajar banco por banco. Una factura pagada queda congelada (no se puede editar ni volver a pagar).</div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+          Facturas pagadas · {pagadas.length}{pagadas.length > 0 ? ` · S/ ${pagadas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+        {pagadas.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Aún no hay facturas pagadas{proy !== 'TODOS' ? ' en ' + proy : ''}.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['N° Factura', 'Proveedor', 'Proyecto', 'Monto S/', 'Banco', 'N° operación', 'F. pago', 'Pagó'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {pagadas.map(f => (
+                  <tr key={f.n} className="border-b border-slate-800">
+                    <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
+                    <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{f.banco}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-300">{f.numOp}</td>
+                    <td className="py-2 px-1.5 text-slate-400">{fmt(f.fechaPago)}</td>
+                    <td className="py-2 px-1.5 text-slate-500 text-[10px]">{f.pagadoPor}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Tablero({ db }) {
   const { rqs, facturas, prestamos, salidas } = db;
   const [proy, setProy] = useState('TODOS');
@@ -1521,11 +1649,19 @@ export default function App() {
     const usrMap = {}; usrs.forEach(u => { usrMap[u.id] = u; });
     const provMap = {}; provs.forEach(p => { provMap[p.ruc] = p; });
     const factMap = {}; factR.data.forEach(f => { factMap[f.id] = f; });
-    const serieDeItem = {}; const itemsDeFactura = {};
+    const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
-      serieDeItem[fi.rq_item_id] = factMap[fi.factura_id] ? factMap[fi.factura_id].serie : null;
+      factDeItem[fi.rq_item_id] = factMap[fi.factura_id] || null;
       (itemsDeFactura[fi.factura_id] = itemsDeFactura[fi.factura_id] || []).push(fi.rq_item_id);
     });
+    // El estado de pago del ítem se hereda de su factura:
+    // sin factura → '—' · factura pendiente al crédito → 'Crédito'
+    // factura pendiente contado/transferencia → 'Falta' · pagada → 'Pagado'
+    const pagoDe = fx => {
+      if (!fx) return '—';
+      if (fx.estado_pago === 'Pagada') return 'Pagado';
+      return (fx.forma_pago || '').toLowerCase().includes('cr') ? 'Crédito' : 'Falta';
+    };
 
     const itemsPorRq = {};
     itemR.data.forEach(r => {
@@ -1536,7 +1672,7 @@ export default function App() {
         canal: r.canal, decision: r.decision, estado: r.estado, motivoRechazo: r.motivo_rechazo || '',
         motivoAnulacion: r.anulacion ? r.anulacion.motivo : '', anuladoPor: r.anulacion ? r.anulacion.por : '',
         fechaAnulacion: r.anulacion ? r.anulacion.fecha : '',
-        pago: r.pago, factura: serieDeItem[r.id] || null,
+        pago: pagoDe(factDeItem[r.id]), factura: factDeItem[r.id] ? factDeItem[r.id].serie : null,
         fechaEntrega: r.fecha_entrega || '', fechaRecojoSaldo: r.fecha_recojo_saldo || '', fechaEntregaSaldo: r.fecha_entrega_saldo || '',
         comunicoResidente: r.comunico_residente === true ? 'Sí' : r.comunico_residente === false ? 'No' : '—',
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
@@ -1560,6 +1696,8 @@ export default function App() {
       ruc: f.proveedor_ruc, fecha: f.fecha, monto: Number(f.monto), forma: f.forma_pago,
       proyecto: nomProy[f.proyecto] || f.proyecto,
       registradoPor: usrMap[f.registrado_por] ? usrMap[f.registrado_por].nombre : '',
+      estadoPago: f.estado_pago || 'Pendiente', banco: f.banco || '', numOp: f.numero_operacion || '',
+      fechaPago: f.fecha_pago || '', pagadoPor: usrMap[f.pagado_por] ? usrMap[f.pagado_por].nombre : '',
       items: (itemsDeFactura[f.id] || []).map(id => ({ rq: rqNumDeItem[id], desc: descDeItem[id] })),
     }));
 
@@ -1659,7 +1797,6 @@ export default function App() {
       }),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
       registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, lineas }) => wrap(async () => {
-        const itemIds = lineas.map(l => l.id);
         const existe = dbRef.current.proveedores.some(p => p[0] === ruc);
         if (!existe) {
           const { error: eP } = await supabase.from('proveedores').insert({ ruc, razon_social: prov });
@@ -1673,9 +1810,13 @@ export default function App() {
         if (error) return { error: error.code === '23505' ? { message: `La factura ${serie} de ese RUC ya está registrada.` } : error };
         const { error: e2 } = await supabase.from('factura_items').insert(lineas.map(l => ({ factura_id: fact.id, rq_item_id: l.id, precio_unitario: l.precio })));
         if (e2) return { error: e2 };
-        const { error: e3 } = await supabase.from('rq_items').update({ pago: 'Pagado' }).in('id', itemIds);
-        if (e3) return { error: e3 };
         return {};
+      }),
+      pagarFactura: (id, { banco, op, fecha }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('facturas').update({
+          estado_pago: 'Pagada', banco, numero_operacion: op, fecha_pago: fecha, pagado_por: u.id,
+        }).eq('id', id);
       }),
       recibir: (item, rec, obs) => wrap(async () => {
         const total = Number(item.cantRecibida || 0) + rec;
@@ -1769,6 +1910,7 @@ export default function App() {
         {tab === 'com' && <Compras user={user} db={db} api={api} />}
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
+        {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
         {tab === 'tab' && <Tablero db={db} />}
       </div>
     </div>
