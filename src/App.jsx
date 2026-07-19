@@ -38,6 +38,41 @@ function canalDeFecha(f) {
   return { k, cls: canalClases[k] };
 }
 
+// Semáforo de caducidad: ≤7 días rojo, ≤30 amarillo, vencido bloquea salida
+function estadoCaducidad(fecha) {
+  if (!fecha) return null;
+  const d = diasHoy(fecha);
+  if (d < 0) return { k: 'VENCIDO', cls: 'bg-red-950 text-red-400 border border-red-800' };
+  if (d <= 7) return { k: `vence en ${d}d`, cls: 'bg-red-950 text-red-400' };
+  if (d <= 30) return { k: `vence en ${d}d`, cls: 'bg-yellow-950 text-yellow-400' };
+  return { k: fmt(fecha), cls: 'bg-slate-800 text-slate-400' };
+}
+
+// Stock por obra y material: inicial + recibido − salidas ± préstamos,
+// con la caducidad más próxima conocida. Se usa en el consolidado de
+// Compras para sugerir transferencias antes de comprar.
+function calcularStocks(db) {
+  const map = {};
+  const ent = (o, c) => { map[o] = map[o] || {}; return (map[o][c] = map[o][c] || { cant: 0, cadMin: null }); };
+  db.stockInicial.forEach(si => { ent(si.proyecto, si.cod).cant += si.cant; });
+  db.rqs.forEach(r => r.items.forEach(i => {
+    if (i.decision !== 'Aprobado') return;
+    const rec = Number(i.cantRecibida || 0);
+    if (rec > 0) {
+      const e = ent(r.proyecto, i.cod);
+      e.cant += rec;
+      if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
+    }
+  }));
+  db.salidas.forEach(s => { if (!s.anulada) ent(s.proyecto, s.cod).cant -= s.cant; });
+  db.prestamos.forEach(p => {
+    if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
+    ent(p.origen, p.cod).cant -= p.cant;
+    ent(p.destino, p.cod).cant += p.cant;
+  });
+  return map;
+}
+
 // Niveles de obra para análisis de gasto por piso
 const PISOS = [
   'PLATEA / CIMENTACIÓN', 'SÓTANO 3', 'SÓTANO 2', 'SÓTANO 1',
@@ -668,19 +703,36 @@ function Catalogo({ user, db, api }) {
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar en el catálogo para verificar duplicados…" className={`w-full ${inputCls} py-2 text-sm mb-2`} />
         {res.length > 0 && (
           <table className="w-full text-xs">
-            <thead><tr>{['Código', 'Descripción', 'Und', 'Familia'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Código', 'Descripción', 'Und', 'Familia', 'Perecedero'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {res.map(m => (
                 <tr key={m[0]} className="border-b border-slate-800">
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{m[0]}</td>
                   <td className="py-2 px-1.5 text-slate-200">{m[1]}</td>
-                  <td className="py-2 px-1.5 text-slate-500">{m[2]}</td>
+                  <td className="py-2 px-1.5 text-slate-500">{m[2]}{m[4] ? ` (${m[5]} de ${m[4]})` : ''}</td>
                   <td className="py-2 px-1.5 text-slate-400">{m[3]}</td>
+                  <td className="py-2 px-1.5">
+                    {puedeAprobar ? (
+                      <label className="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-400">
+                        <input type="checkbox" checked={!!m[6]}
+                          onChange={async e => {
+                            const r = await api.setPerecedero(m[0], e.target.checked);
+                            if (r.error) { setAviso('⚠ ' + r.error); return; }
+                            setAviso(e.target.checked
+                              ? `"${m[1]}" marcado como perecedero: la recepción exigirá fecha de caducidad.`
+                              : `"${m[1]}" ya no es perecedero.`);
+                            setTimeout(() => setAviso(''), 4000);
+                          }} />
+                        <span>{m[6] ? 'Sí · exige caducidad' : 'No'}</span>
+                      </label>
+                    ) : <span className="text-slate-500 text-[10px]">{m[6] ? 'Sí' : 'No'}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
+        <div className="mt-3 text-slate-500 text-[11px]">Marca como perecederos los materiales con fecha de vencimiento (pinturas, aditivos, sellantes, cemento…): su recepción exigirá la fecha de caducidad y el stock mostrará el semáforo de vencimiento.</div>
       </div>
     </div>
   );
@@ -768,8 +820,70 @@ function Compras({ user, db, api }) {
 
   const factProy = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
 
+  // Consolidado por comprar: ítems aprobados sin gestionar (sin factura y
+  // sin estado logístico), agrupados por material entre todas las obras.
+  const stocks = calcularStocks(db);
+  const porComprar = Object.values(flatBase
+    .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—')
+    .reduce((acc, i) => {
+      if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porObra: {}, minFecha: i.fecha };
+      const g = acc[i.cod];
+      g.total += Number(i.cant);
+      g.porObra[i.proyecto] = (g.porObra[i.proyecto] || 0) + Number(i.cant);
+      if (i.fecha < g.minFecha) g.minFecha = i.fecha;
+      return acc;
+    }, {}))
+    .sort((a, b) => a.minFecha < b.minFecha ? -1 : 1);
+
+  // sugerencia: alguna obra ya tiene stock de ese material (peor si está por vencer)
+  const stockEnOtrasObras = g => PROYECTOS
+    .map(([c, p]) => ({ obra: p, ...((stocks[p] || {})[g.cod] || { cant: 0, cadMin: null }) }))
+    .filter(x => x.cant > 0);
+
   return (
     <div>
+    {porComprar.length > 0 && (
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+          Consolidado por comprar · {porComprar.length} material(es) · une pedidos de varias obras (la factura sigue siendo una por obra)</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead><tr>{['Material', 'Total a comprar', 'Detalle por obra', 'Más urgente', 'Stock en otras obras'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <tbody>
+              {porComprar.map(g => {
+                const otras = stockEnOtrasObras(g);
+                const urg = diasHoy(g.minFecha);
+                return (
+                  <tr key={g.cod} className="border-b border-slate-800 align-top">
+                    <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
+                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
+                    <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
+                    <td className="py-2 px-1.5 text-slate-300 text-[10px]">
+                      {Object.entries(g.porObra).map(([o, c]) => `${o}: ${c}`).join(' · ')}
+                      {Object.keys(g.porObra).length > 1 && <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-green-950 text-green-400">consolidable</span>}</td>
+                    <td className={`py-2 px-1.5 whitespace-nowrap ${urg < 2 ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}{urg < 2 ? ' · URGENTE' : ''}</td>
+                    <td className="py-2 px-1.5 text-[10px]">
+                      {otras.length === 0 ? <span className="text-slate-600">—</span> : otras.map(x => {
+                        const cad = estadoCaducidad(x.cadMin);
+                        const porVencer = cad && (cad.cls.includes('yellow') || cad.cls.includes('red'));
+                        const esSolicitante = !!g.porObra[x.obra];
+                        return (
+                          <div key={x.obra} className={porVencer ? 'text-yellow-400' : 'text-sky-400'}>
+                            {esSolicitante
+                              ? `${x.obra} ya tiene ${x.cant} ${g.und} en su almacén${porVencer ? ` (${cad.k})` : ''} — verificar antes de comprar`
+                              : `${x.obra} tiene ${x.cant} ${g.und}${porVencer ? ` (${cad.k}) — transferir antes que comprar` : ' — considerar préstamo/transferencia'}`}
+                          </div>
+                        );
+                      })}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 text-slate-500 text-[11px]">Negocia el total con el proveedor y pídele factura separada por obra: mejor precio por volumen sin mezclar presupuestos.</div>
+      </div>
+    )}
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
       <div className="flex items-center gap-3 mb-3 flex-wrap">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Gestión de compras · aprobación, estado y seguimiento</div>
@@ -966,7 +1080,7 @@ function Compras({ user, db, api }) {
 }
 
 function Almacen({ user, db, api }) {
-  const { rqs, salidas, prestamos, stockInicial, factorMap } = db;
+  const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap } = db;
   const esAlm = user.rol === 'almacen';
   const [form, setForm] = useState({});
   const [aviso, setAviso] = useState('');
@@ -990,13 +1104,14 @@ function Almacen({ user, db, api }) {
     const fc = factorMap[i.cod];
     const rec = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? fc.factor) || 0) : Number(f.cant);
     if (!(rec > 0)) return;
+    if (pereceMap[i.cod] && !f.cad) { avisar('⚠ Este material es perecedero: registra la fecha de caducidad de la etiqueta.', 5000); return; }
     const yaRecibido = Number(i.cantRecibida || 0);
     const pedido = Number(i.cant);
     if (yaRecibido + rec > pedido) {
       avisar(`⚠ No se puede recibir ${rec}: excede lo pedido (falta ${pedido - yaRecibido} de ${pedido}). Si el proveedor entregó de más, corrige el RQ con Compras.`, 6000);
       return;
     }
-    const r = await api.recibir(i, rec, f.obs.trim());
+    const r = await api.recibir(i, rec, f.obs.trim(), pereceMap[i.cod] ? f.cad : null);
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
     const total = yaRecibido + rec;
     const completo = total >= pedido;
@@ -1009,7 +1124,7 @@ function Almacen({ user, db, api }) {
   const salidasProy = salidas.filter(s => s.proyecto === proy);
   const stockMap = {};
   const entrada = (cod, desc, und) => {
-    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0 };
+    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0, cadMin: null };
     return stockMap[cod];
   };
   // saldo inicial por inventario físico (tabla stock_inicial)
@@ -1017,7 +1132,11 @@ function Almacen({ user, db, api }) {
   rqs.filter(r => r.proyecto === proy).forEach(r => r.items.forEach(i => {
     if (i.decision !== 'Aprobado') return;
     const rec = Number(i.cantRecibida || 0);
-    if (rec > 0) entrada(i.cod, i.desc, i.und).recibido += rec;
+    if (rec > 0) {
+      const e = entrada(i.cod, i.desc, i.und);
+      e.recibido += rec;
+      if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
+    }
   }));
   salidasProy.filter(s => !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += Number(s.cant); });
   prestamos.forEach(p => {
@@ -1123,7 +1242,13 @@ function Almacen({ user, db, api }) {
                         ) : (
                           <input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setF(i.id, 'cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
                         )}
-                        {llega > falta && <div className="text-[9px] text-red-400 mt-1">Excede lo pedido</div>}</td>
+                        {llega > falta && <div className="text-[9px] text-red-400 mt-1">Excede lo pedido</div>}
+                        {pereceMap[i.cod] && (
+                          <div className="mt-1">
+                            <div className="text-[9px] text-yellow-400">Perecedero: fecha de caducidad *</div>
+                            <FechaInput value={f.cad || ''} onChange={e => setF(i.id, 'cad', e.target.value)} className={`w-32 ${inputCls}`} />
+                          </div>
+                        )}</td>
                       <td className="py-2 px-1.5">
                         <textarea rows={2} value={f.obs} onChange={e => setF(i.id, 'obs', e.target.value)} disabled={!esAlm}
                           placeholder="Estado del material, faltantes, daños…" className={`w-48 ${inputCls} resize-y`} />
@@ -1147,17 +1272,26 @@ function Almacen({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Código', 'Material', 'Und', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Código', 'Material', 'Und', 'Caducidad', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {stock.map(s => {
                   const f = fSal[s.cod] || { cant: '', hoja: '', zona: '' };
                   const setS = (k, v) => setFSal({ ...fSal, [s.cod]: { ...f, [k]: v } });
-                  const listo = esAlm && Number(f.cant) > 0 && Number(f.cant) <= s.stock && f.hoja.trim() && f.zona.trim();
+                  const cad = estadoCaducidad(s.cadMin);
+                  const vencido = cad && cad.k === 'VENCIDO';
+                  const listo = esAlm && !vencido && Number(f.cant) > 0 && Number(f.cant) <= s.stock && f.hoja.trim() && f.zona.trim();
                   return (
                     <tr key={s.cod} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
                       <td className="py-2 px-1.5 text-slate-200">{s.desc}</td>
                       <td className="py-2 px-1.5 text-slate-500">{s.und}</td>
+                      <td className="py-2 px-1.5">
+                        {cad ? (
+                          <div>
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase whitespace-nowrap ${cad.cls}`}>{cad.k}</span>
+                            {vencido && <div className="text-[9px] text-red-400 mt-1 w-28 leading-tight">Salida bloqueada: dar de baja o corregir con Gerencia</div>}
+                          </div>
+                        ) : <span className="text-slate-600">—</span>}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.inicial > 0 ? 'text-sky-400' : 'text-slate-500'}`}>{s.inicial}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.recibido}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
@@ -1676,6 +1810,7 @@ export default function App() {
         fechaEntrega: r.fecha_entrega || '', fechaRecojoSaldo: r.fecha_recojo_saldo || '', fechaEntregaSaldo: r.fecha_entrega_saldo || '',
         comunicoResidente: r.comunico_residente === true ? 'Sí' : r.comunico_residente === false ? 'No' : '—',
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
+        fechaCaducidad: r.fecha_caducidad || '',
       };
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
     });
@@ -1737,7 +1872,8 @@ export default function App() {
 
     const nuevo = {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial,
-      catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null]),
+      catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
+      pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
       factorMap,
@@ -1818,13 +1954,15 @@ export default function App() {
           estado_pago: 'Pagada', banco, numero_operacion: op, fecha_pago: fecha, pagado_por: u.id,
         }).eq('id', id);
       }),
-      recibir: (item, rec, obs) => wrap(async () => {
+      recibir: (item, rec, obs, cad) => wrap(async () => {
         const total = Number(item.cantRecibida || 0) + rec;
         const esSaldo = item.estado === 'Incompleto';
         const patch = { cant_recibida: total };
         if (esSaldo) patch.fecha_entrega_saldo = HOY_ISO;
         else patch.fecha_entrega = item.fechaEntrega || HOY_ISO;
         if (obs) patch.obs_almacen = item.obsAlmacen ? item.obsAlmacen + ' · ' + obs : obs;
+        // perecedero: se conserva la caducidad más próxima entre recepciones
+        if (cad) patch.fecha_caducidad = (item.fechaCaducidad && item.fechaCaducidad < cad) ? item.fechaCaducidad : cad;
         return await supabase.from('rq_items').update(patch).eq('id', item.id);
       }),
       darSalida: ({ proyecto, cod: codigo, cant, hoja, zona }) => wrap(async () => {
@@ -1859,6 +1997,8 @@ export default function App() {
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
         await supabase.from('familias').insert({ iu, nombre })),
+      setPerecedero: (codigo, valor) => wrap(async () =>
+        await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo)),
     };
   }, [cargarTodo]);
 

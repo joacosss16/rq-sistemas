@@ -84,7 +84,7 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
 ## Backlog acordado (18 jul 2026) — orden aprobado por el dueño
 1. ✅ Desglose de precios por ítem en facturas + unidades base/factor caja (migración 5)
 2. ✅ Módulo de Pagos: rol `pagos`, estado de pago a nivel factura (migración 6)
-3. Vista "Consolidado por comprar" en Compras (agrupa ítems aprobados por material entre obras; factura sigue individual por obra) + caducidad de perecederos (flag en catálogo, fecha por recepción, semáforo 30/7 días, vencido bloqueado)
+3. ✅ Consolidado por comprar en Compras + caducidad de perecederos (migración 7: materiales.perecedero, rq_items.fecha_caducidad; semáforo 30/7, vencido bloquea salida; sugerencia de transferencia antes de comprar)
 4. Historial/comparativa de precios por material y proveedor con CSV
 5. Post-piloto: bitácora de cambios (historial), auditoría cíclica ciega de almacén, liquidación de transferencia intercompany
 Nuevos RQs: piso/nivel obligatorio (lista cerrada), fecha necesitada única por RQ (Compras gestiona por ítem), PDF solo cuando todos los ítems están decididos y solo con aprobados.
