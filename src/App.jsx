@@ -313,7 +313,9 @@ function Residente({ user, db, api }) {
   const [items, setItems] = useState([]);
   const [just, setJust] = useState('');
   const [solForm, setSolForm] = useState(null);
-  const [aviso, setAviso] = useState('');
+  const [aviso, setAvisoRaw] = useState('');
+  // los avisos (incluidos los de error) se autolimpian
+  const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
   const [enviando, setEnviando] = useState(false);
   const ch = canalDeFecha(cab.fecha);
   const urgente = ch && ch.k === 'URGENTE';
@@ -538,7 +540,9 @@ function Catalogo({ user, db, api }) {
   const [edit, setEdit] = useState({});   // n -> { desc, und, famIu, cod }
   const [rech, setRech] = useState({});
   const [q, setQ] = useState('');
-  const [aviso, setAviso] = useState('');
+  const [aviso, setAvisoRaw] = useState('');
+  // los avisos (incluidos los de error) se autolimpian
+  const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
   const pend = solicitudes.filter(s => s.estado === 'Pendiente');
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
 
@@ -1745,6 +1749,17 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  // Una pestaña abierta durante la medianoche quedaría con la fecha del día
+  // anterior (HOY se calcula al cargar): al detectar el cambio de día, recargar.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const d = new Date(); d.setHours(0, 0, 0, 0);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      if (iso !== HOY_ISO) window.location.reload();
+    }, 60000);
+    return () => clearInterval(t);
+  }, []);
+
   const cargarTodo = useCallback(async () => {
     // Supabase devuelve máximo 1,000 filas por consulta: traer por lotes
     // hasta completar (el catálogo tiene 1,740 materiales).
@@ -1996,14 +2011,12 @@ export default function App() {
           descripcion: desc, und, familia_iu: famIu, perecedero, solicitante_id: u.id, proyecto: cod(proyecto),
         });
       }),
-      aprobarSolicitud: (s, { codigo, desc, und, famIu, perecedero }) => wrap(async () => {
-        const { error } = await supabase.from('materiales').insert({ codigo, descripcion: desc, und, perecedero });
-        if (error) return { error };
-        // la solicitud guarda la versión final que aprobó Compras (con familia reasignada)
-        return await supabase.from('solicitudes_material').update({
-          estado: 'Aprobado', codigo_asignado: codigo, descripcion: desc, und, familia_iu: famIu, perecedero,
-        }).eq('id', s.id);
-      }),
+      // Aprobación en una sola transacción (RPC): material + solicitud juntos
+      aprobarSolicitud: (s, { codigo, desc, und, famIu, perecedero }) => wrap(async () =>
+        await supabase.rpc('aprobar_material', {
+          p_solicitud: s.id, p_codigo: codigo, p_descripcion: desc,
+          p_und: und, p_familia_iu: famIu, p_perecedero: perecedero,
+        })),
       rechazarSolicitud: (s, motivo) => wrap(async () =>
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
