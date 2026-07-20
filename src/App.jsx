@@ -15,14 +15,22 @@ const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso i
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
 
 const TABS_POR_ROL = {
-  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
+  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
   residente: [['res', 'Mis requerimientos']],
   almacen: [['alm', 'Mi almacén']],
-  pagos: [['pag', 'Pagos']],
+  pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
 };
 const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren' };
+const UMBRAL_MONTO_INUSUAL = 10000; // S/ — pagos por encima se marcan para revisión
+
+// Vencimiento de una factura: fecha + días de crédito (contado vence el mismo día)
+function vencimientoDe(f) {
+  const d = new Date(f.fecha + 'T00:00:00');
+  d.setDate(d.getDate() + (f.forma === 'Crédito 15 días' ? 15 : f.forma === 'Crédito 30 días' ? 30 : 0));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta'];
 const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher' };
 
@@ -1473,12 +1481,7 @@ function Pagos({ user, db, api }) {
     .filter(r => proy === 'TODOS' || r.proyecto === proy)
     .map(r => ({ ...r, monto: facturas.filter(f => f.rendicionId === r.id).reduce((a, f) => a + f.monto, 0) }));
 
-  // vencimiento: fecha de factura + días de crédito (contado vence el mismo día)
-  const vencimiento = f => {
-    const d = new Date(f.fecha + 'T00:00:00');
-    d.setDate(d.getDate() + (f.forma === 'Crédito 15 días' ? 15 : f.forma === 'Crédito 30 días' ? 30 : 0));
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
+  const vencimiento = vencimientoDe;
 
   const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO };
   const setP = (id, k, v) => setFPago({ ...fPago, [id]: { ...getP(id), [k]: v } });
@@ -1627,7 +1630,8 @@ function Pagos({ user, db, api }) {
 
 function Rendiciones({ user, db, api }) {
   const { rendiciones, facturas, cajas, bancoDe } = db;
-  const puede = user.rol === 'administracion';
+  // administración aprueba; el rol pagos también (Mónica lleva ambos frentes)
+  const puede = user.rol === 'administracion' || user.rol === 'pagos';
   const [proy, setProy] = useState('TODOS');
   const [obs, setObs] = useState({});
   const [aviso, setAvisoRaw] = useState('');
@@ -1708,6 +1712,143 @@ function Rendiciones({ user, db, api }) {
           </div>
         ))}
         <div className="mt-3 text-slate-500 text-[11px]">Fondo fijo: cada obra arranca el día con su monto completo (config en tabla cajas_chicas{Object.keys(cajas).length ? ` · ${Object.entries(cajas).map(([o, m]) => `${o}: S/ ${m}`).join(' · ')}` : ''}). Las facturas en efectivo del día se rinden aquí; administración aprueba y Pagos repone.</div>
+      </div>
+    </div>
+  );
+}
+
+function Auditoria({ user, db, api }) {
+  const { facturas, rendiciones, bancoDe } = db;
+  const puede = user.rol === 'gerente';
+  const hace7 = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const [desde, setDesde] = useState(hace7);
+  const [hasta, setHasta] = useState(HOY_ISO);
+  const [aviso, setAvisoRaw] = useState('');
+  const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 5000); };
+
+  const pagadas = facturas.filter(f => f.estadoPago === 'Pagada');
+  const enSemana = pagadas.filter(f => f.fechaPago >= desde && f.fechaPago <= hasta)
+    .sort((a, b) => (a.proyecto + a.fechaPago < b.proyecto + b.fechaPago ? -1 : 1));
+
+  // ---------- NIVEL 1: alertas automáticas (sobre TODOS los datos) ----------
+  const alertas = [];
+  { // N° de operación repetido en el mismo banco
+    const vistos = {};
+    pagadas.filter(f => f.medio !== 'Efectivo' && f.numOp).forEach(f => {
+      const k = `${f.banco}|${f.numOp}`;
+      (vistos[k] = vistos[k] || []).push(f);
+    });
+    Object.values(vistos).filter(v => v.length > 1).forEach(v => {
+      alertas.push({ tipo: 'N° de operación repetido', detalle: `${v[0].banco} op. ${v[0].numOp} usado en ${v.length} pagos: ${v.map(f => `${f.serie} (S/ ${f.monto.toFixed(2)})`).join(' · ')}` });
+    });
+  }
+  pagadas.filter(f => f.medio !== 'Efectivo' && f.banco && (bancoDe[f.proyecto] || {}).banco && f.banco !== bancoDe[f.proyecto].banco)
+    .forEach(f => alertas.push({ tipo: 'Banco distinto al de la obra', detalle: `${f.serie} (${f.proyecto}) pagada desde ${f.banco}; la obra opera con ${bancoDe[f.proyecto].banco}` }));
+  pagadas.filter(f => f.fechaPago && f.fechaPago < f.fecha)
+    .forEach(f => alertas.push({ tipo: 'Pago anterior a la factura', detalle: `${f.serie}: factura del ${fmt(f.fecha)} pagada el ${fmt(f.fechaPago)}` }));
+  rendiciones.filter(r => r.estado === 'Aprobada' && !r.repOp && r.fechaAprobacion && diasHoy(r.fechaAprobacion) <= -2)
+    .forEach(r => alertas.push({ tipo: 'Rendición sin reposición', detalle: `${r.proyecto} (${fmt(r.fecha)}): aprobada hace ${-diasHoy(r.fechaAprobacion)} días y la caja sigue incompleta` }));
+  {
+    const vencidas = facturas.filter(f => f.estadoPago !== 'Pagada' && diasHoy(vencimientoDe(f)) < 0);
+    if (vencidas.length) {
+      const monto = vencidas.reduce((a, f) => a + f.monto, 0);
+      alertas.push({ tipo: 'Facturas vencidas sin pagar', detalle: `${vencidas.length} factura(s) por S/ ${monto.toFixed(2)}; la más antigua: ${vencidas.sort((a, b) => (vencimientoDe(a) < vencimientoDe(b) ? -1 : 1))[0].serie} (venció ${fmt(vencimientoDe(vencidas[0]))})` });
+    }
+  }
+  pagadas.filter(f => f.monto > UMBRAL_MONTO_INUSUAL)
+    .forEach(f => alertas.push({ tipo: 'Monto inusual', detalle: `${f.serie} (${f.proyecto}): S/ ${f.monto.toFixed(2)} — revisar con lupa (umbral S/ ${UMBRAL_MONTO_INUSUAL})` }));
+  pagadas.filter(f => !f.conciliada && f.fechaPago && diasHoy(f.fechaPago) <= -14)
+    .forEach(f => alertas.push({ tipo: 'Sin conciliar hace 14+ días', detalle: `${f.serie} (${f.proyecto}) pagada el ${fmt(f.fechaPago)} sigue sin conciliar contra el banco` }));
+
+  const conciliar = async (f, valor) => {
+    const r = await api.conciliarFactura(f.id, valor);
+    if (r.error) { setAviso('⚠ ' + r.error); return; }
+    setAviso(valor ? `${f.serie} conciliada contra el estado de cuenta.` : `${f.serie} marcada como NO conciliada.`);
+  };
+
+  const csvSemana = () => {
+    const cab = ['Obra', 'Banco', 'Cuenta', 'Medio', 'N_Operacion', 'Factura', 'Proveedor', 'RUC', 'Monto', 'F_Pago', 'Pago_Por', 'Conciliada'];
+    const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const filas = enSemana.map(f => [f.proyecto, f.banco || 'EFECTIVO', (bancoDe[f.proyecto] || {}).cuenta || '', f.medio, f.numOp || '', f.serie, f.prov, f.ruc, f.monto.toFixed(2), f.fechaPago, f.pagadoPor, f.conciliada ? 'SI' : 'NO'].map(esc).join(','));
+    const csv = '﻿' + cab.join(',') + '\n' + filas.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `auditoria_pagos_${desde}_a_${hasta}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const totalSemana = enSemana.reduce((a, f) => a + f.monto, 0);
+  const sinConciliar = enSemana.filter(f => !f.conciliada).length;
+
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Auditoría de pagos · revisión semanal de gerencia</div>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            <label className="text-[10px] text-slate-500 uppercase">Del</label>
+            <FechaInput value={desde} onChange={e => setDesde(e.target.value)} className={`w-32 ${inputCls}`} />
+            <label className="text-[10px] text-slate-500 uppercase">al</label>
+            <FechaInput value={hasta} onChange={e => setHasta(e.target.value)} className={`w-32 ${inputCls}`} />
+            <button onClick={csvSemana} disabled={!enSemana.length} className={btnOk(enSemana.length > 0)}>⤓ CSV para conciliar</button>
+          </div>
+        </div>
+      </div>
+
+      <div className={`border rounded-md p-4 mb-3 ${alertas.length === 0 ? 'bg-green-950 border-green-800' : 'bg-slate-900 border-red-800'}`}>
+        <div className={`text-[11px] font-bold tracking-widest uppercase mb-2 ${alertas.length === 0 ? 'text-green-400' : 'text-red-400'}`}>
+          {alertas.length === 0 ? '✓ 0 alertas — sin hallazgos automáticos' : `⚠ ${alertas.length} alerta(s) detectada(s) automáticamente`}</div>
+        {alertas.map((a, i) => (
+          <div key={i} className="mb-1.5 text-xs">
+            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400 mr-2">{a.tipo}</span>
+            <span className="text-slate-300">{a.detalle}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+          Pagos del período · {enSemana.length} · S/ {totalSemana.toFixed(2)} · sin conciliar: {sinConciliar}</div>
+        <Aviso msg={aviso} />
+        {enSemana.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Sin pagos en el período seleccionado.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Obra', 'Banco', 'Medio', 'N°', 'Factura', 'Proveedor', 'Monto S/', 'F. pago', 'Pagó', 'Conciliada contra banco'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {enSemana.map(f => (
+                  <tr key={f.n} className="border-b border-slate-800">
+                    <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{f.proyecto}</td>
+                    <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.medio === 'Efectivo' ? 'Caja chica' : f.banco}</td>
+                    <td className="py-2 px-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${f.medio === 'Efectivo' ? 'bg-yellow-950 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>{f.medio}</span></td>
+                    <td className="py-2 px-1.5 font-mono text-slate-300">{f.numOp || '—'}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                    <td className="py-2 px-1.5 text-slate-400">{fmt(f.fechaPago)}</td>
+                    <td className="py-2 px-1.5 text-slate-500 text-[10px]">{f.pagadoPor}</td>
+                    <td className="py-2 px-1.5">
+                      {puede ? (
+                        <label className="flex items-center gap-1.5 cursor-pointer text-[10px]">
+                          <input type="checkbox" checked={f.conciliada} onChange={e => conciliar(f, e.target.checked)} />
+                          <span className={f.conciliada ? 'text-green-400' : 'text-slate-500'}>
+                            {f.conciliada ? `✓ ${f.conciliadaPor} · ${fmt(f.fechaConciliacion)}` : 'marcar al verificar en el banco'}</span>
+                        </label>
+                      ) : (
+                        <span className={`text-[10px] ${f.conciliada ? 'text-green-400' : 'text-slate-500'}`}>{f.conciliada ? '✓ conciliada' : 'pendiente'}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Ritual semanal: descarga el CSV, ábrelo junto al estado de cuenta de cada banco, y marca aquí cada pago verificado. Lo que quede sin conciliar 14 días se vuelve alerta roja. Los pagos en efectivo se auditan por su rendición (pestaña Rendiciones).</div>
       </div>
     </div>
   );
@@ -2019,6 +2160,8 @@ export default function App() {
       registradoPor: usrMap[f.registrado_por] ? usrMap[f.registrado_por].nombre : '',
       estadoPago: f.estado_pago || 'Pendiente', banco: f.banco || '', numOp: f.numero_operacion || '',
       medio: f.medio_pago || '', rendicionId: f.rendicion_id || null,
+      conciliada: !!f.conciliada, conciliadaPor: usrMap[f.conciliada_por] ? usrMap[f.conciliada_por].nombre : '',
+      fechaConciliacion: f.fecha_conciliacion || '',
       fechaPago: f.fecha_pago || '', pagadoPor: usrMap[f.pagado_por] ? usrMap[f.pagado_por].nombre : '',
       items: (itemsDeFactura[f.id] || []).map(id => ({ rq: rqNumDeItem[id], desc: descDeItem[id] })),
     }));
@@ -2236,6 +2379,13 @@ export default function App() {
         await supabase.from('familias').insert({ iu, nombre })),
       setPerecedero: (codigo, valor) => wrap(async () =>
         await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo)),
+      conciliarFactura: (id, valor) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('facturas').update(valor
+          ? { conciliada: true, conciliada_por: u.id, fecha_conciliacion: HOY_ISO }
+          : { conciliada: false, conciliada_por: null, fecha_conciliacion: null }
+        ).eq('id', id);
+      }),
     };
   }, [cargarTodo]);
 
@@ -2289,6 +2439,7 @@ export default function App() {
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
         {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
         {tab === 'ren' && <Rendiciones user={user} db={db} api={api} />}
+        {tab === 'aud' && <Auditoria user={user} db={db} api={api} />}
         {tab === 'tab' && <Tablero db={db} />}
       </div>
     </div>
