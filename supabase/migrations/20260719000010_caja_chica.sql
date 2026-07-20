@@ -31,9 +31,13 @@ alter table public.facturas add column medio_pago text
   check (medio_pago in ('Transferencia','Cheque','Tarjeta','Efectivo'));
 alter table public.facturas add column rendicion_id uuid;
 
--- Las facturas pagadas ANTES de esta migración quedan como Transferencia
+-- Las facturas pagadas ANTES de esta migración quedan como Transferencia.
+-- El trigger facturas_bu congela las facturas pagadas: se suspende solo
+-- durante este backfill.
+alter table public.facturas disable trigger facturas_bu;
 update public.facturas set medio_pago = 'Transferencia'
  where estado_pago = 'Pagada' and medio_pago is null;
+alter table public.facturas enable trigger facturas_bu;
 
 -- Pagada exige: siempre medio + fecha + quién; banco y N° solo si NO es efectivo
 alter table public.facturas drop constraint chk_pago_completo;
