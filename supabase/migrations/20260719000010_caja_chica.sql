@@ -31,6 +31,10 @@ alter table public.facturas add column medio_pago text
   check (medio_pago in ('Transferencia','Cheque','Tarjeta','Efectivo'));
 alter table public.facturas add column rendicion_id uuid;
 
+-- Las facturas pagadas ANTES de esta migración quedan como Transferencia
+update public.facturas set medio_pago = 'Transferencia'
+ where estado_pago = 'Pagada' and medio_pago is null;
+
 -- Pagada exige: siempre medio + fecha + quién; banco y N° solo si NO es efectivo
 alter table public.facturas drop constraint chk_pago_completo;
 alter table public.facturas add constraint chk_pago_completo
