@@ -21,8 +21,9 @@ const TABS_POR_ROL = {
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
+  comprador: [['dia', 'Compras del día'], ['fac', 'Facturar'], ['ren', 'Rendiciones']],
 };
-const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren' };
+const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren', comprador: 'dia' };
 const UMBRAL_MONTO_INUSUAL = 10000; // S/ — pagos por encima se marcan para revisión
 
 // Vencimiento de una factura: fecha + días de crédito (contado vence el mismo día)
@@ -845,9 +846,10 @@ function Catalogo({ user, db, api }) {
   );
 }
 
-function Compras({ user, db, api }) {
+function Compras({ user, db, api, modo }) {
   const { rqs, facturas, proveedores } = db;
-  const puedeFacturar = user.rol === 'compras';
+  const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
+  const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
@@ -862,10 +864,13 @@ function Compras({ user, db, api }) {
 
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
   const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso })));
+  // primero lo que se necesita antes (fecha necesitada ascendente)
   const flat = flatBase
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
     .filter(i => !(i.estado === 'Entregado' && i.pago === 'Pagado'))
-    .filter(i => proy === 'TODOS' || i.proyecto === proy);
+    .filter(i => proy === 'TODOS' || i.proyecto === proy)
+    .filter(i => !facturarSolo || i.decision === 'Aprobado')
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
 
   const enviarRechazo = async i => {
     const motivo = (rechazo[i.id] || '').trim();
@@ -950,7 +955,7 @@ function Compras({ user, db, api }) {
 
   return (
     <div>
-    {porComprar.length > 0 && (
+    {!facturarSolo && porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
           Consolidado por comprar · {porComprar.length} material(es) · une pedidos de varias obras (la factura sigue siendo una por obra)</div>
@@ -1063,7 +1068,7 @@ function Compras({ user, db, api }) {
                   </td>
                   <td className="py-2 px-1.5">
                     {post ? (
-                      (i.estado === 'Entregado' || i.estado === 'Incompleto') ? (
+                      (facturarSolo || i.estado === 'Entregado' || i.estado === 'Incompleto') ? (
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
                           title="Lo fija el almacén automáticamente al registrar la recepción.">{i.estado}</span>
                       ) : (
@@ -1143,17 +1148,17 @@ function Compras({ user, db, api }) {
                       )}
                     </div>
                   ) : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5">{post ? <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">—</span>}</td>
+                  <td className="py-2 px-1.5">{post ? (facturarSolo ? <span className="text-slate-400">{fmt(i.fechaEntrega)}</span> : <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} />) : <span className="text-slate-600">—</span>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{llego !== null ? llego + 'd' : '—'}</td>
                   <td className={`py-2 px-1.5 font-mono ${holg === null ? 'text-slate-500' : holg < 0 ? 'text-red-400' : 'text-green-400'}`}>{holg !== null ? holg + 'd' : '—'}</td>
-                  <td className="py-2 px-1.5">{inc ? <FechaInput value={i.fechaRecojoSaldo} onChange={e => updItem(i, { fecha_recojo_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5">{inc ? <FechaInput value={i.fechaEntregaSaldo} onChange={e => updItem(i, { fecha_entrega_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">—</span>}</td>
+                  <td className="py-2 px-1.5">{inc && !facturarSolo ? <FechaInput value={i.fechaRecojoSaldo} onChange={e => updItem(i, { fecha_recojo_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? fmt(i.fechaRecojoSaldo) : '—'}</span>}</td>
+                  <td className="py-2 px-1.5">{inc && !facturarSolo ? <FechaInput value={i.fechaEntregaSaldo} onChange={e => updItem(i, { fecha_entrega_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? fmt(i.fechaEntregaSaldo) : '—'}</span>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{saldoDias !== null ? saldoDias + 'd' : '—'}</td>
-                  <td className="py-2 px-1.5">{inc ? (
+                  <td className="py-2 px-1.5">{inc && !facturarSolo ? (
                     <select value={i.comunicoResidente} onChange={e => updItem(i, { comunico_residente: e.target.value === 'Sí' ? true : e.target.value === 'No' ? false : null })} className={inputCls}>
-                      {['—', 'Sí', 'No'].map(x => <option key={x}>{x}</option>)}</select>) : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5">{inc ? <input defaultValue={i.destinoSaldo} onBlur={e => { if (e.target.value !== i.destinoSaldo) updItem(i, { destino_saldo: e.target.value || null }); }} placeholder="Almacén de obra…" className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5"><AnularBox onConfirm={m => anularItem(i, m)} /></td>
+                      {['—', 'Sí', 'No'].map(x => <option key={x}>{x}</option>)}</select>) : <span className="text-slate-600">{inc ? i.comunicoResidente : '—'}</span>}</td>
+                  <td className="py-2 px-1.5">{inc && !facturarSolo ? <input defaultValue={i.destinoSaldo} onBlur={e => { if (e.target.value !== i.destinoSaldo) updItem(i, { destino_saldo: e.target.value || null }); }} placeholder="Almacén de obra…" className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? (i.destinoSaldo || '—') : '—'}</span>}</td>
+                  <td className="py-2 px-1.5">{!facturarSolo && <AnularBox onConfirm={m => anularItem(i, m)} />}</td>
                 </tr>
               );
             })}
@@ -1543,6 +1548,69 @@ function Almacen({ user, db, api }) {
             </table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Vista del COMPRADOR (Frank): su lista de trabajo del día.
+// Prioriza urgentes y fechas necesitadas; consolida el mismo material
+// entre obras y le dice cuántas facturas pedir.
+function ComprasDelDia({ db }) {
+  const { rqs } = db;
+  const EN_LETRAS = { 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
+
+  const pendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
+    .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—');
+
+  const grupos = Object.values(pendientes.reduce((acc, i) => {
+    if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porRQ: [], minFecha: i.fecha, proyectos: new Set() };
+    const g = acc[i.cod];
+    g.total += Number(i.cant);
+    g.porRQ.push({ rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha });
+    if (i.fecha < g.minFecha) g.minFecha = i.fecha;
+    g.proyectos.add(i.proyecto);
+    return acc;
+  }, {}))
+    .map(g => ({ ...g, urgente: diasHoy(g.minFecha) < 2, nProy: g.proyectos.size }))
+    .sort((a, b) => (a.urgente !== b.urgente) ? (a.urgente ? -1 : 1) : (a.minFecha < b.minFecha ? -1 : 1));
+
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+          Compras del día · {grupos.length} material(es) por comprar · urgentes primero</div>
+        {grupos.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Nada por comprar: no hay ítems aprobados pendientes. ¡Buen día!</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['', 'Ítem', 'Cantidad total', 'Por RQ / obra', 'Necesitado para', 'Observación'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {grupos.map(g => (
+                  <tr key={g.cod} className="border-b border-slate-800 align-top">
+                    <td className="py-2 px-1.5">
+                      {g.urgente && <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">URGENTE</span>}</td>
+                    <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
+                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
+                    <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 whitespace-nowrap">{g.total} {g.und}</td>
+                    <td className="py-2 px-1.5 text-slate-300 text-[10px]">
+                      {g.porRQ.map((x, k) => (
+                        <div key={k}>RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b>{x.cant}</b> (para {fmt(x.fecha)})</div>
+                      ))}</td>
+                    <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${g.urgente ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}</td>
+                    <td className="py-2 px-1.5 text-[10px]">
+                      {g.nProy > 1
+                        ? <span className="text-green-400 font-semibold">Consolidar: pedir {EN_LETRAS[g.nProy] || g.nProy} facturas (una por obra)</span>
+                        : <span className="text-slate-400">Pedir una factura ({[...g.proyectos][0]})</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Negocia el total por material con el proveedor. Cuando un material lo piden varias obras, pide facturas separadas (una por obra) para no mezclar presupuestos. Las facturas se registran en la pestaña Facturar; las de efectivo entran a tu rendición del día.</div>
       </div>
     </div>
   );
@@ -2588,6 +2656,8 @@ export default function App() {
       <div className="p-4">
         {tab === 'res' && <Residente user={user} db={db} api={api} />}
         {tab === 'com' && <Compras user={user} db={db} api={api} />}
+        {tab === 'dia' && <ComprasDelDia db={db} />}
+        {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
         {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
