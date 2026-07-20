@@ -11,7 +11,6 @@ const diasHoy = f => dias(f, HOY_ISO);
 let PROYECTOS = [];
 let ALMACENEROS = {};
 
-const ESTADOS_LOGISTICA = ['—', 'En camino', 'Entregado', 'Incompleto'];
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
 const BANCOS = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'BanBif', 'Banco de la Nación', 'Otro'];
@@ -969,8 +968,14 @@ function Compras({ user, db, api }) {
                   </td>
                   <td className="py-2 px-1.5">
                     {post ? (
-                      <select value={i.estado} onChange={e => updItem(i, { estado: e.target.value })} className={inputCls}>
-                        {ESTADOS_LOGISTICA.map(x => <option key={x}>{x}</option>)}</select>
+                      (i.estado === 'Entregado' || i.estado === 'Incompleto') ? (
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
+                          title="Lo fija el almacén automáticamente al registrar la recepción.">{i.estado}</span>
+                      ) : (
+                        <select value={i.estado} onChange={e => updItem(i, { estado: e.target.value })} className={inputCls}
+                          title="Compras gestiona el tránsito. Entregado e Incompleto los fija el almacén al recibir.">
+                          {['—', 'En camino'].map(x => <option key={x}>{x}</option>)}</select>
+                      )
                     ) : <span className="text-slate-600">—</span>}
                   </td>
                   <td className="py-2 px-1.5">{post ? (
@@ -1055,7 +1060,7 @@ function Compras({ user, db, api }) {
         </table>
       </div>
       )}
-      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: estado logístico solo para aprobados. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
+      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: Compras marca "En camino" cuando el pedido está en tránsito; "Entregado" e "Incompleto" los fija el almacén automáticamente al registrar la recepción. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
     </div>
 
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
