@@ -226,6 +226,90 @@ function imprimirRQ(r) {
   w.document.close();
 }
 
+const ESTILO_PDF = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; padding: 24px; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #111; padding-bottom: 8px; margin-bottom: 10px; }
+  .logo { font-size: 16px; font-weight: 800; letter-spacing: 2px; }
+  .logo small { display: block; font-size: 9px; font-weight: 400; letter-spacing: 1px; color: #555; }
+  .meta { text-align: right; font-size: 11px; }
+  h1 { font-size: 13px; text-align: center; margin: 8px 0 12px; letter-spacing: 1px; }
+  table.t { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  table.t th { background: #111; color: #fff; padding: 5px 4px; font-size: 9px; text-transform: uppercase; text-align: left; }
+  table.t td { border: 1px solid #999; padding: 4px; }
+  .c { text-align: center; } .r { text-align: right; } .mono { font-family: 'Courier New', monospace; }
+  .tot td { font-weight: 800; background: #f0f0f0; }
+  .nota { border: 1px solid #999; background: #fffbe6; padding: 6px 8px; margin-bottom: 10px; font-size: 10px; }
+  .firmas { display: flex; gap: 16px; margin-top: 60px; }
+  .firma { flex: 1; text-align: center; }
+  .firma .linea { border-top: 1px solid #111; padding-top: 4px; font-size: 9px; font-weight: 700; text-transform: uppercase; }
+  .firma .campos { font-size: 9px; color: #555; margin-top: 14px; text-align: left; }
+  @media print { body { padding: 10mm; } }
+`;
+
+function abrirPDF(titulo, cuerpo) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('El navegador bloqueó la ventana. Permite ventanas emergentes para descargar el PDF.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${titulo}</title><style>${ESTILO_PDF}</style></head><body>${cuerpo}<script>window.onload = () => { window.print(); };<\/script></body></html>`);
+  w.document.close();
+}
+
+// Cierre mensual valorizado (documento contable, para gerencia y contabilidad)
+function imprimirCierre({ obra, corte, filas, salidasMes, prestamosActivos }) {
+  const totValor = filas.reduce((a, f) => a + (f.valor ?? 0), 0);
+  const sinPrecio = filas.filter(f => f.valor == null).length;
+  const cuerpo = `
+  <div class="head">
+    <div class="logo">GRUPO COPACABANA<small>CONSTRUCCIÓN E INMOBILIARIA · CUSCO</small></div>
+    <div class="meta"><b>CIERRE DE ALMACÉN</b><br>Obra: ${obra}<br>Fecha de corte: ${fmt(corte)}</div>
+  </div>
+  <h1>CIERRE MENSUAL DE ALMACÉN — VALORIZADO</h1>
+  ${sinPrecio > 0 ? `<div class="nota"><b>${sinPrecio} material(es) sin precio de compra registrado</b> (aparecen como "sin valorizar"): el total es parcial hasta contar con sus precios.</div>` : ''}
+  <table class="t">
+    <thead><tr><th>Código</th><th>Material</th><th>Und</th><th class="r">Stock</th><th class="r">Precio prom. S/</th><th class="r">Valor S/</th></tr></thead>
+    <tbody>
+      ${filas.map(f => `<tr>
+        <td class="mono c">${f.cod}</td><td>${f.desc}</td><td class="c">${f.und}</td>
+        <td class="r mono">${f.cant}</td>
+        <td class="r mono">${f.precio != null ? f.precio.toFixed(2) : '—'}</td>
+        <td class="r mono">${f.valor != null ? f.valor.toFixed(2) : 'sin valorizar'}</td>
+      </tr>`).join('')}
+      <tr class="tot"><td colspan="5" class="r">VALOR TOTAL DEL ALMACÉN</td><td class="r mono">S/ ${totValor.toFixed(2)}</td></tr>
+    </tbody>
+  </table>
+  <div class="nota">Movimientos del mes: <b>${salidasMes.n}</b> salida(s) por <b>${salidasMes.cant}</b> unidades · Préstamos activos: <b>${prestamosActivos}</b>. Stock = inicial + recibido − salidas ± préstamos (foto al corte).</div>
+  <div class="firmas">
+    ${['ALMACENERO', 'V°B° GERENCIA'].map(f => `
+      <div class="firma"><div class="campos">FECHA:<br><br>NOMBRE:</div><br><br><div class="linea">${f}</div></div>`).join('')}
+  </div>`;
+  abrirPDF(`Cierre ${obra} ${corte}`, cuerpo);
+}
+
+// Hoja de conteo CIEGO (para el verificador de confianza: sin cantidades)
+function imprimirConteo({ obra, corte, filas }) {
+  const cuerpo = `
+  <div class="head">
+    <div class="logo">GRUPO COPACABANA<small>CONSTRUCCIÓN E INMOBILIARIA · CUSCO</small></div>
+    <div class="meta"><b>HOJA DE CONTEO</b><br>Obra: ${obra}<br>Fecha: ${fmt(corte)}</div>
+  </div>
+  <h1>VERIFICACIÓN FÍSICA DE ALMACÉN — CONTEO CIEGO</h1>
+  <div class="nota"><b>Instrucciones:</b> cuente físicamente cada material y anote la cantidad encontrada. Este documento NO muestra las cantidades del sistema a propósito: la comparación la hace gerencia al recibir la hoja firmada. No pida las cantidades al almacenero.</div>
+  <table class="t">
+    <thead><tr><th>#</th><th>Código</th><th>Material</th><th>Und</th><th class="c" style="width:18%">CANTIDAD CONTADA</th><th style="width:20%">Observaciones</th></tr></thead>
+    <tbody>
+      ${filas.map((f, i) => `<tr>
+        <td class="c">${i + 1}</td><td class="mono c">${f.cod}</td><td>${f.desc}</td><td class="c">${f.und}</td>
+        <td style="height:26px"></td><td></td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  <div class="firmas">
+    ${['CONTÓ (VERIFICADOR)', 'ALMACENERO PRESENTE', 'REVISÓ GERENCIA'].map(f => `
+      <div class="firma"><div class="campos">FECHA:<br><br>NOMBRE:</div><br><br><div class="linea">${f}</div></div>`).join('')}
+  </div>`;
+  abrirPDF(`Conteo ${obra} ${corte}`, cuerpo);
+}
+
 function FiltroProyecto({ value, onChange, todos, excluir }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)} className={inputCls}>
@@ -1718,8 +1802,45 @@ function Rendiciones({ user, db, api }) {
 }
 
 function Auditoria({ user, db, api }) {
-  const { facturas, rendiciones, bancoDe } = db;
+  const { facturas, rendiciones, bancoDe, precioProm, salidas, prestamos } = db;
   const puede = user.rol === 'gerente';
+  const [obraCierre, setObraCierre] = useState('');
+
+  // ---------- CIERRE MENSUAL DE ALMACÉN ----------
+  const generarCierre = tipo => {
+    if (!obraCierre) return;
+    const stocks = calcularStocks(db)[obraCierre] || {};
+    const matInfo = Object.fromEntries(db.catalogo.map(m => [m[0], { desc: m[1], und: m[2] }]));
+    const filas = Object.entries(stocks)
+      .filter(([, v]) => v.cant > 0)
+      .map(([cod, v]) => {
+        const precio = precioProm[cod] != null ? precioProm[cod] : null;
+        return {
+          cod, desc: (matInfo[cod] || {}).desc || cod, und: (matInfo[cod] || {}).und || '',
+          cant: v.cant, precio, valor: precio != null ? v.cant * precio : null,
+        };
+      });
+    if (!filas.length) { alert(`${obraCierre} no tiene stock para cerrar.`); return; }
+
+    if (tipo === 'cierre') {
+      const mes = HOY_ISO.slice(0, 7);
+      const salMes = salidas.filter(s => s.proyecto === obraCierre && !s.anulada && s.fecha.startsWith(mes));
+      imprimirCierre({
+        obra: obraCierre, corte: HOY_ISO,
+        filas: [...filas].sort((a, b) => (b.valor ?? -1) - (a.valor ?? -1)),
+        salidasMes: { n: salMes.length, cant: salMes.reduce((a, s) => a + s.cant, 0) },
+        prestamosActivos: prestamos.filter(p => p.estado === 'Prestado' && (p.origen === obraCierre || p.destino === obraCierre)).length,
+      });
+    } else {
+      // conteo ciego: 100% de los de mayor valor + muestra aleatoria del resto,
+      // mezclados en orden alfabético para que no se distinga qué es qué
+      const porValor = [...filas].sort((a, b) => (b.valor ?? -1) - (a.valor ?? -1));
+      const top = porValor.slice(0, 15);
+      const resto = porValor.slice(15).sort(() => Math.random() - 0.5).slice(0, 10);
+      const muestra = [...top, ...resto].sort((a, b) => a.desc.localeCompare(b.desc));
+      imprimirConteo({ obra: obraCierre, corte: HOY_ISO, filas: muestra });
+    }
+  };
   const hace7 = (() => { const d = new Date(); d.setDate(d.getDate() - 7); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const [desde, setDesde] = useState(hace7);
   const [hasta, setHasta] = useState(HOY_ISO);
@@ -1849,6 +1970,24 @@ function Auditoria({ user, db, api }) {
           </div>
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Ritual semanal: descarga el CSV, ábrelo junto al estado de cuenta de cada banco, y marca aquí cada pago verificado. Lo que quede sin conciliar 14 días se vuelve alerta roja. Los pagos en efectivo se auditan por su rendición (pestaña Rendiciones).</div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mt-3">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Cierre mensual de almacén · foto valorizada + verificación física</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={obraCierre} onChange={e => setObraCierre(e.target.value)} className={inputCls}>
+            <option value="">— Elegir obra —</option>
+            {PROYECTOS.map(([c, p]) => <option key={c} value={p}>{c} · {p}</option>)}
+          </select>
+          <span className="text-slate-500 text-[11px]">Corte: {fmt(HOY_ISO)}</span>
+          <button onClick={() => generarCierre('cierre')} disabled={!obraCierre} className={btnOk(!!obraCierre)}>⤓ Cierre valorizado (PDF)</button>
+          <button onClick={() => generarCierre('conteo')} disabled={!obraCierre} className={btnOk(!!obraCierre)}>⤓ Hoja de conteo ciego (PDF)</button>
+        </div>
+        <div className="mt-3 text-slate-500 text-[11px]">
+          El <b>cierre valorizado</b> (con cantidades y soles al precio promedio de compra) es para gerencia y contabilidad.
+          La <b>hoja de conteo</b> va SIN cantidades: entrégala a la persona de confianza, que cuenta, firma y devuelve — gerencia compara contra el cierre.
+          La muestra incluye el 100% de los materiales de mayor valor + una selección aleatoria del resto, mezclados sin distinción.
+        </div>
       </div>
     </div>
   );
@@ -2110,6 +2249,19 @@ export default function App() {
     const usrMap = {}; usrs.forEach(u => { usrMap[u.id] = u; });
     const provMap = {}; provs.forEach(p => { provMap[p.ruc] = p; });
     const factMap = {}; factR.data.forEach(f => { factMap[f.id] = f; });
+    // Precio promedio ponderado por material (del desglose de facturas):
+    // base de la valorización del cierre mensual de almacén
+    const itemById = {}; itemR.data.forEach(r => { itemById[r.id] = r; });
+    const acumPrecio = {};
+    fitR.data.forEach(fi => {
+      if (fi.precio_unitario == null) return;
+      const it = itemById[fi.rq_item_id]; if (!it) return;
+      const a = (acumPrecio[it.codigo] = acumPrecio[it.codigo] || { m: 0, c: 0 });
+      a.m += Number(fi.precio_unitario) * Number(it.cant);
+      a.c += Number(it.cant);
+    });
+    const precioProm = {};
+    Object.entries(acumPrecio).forEach(([k, v]) => { if (v.c > 0) precioProm[k] = v.m / v.c; });
     const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
       factDeItem[fi.rq_item_id] = factMap[fi.factura_id] || null;
@@ -2216,6 +2368,7 @@ export default function App() {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
+      precioProm,
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
       factorMap,
