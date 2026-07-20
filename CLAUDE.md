@@ -57,7 +57,9 @@ stock = recibido − salidas (no anuladas) ± préstamos netos (activos). Por al
 - `compras` (Lucía Arana) → Compras + Catálogo + Tablero
 - `residente.danaus` (Andrés Chino), `residente.maia` (Edwin Salas) → solo su vista; proyecto y nombre fijos (no puede pedir para otra obra)
 - `almacen.luz` (Brayan Huamán), `almacen.maia` (Anton Taucca) → solo su almacén, sin selector de proyecto
-- `pagos` (área de pagos) → solo vista Pagos: ejecuta el pago de facturas (banco, N° operación, fecha); no edita datos comerciales
+- `pagos` (área de pagos) → solo vista Pagos: ejecuta el pago de facturas por medio (Transferencia/Cheque/Tarjeta; banco fijo según la obra) + reposiciones de caja chica; no edita datos comerciales
+- `administracion` (Mónica Del Castillo) → solo vista Rendiciones: aprueba/observa la rendición diaria de caja chica
+- Caja chica (fondo fijo por obra, tabla `cajas_chicas`): Frank (rol `compras`, usuario propio) compra con efectivo; la factura en efectivo nace Pagada contra la rendición del día (única por obra+fecha); administración aprueba; Pagos repone el fondo desde la cuenta de la obra. Bancos por obra en `proyectos.banco` (datos de prueba hasta tener los reales).
 
 ### Tablero
 14 KPIs: RQs, ítems, % urgentes, entregados, llegaron tarde, rechazados, anulados, incompletos, facturado S/, préstamos activos, holgura promedio, entrega a tiempo %, uso incorrecto %, falta de pago más antiguo. KPIs clicables Pago Crédito / Pago Falta filtran el consolidado. Tablas: **Planificación por residente** (% urgentes con semáforo: verde <25%, amarillo <50%, rojo ≥50% — mide quién planifica y quién apaga incendios) y **Resumen por proyecto** (RQs, % urg, facturado, holgura, uso incorrecto, préstamos). Descarga CSV: botón global + botón por proyecto (25 columnas, BOM UTF-8, abre directo en Excel).

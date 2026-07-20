@@ -13,16 +13,18 @@ let ALMACENEROS = {};
 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
-const BANCOS = ['BCP', 'BBVA', 'Interbank', 'Scotiabank', 'BanBif', 'Banco de la Nación', 'Otro'];
 
 const TABS_POR_ROL = {
-  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['tab', 'Tablero']],
-  compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['tab', 'Tablero']],
+  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
+  compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
   residente: [['res', 'Mis requerimientos']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos']],
+  administracion: [['ren', 'Rendiciones']],
 };
-const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag' };
+const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren' };
+const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta'];
+const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher' };
 
 const canalClases = {
   URGENTE: 'bg-red-950 text-red-400 border-red-800',
@@ -788,7 +790,7 @@ function Compras({ user, db, api }) {
 
   const abrirFactura = i => {
     if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
-    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {} } });
+    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {}, efectivo: false } });
   };
   const cerrarFactura = id => { const f2 = { ...fFact }; delete f2[id]; setFFact(f2); };
 
@@ -822,7 +824,8 @@ function Compras({ user, db, api }) {
     }
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
-      monto: Number(f.monto), forma: f.forma, proyecto: i.proyecto,
+      monto: Number(f.monto), forma: f.efectivo ? 'Contado' : f.forma, proyecto: i.proyecto,
+      efectivo: !!f.efectivo,
       lineas: cubiertos.map(x => ({ id: x.id, precio: Number(f.precios[x.id]) })),
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
@@ -999,8 +1002,14 @@ function Compras({ user, db, api }) {
                           {ff.ruc && /^\d{11}$/.test(ff.ruc) && !proveedores.some(p => p[0] === ff.ruc) && <div className="text-[9px] text-sky-400 mb-1">Proveedor nuevo: se agregará al maestro.</div>}
                           <FechaInput value={ff.fecha} onChange={e => setFF(i.id, 'fecha', e.target.value)} className={`w-full mb-1 ${inputCls}`} />
                           <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} placeholder="Monto TOTAL S/ (inc. IGV)" className={`w-full mb-1 ${inputCls} font-mono`} />
-                          <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} className={`w-full mb-1 ${inputCls}`}>
-                            {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
+                          {!ff.efectivo && (
+                            <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} className={`w-full mb-1 ${inputCls}`}>
+                              {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
+                          )}
+                          <label className="flex items-start gap-1.5 mb-1 cursor-pointer text-[10px] text-slate-300">
+                            <input type="checkbox" checked={!!ff.efectivo} onChange={e => setFF(i.id, 'efectivo', e.target.checked)} className="mt-0.5" />
+                            <span>Ya pagada en <b>EFECTIVO</b> (caja chica de hoy) — queda Pagada y entra a la rendición del día</span>
+                          </label>
                           {candidatosExtra.length > 0 && (
                             <div className="mb-1.5 border-t border-slate-700 pt-1.5">
                               <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">¿Esta factura cubre otros ítems? ({i.proyecto})</div>
@@ -1448,15 +1457,21 @@ function Almacen({ user, db, api }) {
 }
 
 function Pagos({ user, db, api }) {
-  const { facturas } = db;
+  const { facturas, rendiciones, bancoDe } = db;
   const puede = user.rol === 'pagos';
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
+  const [fRep, setFRep] = useState({});
   const [aviso, setAviso] = useState('');
 
   const fs = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
   const pend = fs.filter(f => f.estadoPago !== 'Pagada');
   const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
+  // reposiciones de caja chica: rendiciones aprobadas aún sin reponer
+  const porReponer = rendiciones
+    .filter(r => r.estado === 'Aprobada' && !r.repOp)
+    .filter(r => proy === 'TODOS' || r.proyecto === proy)
+    .map(r => ({ ...r, monto: facturas.filter(f => f.rendicionId === r.id).reduce((a, f) => a + f.monto, 0) }));
 
   // vencimiento: fecha de factura + días de crédito (contado vence el mismo día)
   const vencimiento = f => {
@@ -1465,16 +1480,27 @@ function Pagos({ user, db, api }) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const getP = id => fPago[id] || { banco: '', op: '', fecha: HOY_ISO };
+  const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO };
   const setP = (id, k, v) => setFPago({ ...fPago, [id]: { ...getP(id), [k]: v } });
 
   const pagar = async f => {
     const p = getP(f.id);
-    if (!p.banco || !p.op.trim() || !p.fecha) return;
-    const r = await api.pagarFactura(f.id, { banco: p.banco, op: p.op.trim(), fecha: p.fecha });
+    const banco = (bancoDe[f.proyecto] || {}).banco || '';
+    if (!p.medio || !p.op.trim() || !p.fecha || !banco) return;
+    const r = await api.pagarFactura(f.id, { medio: p.medio, banco, op: p.op.trim(), fecha: p.fecha });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fPago }; delete f2[f.id]; setFPago(f2);
-    setAviso(`Factura ${f.serie} pagada (${p.banco} · op. ${p.op}).`);
+    setAviso(`Factura ${f.serie} pagada (${p.medio} · ${banco} · ${p.op}).`);
+    setTimeout(() => setAviso(''), 5000);
+  };
+
+  const reponer = async r => {
+    const p = fRep[r.id] || {};
+    if (!(p.op || '').trim() || !(p.fecha || HOY_ISO)) return;
+    const res = await api.reponerRendicion(r.id, { op: p.op.trim(), fecha: p.fecha || HOY_ISO });
+    if (res.error) { setAviso('⚠ ' + res.error); setTimeout(() => setAviso(''), 7000); return; }
+    const f2 = { ...fRep }; delete f2[r.id]; setFRep(f2);
+    setAviso(`Reposición de caja chica de ${r.proyecto} registrada (S/ ${r.monto.toFixed(2)}).`);
     setTimeout(() => setAviso(''), 5000);
   };
 
@@ -1493,13 +1519,15 @@ function Pagos({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Banco', 'N° operación', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Medio', 'Banco (según obra)', 'N°', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {pend.map(f => {
                   const p = getP(f.id);
                   const venc = vencimiento(f);
                   const atrasada = diasHoy(venc) < 0;
-                  const listo = puede && p.banco && p.op.trim() && p.fecha;
+                  const bancoObra = (bancoDe[f.proyecto] || {}).banco || '—';
+                  const cuentaObra = (bancoDe[f.proyecto] || {}).cuenta || '';
+                  const listo = puede && p.medio && p.op.trim() && p.fecha && bancoObra !== '—';
                   return (
                     <tr key={f.n} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
@@ -1512,10 +1540,12 @@ function Pagos({ user, db, api }) {
                       <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.forma}</td>
                       <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${atrasada ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(venc)}{atrasada ? ` · ${-diasHoy(venc)}d atraso` : ''}</td>
                       <td className="py-2 px-1.5">
-                        <select value={p.banco} onChange={e => setP(f.id, 'banco', e.target.value)} disabled={!puede} className={inputCls}>
-                          <option value="">— Banco —</option>
-                          {BANCOS.map(b => <option key={b}>{b}</option>)}</select></td>
-                      <td className="py-2 px-1.5"><input value={p.op} onChange={e => setP(f.id, 'op', e.target.value)} disabled={!puede} placeholder="N° operación" className={`w-24 ${inputCls} font-mono`} /></td>
+                        <select value={p.medio} onChange={e => setP(f.id, 'medio', e.target.value)} disabled={!puede} className={inputCls}>
+                          {MEDIOS_PAGO.map(b => <option key={b}>{b}</option>)}</select></td>
+                      <td className="py-2 px-1.5 whitespace-nowrap">
+                        <span className="text-slate-300">{bancoObra}</span>
+                        {cuentaObra && <div className="text-[9px] font-mono text-slate-500">{cuentaObra}</div>}</td>
+                      <td className="py-2 px-1.5"><input value={p.op} onChange={e => setP(f.id, 'op', e.target.value)} disabled={!puede} placeholder={ETIQUETA_NRO[p.medio] || 'N°'} className={`w-24 ${inputCls} font-mono`} /></td>
                       <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setP(f.id, 'fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5"><button onClick={() => pagar(f)} disabled={!listo} className={btnOk(!!listo)}>Registrar pago</button></td>
                     </tr>
@@ -1528,6 +1558,40 @@ function Pagos({ user, db, api }) {
         <div className="mt-3 text-slate-500 text-[11px]">Cada obra paga desde su propia cuenta: filtra por proyecto para trabajar banco por banco. Una factura pagada queda congelada (no se puede editar ni volver a pagar).</div>
       </div>
 
+      {porReponer.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+            Reposiciones de caja chica · {porReponer.length} · rendiciones aprobadas por administración</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Obra', 'Fecha rendición', 'Responsable', 'Monto a reponer S/', 'Banco (según obra)', 'N° operación del retiro', 'F. reposición', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {porReponer.map(r => {
+                  const p = fRep[r.id] || { op: '', fecha: HOY_ISO };
+                  const setR = (k, v) => setFRep({ ...fRep, [r.id]: { ...p, [k]: v } });
+                  const bancoObra = (bancoDe[r.proyecto] || {}).banco || '—';
+                  const listo = puede && (p.op || '').trim();
+                  return (
+                    <tr key={r.id} className="border-b border-slate-800 align-top">
+                      <td className="py-2 px-1.5 text-slate-200 whitespace-nowrap">{r.proyecto}</td>
+                      <td className="py-2 px-1.5 text-slate-400">{fmt(r.fecha)}</td>
+                      <td className="py-2 px-1.5 text-slate-400">{r.responsable}</td>
+                      <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 text-right">{r.monto.toFixed(2)}</td>
+                      <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{bancoObra}
+                        {(bancoDe[r.proyecto] || {}).cuenta && <div className="text-[9px] font-mono text-slate-500">{bancoDe[r.proyecto].cuenta}</div>}</td>
+                      <td className="py-2 px-1.5"><input value={p.op} onChange={e => setR('op', e.target.value)} disabled={!puede} placeholder="N° operación" className={`w-24 ${inputCls} font-mono`} /></td>
+                      <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setR('fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
+                      <td className="py-2 px-1.5"><button onClick={() => reponer(r)} disabled={!listo} className={btnOk(!!listo)}>Registrar reposición</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 text-slate-500 text-[11px]">La reposición completa el fondo fijo para que la caja arranque llena a la mañana siguiente. Sale de la cuenta de la obra.</div>
+        </div>
+      )}
+
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
           Facturas pagadas · {pagadas.length}{pagadas.length > 0 ? ` · S/ ${pagadas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
@@ -1536,7 +1600,7 @@ function Pagos({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['N° Factura', 'Proveedor', 'Proyecto', 'Monto S/', 'Banco', 'N° operación', 'F. pago', 'Pagó'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['N° Factura', 'Proveedor', 'Proyecto', 'Monto S/', 'Medio', 'Banco', 'N°', 'F. pago', 'Pagó'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {pagadas.map(f => (
                   <tr key={f.n} className="border-b border-slate-800">
@@ -1544,8 +1608,10 @@ function Pagos({ user, db, api }) {
                     <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                     <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
-                    <td className="py-2 px-1.5 text-slate-300">{f.banco}</td>
-                    <td className="py-2 px-1.5 font-mono text-slate-300">{f.numOp}</td>
+                    <td className="py-2 px-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${f.medio === 'Efectivo' ? 'bg-yellow-950 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>{f.medio || '—'}</span></td>
+                    <td className="py-2 px-1.5 text-slate-300">{f.banco || '—'}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-300">{f.numOp || '—'}</td>
                     <td className="py-2 px-1.5 text-slate-400">{fmt(f.fechaPago)}</td>
                     <td className="py-2 px-1.5 text-slate-500 text-[10px]">{f.pagadoPor}</td>
                   </tr>
@@ -1554,6 +1620,94 @@ function Pagos({ user, db, api }) {
             </table>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function Rendiciones({ user, db, api }) {
+  const { rendiciones, facturas, cajas, bancoDe } = db;
+  const puede = user.rol === 'administracion';
+  const [proy, setProy] = useState('TODOS');
+  const [obs, setObs] = useState({});
+  const [aviso, setAvisoRaw] = useState('');
+  const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
+
+  const lista = rendiciones
+    .filter(r => proy === 'TODOS' || r.proyecto === proy)
+    .map(r => {
+      const fs = facturas.filter(f => f.rendicionId === r.id);
+      const total = fs.reduce((a, f) => a + f.monto, 0);
+      return { ...r, facturas: fs, total, sobrante: r.montoFondo - total };
+    })
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+
+  const resolver = async (r, estado) => {
+    const observacion = (obs[r.id] || '').trim();
+    if (estado === 'Observada' && !observacion) { setAviso('⚠ Para observar una rendición escribe el motivo.'); return; }
+    const res = await api.resolverRendicion(r.id, { estado, observacion });
+    if (res.error) { setAviso('⚠ ' + res.error); return; }
+    const o2 = { ...obs }; delete o2[r.id]; setObs(o2);
+    setAviso(estado === 'Aprobada'
+      ? `Rendición de ${r.proyecto} (${fmt(r.fecha)}) aprobada. La reposición de S/ ${r.total.toFixed(2)} pasó a la cola del área de Pagos.`
+      : `Rendición de ${r.proyecto} observada; coordina la corrección con ${r.responsable}.`);
+  };
+
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Rendiciones de caja chica · fondo fijo diario por obra</div>
+          <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
+        </div>
+        {!puede && <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: las rendiciones las aprueba administración.</div>}
+        <Aviso msg={aviso} />
+        {lista.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Sin rendiciones{proy !== 'TODOS' ? ' en ' + proy : ''}. Se crean solas cuando Compras registra la primera factura en efectivo del día.</div>
+        ) : lista.map(r => (
+          <div key={r.id} className="mb-3 border border-slate-800 rounded p-3">
+            <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+              <b className="text-sm text-slate-100">{r.proyecto}</b>
+              <span className="text-slate-500 text-[11px]">{fmt(r.fecha)} · rinde: {r.responsable}</span>
+              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${r.estado === 'Aprobada' ? 'bg-green-950 text-green-400' : r.estado === 'Observada' ? 'bg-red-950 text-red-400' : 'bg-yellow-950 text-yellow-400'}`}>{r.estado}</span>
+              <span className="ml-auto text-[11px] font-mono text-slate-300">
+                Fondo S/ {r.montoFondo.toFixed(2)} · Rendido <b className="text-yellow-400">S/ {r.total.toFixed(2)}</b> · Sobrante teórico S/ {r.sobrante.toFixed(2)}</span>
+            </div>
+            {r.facturas.length > 0 && (
+              <table className="w-full text-xs mb-2">
+                <thead><tr>{['Factura', 'Proveedor', 'Ítems', 'Monto S/'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {r.facturas.map(f => (
+                    <tr key={f.n} className="border-b border-slate-800">
+                      <td className="py-1.5 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                      <td className="py-1.5 px-1.5 text-slate-300">{f.prov}</td>
+                      <td className="py-1.5 px-1.5 text-slate-400 text-[10px]">{f.items.map(x => x.desc).join(' · ')}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {r.estado === 'Abierta' && puede && (
+              <div className="flex gap-2 items-start flex-wrap">
+                <button onClick={() => resolver(r, 'Aprobada')} className={btnVerde}>Aprobar rendición</button>
+                <input value={obs[r.id] || ''} onChange={e => setObs({ ...obs, [r.id]: e.target.value })}
+                  placeholder="Motivo de observación (obligatorio para observar)" className={`${inputCls}`} style={{ minWidth: '260px' }} />
+                <button onClick={() => resolver(r, 'Observada')} className={btnRojo}>Observar</button>
+              </div>
+            )}
+            {r.estado === 'Observada' && <div className="text-red-400 text-[11px]">Observada: {r.observacion} ({r.aprobadoPor})</div>}
+            {r.estado === 'Aprobada' && (
+              <div className="text-[11px] text-slate-500">
+                Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)} ·
+                {r.repOp
+                  ? ` repuesta: ${(bancoDe[r.proyecto] || {}).banco || ''} op. ${r.repOp} (${fmt(r.repFecha)}, ${r.repuestoPor})`
+                  : ' reposición pendiente en la cola del área de Pagos'}
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="mt-3 text-slate-500 text-[11px]">Fondo fijo: cada obra arranca el día con su monto completo (config en tabla cajas_chicas{Object.keys(cajas).length ? ` · ${Object.entries(cajas).map(([o, m]) => `${o}: S/ ${m}`).join(' · ')}` : ''}). Las facturas en efectivo del día se rinden aquí; administración aprueba y Pagos repone.</div>
       </div>
     </div>
   );
@@ -1792,15 +1946,17 @@ export default function App() {
       fetchAll(() => supabase.from('solicitudes_material').select('*').order('numero')),
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
       fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
+      fetchAll(() => supabase.from('cajas_chicas').select('*').order('proyecto')),
+      fetchAll(() => supabase.from('rendiciones').select('*').order('numero')),
     ];
-    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR] = await Promise.all(q);
-    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR].find(r => r.error);
+    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR] = await Promise.all(q);
+    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
     const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
     const famMap = {}; fams.forEach(f => { famMap[f.iu] = f.nombre; });
-    const nomProy = {}, codProy = {};
-    prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; });
+    const nomProy = {}, codProy = {}, bancoDe = {};
+    prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; bancoDe[p.nombre] = { banco: p.banco || '', cuenta: p.nro_cuenta || '' }; });
     PROYECTOS = prj.filter(p => p.activo).map(p => [p.codigo, p.nombre]);
     ALMACENEROS = {};
     usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { ALMACENEROS[nomProy[u.proyecto_asignado]] = u.nombre; });
@@ -1862,8 +2018,20 @@ export default function App() {
       proyecto: nomProy[f.proyecto] || f.proyecto,
       registradoPor: usrMap[f.registrado_por] ? usrMap[f.registrado_por].nombre : '',
       estadoPago: f.estado_pago || 'Pendiente', banco: f.banco || '', numOp: f.numero_operacion || '',
+      medio: f.medio_pago || '', rendicionId: f.rendicion_id || null,
       fechaPago: f.fecha_pago || '', pagadoPor: usrMap[f.pagado_por] ? usrMap[f.pagado_por].nombre : '',
       items: (itemsDeFactura[f.id] || []).map(id => ({ rq: rqNumDeItem[id], desc: descDeItem[id] })),
+    }));
+
+    const cajas = {};
+    cajR.data.forEach(c => { cajas[nomProy[c.proyecto] || c.proyecto] = Number(c.monto_fondo); });
+    const rendiciones = renR.data.map(r => ({
+      id: r.id, n: r.numero, proyecto: nomProy[r.proyecto] || r.proyecto, fecha: r.fecha,
+      responsable: usrMap[r.responsable_id] ? usrMap[r.responsable_id].nombre : '',
+      montoFondo: Number(r.monto_fondo), estado: r.estado, observacion: r.observacion || '',
+      aprobadoPor: usrMap[r.aprobado_por] ? usrMap[r.aprobado_por].nombre : '',
+      fechaAprobacion: r.fecha_aprobacion || '', repOp: r.reposicion_operacion || '',
+      repFecha: r.reposicion_fecha || '', repuestoPor: usrMap[r.repuesto_por] ? usrMap[r.repuesto_por].nombre : '',
     }));
 
     const salidas = salR.data.map(s => ({
@@ -1902,7 +2070,7 @@ export default function App() {
     }));
 
     const nuevo = {
-      rqs, facturas, salidas, prestamos, solicitudes, stockInicial,
+      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
@@ -1963,26 +2131,66 @@ export default function App() {
         return { numero: rq.numero };
       }),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
-      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, lineas }) => wrap(async () => {
+      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, efectivo, lineas }) => wrap(async () => {
         const existe = dbRef.current.proveedores.some(p => p[0] === ruc);
         if (!existe) {
           const { error: eP } = await supabase.from('proveedores').insert({ ruc, razon_social: prov });
           if (eP && eP.code !== '23505') return { error: eP };
         }
         const u = (await supabase.auth.getUser()).data.user;
+
+        // Efectivo: la factura nace Pagada contra la rendición del día de la obra
+        let rendicionId = null;
+        if (efectivo) {
+          const proyCod = cod(proyecto);
+          let { data: ren } = await supabase.from('rendiciones').select('id,estado')
+            .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle();
+          if (ren && ren.estado !== 'Abierta') return { error: { message: `La rendición de hoy de ${proyecto} ya fue ${ren.estado.toLowerCase()}; coordina con administración.` } };
+          if (!ren) {
+            const fondo = dbRef.current.cajas[proyecto] || 2000;
+            const ins = await supabase.from('rendiciones').insert({
+              proyecto: proyCod, fecha: HOY_ISO, responsable_id: u.id, monto_fondo: fondo,
+            }).select().single();
+            if (ins.error && ins.error.code === '23505') {
+              // otro registro la creó en paralelo: reintentar lectura
+              ({ data: ren } = await supabase.from('rendiciones').select('id,estado')
+                .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle());
+            } else if (ins.error) return { error: ins.error };
+            else ren = ins.data;
+          }
+          rendicionId = ren.id;
+        }
+
         const { data: fact, error } = await supabase.from('facturas').insert({
           serie, proveedor_ruc: ruc, fecha, monto, forma_pago: forma,
           proyecto: cod(proyecto), registrado_por: u.id,
+          ...(efectivo ? {
+            estado_pago: 'Pagada', medio_pago: 'Efectivo', fecha_pago: HOY_ISO,
+            pagado_por: u.id, rendicion_id: rendicionId,
+          } : {}),
         }).select().single();
         if (error) return { error: error.code === '23505' ? { message: `La factura ${serie} de ese RUC ya está registrada.` } : error };
         const { error: e2 } = await supabase.from('factura_items').insert(lineas.map(l => ({ factura_id: fact.id, rq_item_id: l.id, precio_unitario: l.precio })));
         if (e2) return { error: e2 };
         return {};
       }),
-      pagarFactura: (id, { banco, op, fecha }) => wrap(async () => {
+      pagarFactura: (id, { medio, banco, op, fecha }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('facturas').update({
-          estado_pago: 'Pagada', banco, numero_operacion: op, fecha_pago: fecha, pagado_por: u.id,
+          estado_pago: 'Pagada', medio_pago: medio, banco, numero_operacion: op,
+          fecha_pago: fecha, pagado_por: u.id,
+        }).eq('id', id);
+      }),
+      resolverRendicion: (id, { estado, observacion }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('rendiciones').update({
+          estado, observacion: observacion || null, aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
+        }).eq('id', id);
+      }),
+      reponerRendicion: (id, { op, fecha }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('rendiciones').update({
+          reposicion_operacion: op, reposicion_fecha: fecha, repuesto_por: u.id,
         }).eq('id', id);
       }),
       recibir: (item, rec, obs, cad) => wrap(async () => {
@@ -2080,6 +2288,7 @@ export default function App() {
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
         {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
+        {tab === 'ren' && <Rendiciones user={user} db={db} api={api} />}
         {tab === 'tab' && <Tablero db={db} />}
       </div>
     </div>
