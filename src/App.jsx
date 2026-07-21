@@ -509,8 +509,17 @@ function Residente({ user, db, api }) {
   const [verArchivados, setVerArchivados] = useState(false);
   const rqCerrado = r => r.items.length > 0 &&
     r.items.every(i => i.decision === 'Rechazado' || i.decision === 'Anulado' || i.estado === 'Entregado');
-  const rqsActivos = misRqs.filter(r => !rqCerrado(r));
-  const rqsArchivados = misRqs.filter(rqCerrado);
+  // Orden a elección del residente: N° de RQ o fecha necesitada (lo más próximo primero)
+  const [ordenRqs, setOrdenRqs] = useState('num');
+  const fechaNecDe = r => r.items.reduce((m, i) => (i.fecha && (!m || i.fecha < m) ? i.fecha : m), '');
+  const ordenar = arr => ordenRqs === 'fecha'
+    ? [...arr].sort((a, b) => {
+        const fa = fechaNecDe(a) || '9999', fb = fechaNecDe(b) || '9999';
+        return fa < fb ? -1 : fa > fb ? 1 : a.n - b.n;
+      })
+    : arr;
+  const rqsActivos = ordenar(misRqs.filter(r => !rqCerrado(r)));
+  const rqsArchivados = ordenar(misRqs.filter(rqCerrado));
   const mostrados = [...rqsActivos, ...(verArchivados ? rqsArchivados : [])];
 
   return (
@@ -657,7 +666,17 @@ function Residente({ user, db, api }) {
       )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Mis requerimientos · estado (solo lectura — lo gestiona Compras)</div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Mis requerimientos · estado (solo lectura — lo gestiona Compras)</div>
+          <div className="ml-auto flex items-center gap-1">
+            <span className="text-[9px] font-bold uppercase text-slate-500">Ordenar por:</span>
+            {[['num', 'N° RQ'], ['fecha', 'Fecha necesitada']].map(([k, l]) => (
+              <button key={k} onClick={() => setOrdenRqs(k)}
+                className={`px-2 py-1 rounded text-[9px] font-bold uppercase border ${ordenRqs === k ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
+                {l}</button>
+            ))}
+          </div>
+        </div>
         {misRqs.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Aún no has enviado requerimientos.</div>
         ) : mostrados.length === 0 ? (
