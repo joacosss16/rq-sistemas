@@ -1096,6 +1096,7 @@ function Compras({ user, db, api, modo }) {
   const [triage, setTriage] = useState(null);
   const [busca, setBusca] = useState('');
   const [confAprRq, setConfAprRq] = useState(null);
+  const [verArch, setVerArch] = useState(false);
 
   const updItem = async (i, patch, okMsg) => {
     const r = await api.updItem(i.id, patch);
@@ -1130,10 +1131,19 @@ function Compras({ user, db, api, modo }) {
     const texto = `${i.desc} ${i.cod} rq-${String(i.rq).padStart(3, '0')} ${i.rq} ${i.residente} ${i.proyecto}`.toLowerCase();
     return q.split(/\s+/).every(p => texto.includes(p));
   };
-  const flat = flatAbierto
-    .filter(i => !triage || esTriage[triage](i))
-    .filter(matchBusca)
-    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
+  const ordenar = arr => [...arr].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
+  // Archivados: ítems ya cerrados (Entregado + Pagado). Salen de la vista activa
+  // igual que en el residente; se ven bajo demanda con el botón.
+  const flatArchivado = flatBase
+    .filter(i => i.estado === 'Entregado' && i.pago === 'Pagado')
+    .filter(i => proy === 'TODOS' || i.proyecto === proy)
+    .filter(i => !facturarSolo || i.decision === 'Aprobado');
+  const flatActivos = ordenar(flatAbierto.filter(i => !triage || esTriage[triage](i)).filter(matchBusca));
+  const archMostrados = verArch ? ordenar(flatArchivado.filter(matchBusca)) : [];
+  const flat = [
+    ...flatActivos.map(i => ({ ...i, _arch: false })),
+    ...archMostrados.map(i => ({ ...i, _arch: true })),
+  ];
 
   const enviarRechazo = async i => {
     const motivo = (rechazo[i.id] || '').trim();
@@ -1302,6 +1312,9 @@ function Compras({ user, db, api, modo }) {
         })}
         <input value={busca} onChange={e => setBusca(e.target.value)}
           placeholder="Buscar material, RQ, residente…" className={`ml-auto w-56 ${inputCls}`} />
+        <button onClick={() => setVerArch(v => !v)}
+          className={`px-2.5 py-1.5 rounded text-[10px] font-bold uppercase border ${verArch ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
+          📁 {verArch ? '✕ Ocultar' : `Archivados · ${flatArchivado.length}`}</button>
       </div>
       <Aviso msg={aviso} />
       {flat.length === 0 && <div className="text-center py-6 text-slate-500 text-sm">
@@ -1311,7 +1324,7 @@ function Compras({ user, db, api, modo }) {
         <table className="w-full text-xs">
           <thead><tr>{['RQ', 'Proyecto', 'Nivel', 'Canal', 'Residente', 'Descripción', 'Cant', 'Necesitada', 'Decisión', 'Estado', 'Pago', 'Fecha entrega', 'Llegó en', 'Holgura', 'Recojo saldo', 'Entrega saldo', 'Saldo en', '¿Comunicó residente?', 'Destino saldo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
           <tbody>
-            {flat.map(i => {
+            {flat.map((i, idx) => {
               const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : null;
               const holg = i.fechaEntrega && i.fecha ? dias(i.fecha, i.fechaEntrega) : null;
               const saldoDias = i.fechaEntregaSaldo && i.fechaEntrega ? dias(i.fechaEntregaSaldo, i.fechaEntrega) : null;
@@ -1328,9 +1341,17 @@ function Compras({ user, db, api, modo }) {
               const candidatosExtra = enFact ? flatBase.filter(x => x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && x.pago !== 'Pagado') : [];
               const rqDe = rqMap[i.rq];
               const pdfListo = rqDe.items.length > 0 && rqDe.items.every(x => x.decision !== 'Pendiente') && rqDe.items.some(x => x.decision === 'Aprobado');
+              const esPrimerArch = i._arch && (idx === 0 || !flat[idx - 1]._arch);
               return (
-                <tr key={i.id} className="border-b border-slate-800 align-top">
+                <Fragment key={i.id}>
+                {esPrimerArch && (
+                  <tr><td colSpan={20} className="pt-4 pb-1">
+                    <span className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">📁 Archivados · {archMostrados.length} · entregados y pagados (cerrados)</span>
+                  </td></tr>
+                )}
+                <tr className={`border-b border-slate-800 align-top ${i._arch ? 'opacity-60' : ''}`}>
                   <td className="py-2 px-1.5 whitespace-nowrap">
+                    {i._arch && <span className="text-slate-500 text-[10px] mr-1">📁</span>}
                     {pdfListo ? (
                       <>
                         <button onClick={() => imprimirRQ(rqDe)} title="Ver PDF del requerimiento (solo ítems aprobados)"
@@ -1495,7 +1516,7 @@ function Compras({ user, db, api, modo }) {
                       )}
                     </div>
                   ) : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5">{post ? (facturarSolo ? <span className="text-slate-400">{fmt(i.fechaEntrega)}</span> : <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} />) : <span className="text-slate-600">—</span>}</td>
+                  <td className="py-2 px-1.5">{post ? (facturarSolo || i._arch ? <span className="text-slate-400">{fmt(i.fechaEntrega)}</span> : <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} />) : <span className="text-slate-600">—</span>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{llego !== null ? llego + 'd' : '—'}</td>
                   <td className={`py-2 px-1.5 font-mono ${holg === null ? 'text-slate-500' : holg < 0 ? 'text-red-400' : 'text-green-400'}`}>{holg !== null ? holg + 'd' : '—'}</td>
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? <FechaInput value={i.fechaRecojoSaldo} onChange={e => updItem(i, { fecha_recojo_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? fmt(i.fechaRecojoSaldo) : '—'}</span>}</td>
@@ -1505,8 +1526,9 @@ function Compras({ user, db, api, modo }) {
                     <select value={i.comunicoResidente} onChange={e => updItem(i, { comunico_residente: e.target.value === 'Sí' ? true : e.target.value === 'No' ? false : null })} className={inputCls}>
                       {['—', 'Sí', 'No'].map(x => <option key={x}>{x}</option>)}</select>) : <span className="text-slate-600">{inc ? i.comunicoResidente : '—'}</span>}</td>
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? <input defaultValue={i.destinoSaldo} onBlur={e => { if (e.target.value !== i.destinoSaldo) updItem(i, { destino_saldo: e.target.value || null }); }} placeholder="Almacén de obra…" className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? (i.destinoSaldo || '—') : '—'}</span>}</td>
-                  <td className="py-2 px-1.5">{!facturarSolo && <AnularBox onConfirm={m => anularItem(i, m)} />}</td>
+                  <td className="py-2 px-1.5">{!facturarSolo && !i._arch && <AnularBox onConfirm={m => anularItem(i, m)} />}</td>
                 </tr>
+                </Fragment>
               );
             })}
           </tbody>
