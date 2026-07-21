@@ -2298,13 +2298,15 @@ function Tablero({ db }) {
     const sp = salidas.filter(s => !s.anulada && s.proyecto === p && s.uso !== 'Pendiente');
     return {
       p, rqs: rp.length,
-      urg: rp.length ? Math.round(rp.filter(r => r.canal === 'URGENTE').length / rp.length * 100) + '%' : '—',
+      urgPct: rp.length ? Math.round(rp.filter(r => r.canal === 'URGENTE').length / rp.length * 100) : null,
       fact: facturas.filter(f => f.proyecto === p).reduce((a, f) => a + f.monto, 0),
-      holg: hs.length ? (hs.reduce((a, b) => a + b, 0) / hs.length).toFixed(1) : '—',
-      incorr: sp.length ? Math.round(sp.filter(s => s.uso === 'Incorrecto').length / sp.length * 100) + '%' : '—',
+      holg: hs.length ? +(hs.reduce((a, b) => a + b, 0) / hs.length).toFixed(1) : null,
+      aTiempo: hs.length ? Math.round(hs.filter(h => h >= 0).length / hs.length * 100) : null,
+      incorrPct: sp.length ? Math.round(sp.filter(s => s.uso === 'Incorrecto').length / sp.length * 100) : null,
       pres: prestamos.filter(x => x.estado === 'Prestado' && x.origen === p).length,
     };
   }).filter(x => x.rqs > 0 || x.fact > 0 || x.pres > 0);
+  const maxFact = Math.max(1, ...porProyecto.map(x => x.fact));
 
   const kpis = [['RQs', rqsF.length], ['Ítems', flat.length], ['% Urgentes', pctUrg + '%'], ['Entregados', entregados], ['Llegaron tarde', tarde], ['Rechazados', flat.filter(i => i.decision === 'Rechazado').length], ['Anulados', flat.filter(i => i.decision === 'Anulado').length], ['Incompletos', flat.filter(i => i.estado === 'Incompleto').length], ['Facturado S/', factF.reduce((a, f) => a + f.monto, 0).toFixed(0)], ['Préstamos activos', presActivos], ['Holgura prom.', holgProm + (holgProm !== '—' ? 'd' : '')], ['Entrega a tiempo', aTiempo], ['Uso incorrecto', pctIncorrecto], ['Falta pago más antiguo', faltaMax]];
   const nCredito = flat.filter(i => i.pago === 'Crédito').length;
@@ -2358,24 +2360,30 @@ function Tablero({ db }) {
           </table>)}
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Resumen por proyecto</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Comparativo entre obras</div>
           {porProyecto.length === 0 ? <div className="text-slate-500 text-sm text-center py-4">Sin datos.</div> : (
+          <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['Proyecto', 'RQs', '% Urg', 'Facturado S/', 'Holgura prom', '% Uso incorr.', 'Prést. activos'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Obra', 'RQs', '% Urg', 'Facturado S/', 'Holgura prom', 'A tiempo', '% Uso incorr.', 'Prést. activos'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {porProyecto.map(x => (
                 <tr key={x.p} className="border-b border-slate-800">
                   <td className="py-2 px-1.5 text-slate-200">{x.p}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{x.rqs}</td>
-                  <td className="py-2 px-1.5 font-mono text-slate-300">{x.urg}</td>
-                  <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{x.fact.toFixed(2)}</td>
-                  <td className="py-2 px-1.5 font-mono text-slate-300">{x.holg}{x.holg !== '—' ? 'd' : ''}</td>
-                  <td className="py-2 px-1.5 font-mono text-slate-300">{x.incorr}</td>
+                  <td className={`py-2 px-1.5 font-mono font-bold ${x.urgPct === null ? 'text-slate-500' : x.urgPct >= 50 ? 'text-red-400' : x.urgPct >= 25 ? 'text-yellow-400' : 'text-green-400'}`}>{x.urgPct === null ? '—' : x.urgPct + '%'}</td>
+                  <td className="py-2 px-1.5 font-mono text-slate-200 text-right">
+                    {x.fact.toFixed(2)}
+                    <div className="h-1 bg-slate-800 rounded mt-1"><div className="h-1 bg-yellow-400 rounded" style={{ width: `${Math.round(x.fact / maxFact * 100)}%` }} /></div>
+                  </td>
+                  <td className={`py-2 px-1.5 font-mono ${x.holg === null ? 'text-slate-500' : x.holg < 0 ? 'text-red-400 font-bold' : 'text-green-400'}`}>{x.holg === null ? '—' : x.holg + 'd'}</td>
+                  <td className={`py-2 px-1.5 font-mono font-bold ${x.aTiempo === null ? 'text-slate-500' : x.aTiempo >= 80 ? 'text-green-400' : x.aTiempo >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{x.aTiempo === null ? '—' : x.aTiempo + '%'}</td>
+                  <td className={`py-2 px-1.5 font-mono ${x.incorrPct === null ? 'text-slate-500' : x.incorrPct === 0 ? 'text-green-400' : x.incorrPct <= 10 ? 'text-yellow-400' : 'text-red-400 font-bold'}`}>{x.incorrPct === null ? '—' : x.incorrPct + '%'}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{x.pres}</td>
                 </tr>
               ))}
             </tbody>
-          </table>)}
+          </table>
+          </div>)}
         </div>
       </div>
       )}
