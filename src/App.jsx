@@ -1067,13 +1067,16 @@ function Catalogo({ user, db, api }) {
 }
 
 function Compras({ user, db, api, modo }) {
-  const { rqs, facturas, proveedores } = db;
+  const { rqs, facturas, proveedores, ultimaCompra } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
   const [fFact, setFFact] = useState({});
+  const [triage, setTriage] = useState(null);
+  const [busca, setBusca] = useState('');
+  const [confAprRq, setConfAprRq] = useState(null);
 
   const updItem = async (i, patch, okMsg) => {
     const r = await api.updItem(i.id, patch);
@@ -1085,11 +1088,32 @@ function Compras({ user, db, api, modo }) {
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
   const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso })));
   // primero lo que se necesita antes (fecha necesitada ascendente)
-  const flat = flatBase
+  const flatAbierto = flatBase
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
     .filter(i => !(i.estado === 'Entregado' && i.pago === 'Pagado'))
     .filter(i => proy === 'TODOS' || i.proyecto === proy)
-    .filter(i => !facturarSolo || i.decision === 'Aprobado')
+    .filter(i => !facturarSolo || i.decision === 'Aprobado');
+  const esTriage = {
+    decidir: i => i.decision === 'Pendiente',
+    facturar: i => i.decision === 'Aprobado' && !i.factura,
+    camino: i => i.estado === 'En camino',
+    incompleto: i => i.estado === 'Incompleto',
+  };
+  const chips = [
+    !facturarSolo && ['decidir', 'Por decidir', 'text-yellow-400'],
+    ['facturar', 'Por facturar', 'text-sky-400'],
+    ['camino', 'En camino', 'text-green-400'],
+    ['incompleto', 'Incompletos', 'text-red-400'],
+  ].filter(Boolean);
+  const matchBusca = i => {
+    const q = busca.trim().toLowerCase();
+    if (!q) return true;
+    const texto = `${i.desc} ${i.cod} rq-${String(i.rq).padStart(3, '0')} ${i.rq} ${i.residente} ${i.proyecto}`.toLowerCase();
+    return q.split(/\s+/).every(p => texto.includes(p));
+  };
+  const flat = flatAbierto
+    .filter(i => !triage || esTriage[triage](i))
+    .filter(matchBusca)
     .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
 
   const enviarRechazo = async i => {
@@ -1103,6 +1127,27 @@ function Compras({ user, db, api, modo }) {
   const anularItem = (i, motivo) => {
     updItem(i, { decision: 'Anulado', anulacion: { motivo, por: user.nombre, fecha: HOY_ISO } },
       `Ítem "${i.desc}" anulado por ${user.nombre}. Queda registrado en el Tablero con motivo.`);
+  };
+
+  // Atajo: aprobar de un clic todos los pendientes de un RQ (con confirmación)
+  const aprobarRq = async rqNum => {
+    const pend = flatBase.filter(x => x.rq === rqNum && x.decision === 'Pendiente');
+    setConfAprRq(null);
+    for (const x of pend) {
+      const ok = await updItem(x, { decision: 'Aprobado' });
+      if (!ok) return;
+    }
+    setAviso(`${pend.length} ítem(s) del RQ-${String(rqNum).padStart(3, '0')} aprobados.`);
+    setTimeout(() => setAviso(''), 4000);
+  };
+
+  // Enter salta al siguiente campo dentro del formulario de factura
+  const enterSiguiente = e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const campos = [...e.currentTarget.closest('.form-factura').querySelectorAll('input:not([type=checkbox]):not([disabled]), select:not([disabled])')];
+    const idx = campos.indexOf(e.currentTarget);
+    if (idx >= 0 && idx < campos.length - 1) campos[idx + 1].focus();
   };
 
   const abrirFactura = i => {
@@ -1222,8 +1267,24 @@ function Compras({ user, db, api, modo }) {
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Gestión de compras · aprobación, estado y seguimiento</div>
         <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
       </div>
+      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+        {chips.map(([k, l, cls]) => {
+          const n = flatAbierto.filter(esTriage[k]).length;
+          const activo = triage === k;
+          return (
+            <button key={k} onClick={() => setTriage(activo ? null : k)}
+              className={`px-2.5 py-1.5 rounded text-[10px] font-bold uppercase border ${activo ? 'border-yellow-400 ring-1 ring-yellow-400 bg-slate-800' : 'border-slate-700 bg-slate-800 hover:border-slate-500'}`}>
+              <span className={`font-mono mr-1 ${cls}`}>{n}</span>
+              <span className="text-slate-300">{l}{activo ? ' ✕' : ''}</span>
+            </button>
+          );
+        })}
+        <input value={busca} onChange={e => setBusca(e.target.value)}
+          placeholder="Buscar material, RQ, residente…" className={`ml-auto w-56 ${inputCls}`} />
+      </div>
       <Aviso msg={aviso} />
-      {flat.length === 0 && <div className="text-center py-6 text-slate-500 text-sm">Sin requerimientos abiertos {proy !== 'TODOS' ? 'en ' + proy : ''}.</div>}
+      {flat.length === 0 && <div className="text-center py-6 text-slate-500 text-sm">
+        {triage || busca.trim() ? 'Nada que coincida con el filtro.' : `Sin requerimientos abiertos ${proy !== 'TODOS' ? 'en ' + proy : ''}.`}</div>}
       {flat.length > 0 && (
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -1270,9 +1331,22 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 text-slate-200">{fmt(i.fecha)}</td>
                   <td className="py-2 px-1.5">
                     {i.decision === 'Pendiente' && !enRechazo && (
-                      <div className="flex gap-1">
-                        <button onClick={() => updItem(i, { decision: 'Aprobado' })} className={btnVerde}>Aprobar</button>
-                        <button onClick={() => setRechazo({ ...rechazo, [i.id]: '' })} className={btnRojo}>Rechazar</button>
+                      <div>
+                        <div className="flex gap-1">
+                          <button onClick={() => updItem(i, { decision: 'Aprobado' })} className={btnVerde}>Aprobar</button>
+                          <button onClick={() => setRechazo({ ...rechazo, [i.id]: '' })} className={btnRojo}>Rechazar</button>
+                        </div>
+                        {rqDe.items.filter(x => x.decision === 'Pendiente').length > 1 && (
+                          confAprRq === i.rq ? (
+                            <button onClick={() => aprobarRq(i.rq)}
+                              className="mt-1 w-full px-2 py-1 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400 border border-green-700 hover:bg-green-900">
+                              ¿Confirmar? Aprueba {rqDe.items.filter(x => x.decision === 'Pendiente').length} ítems</button>
+                          ) : (
+                            <button onClick={() => { setConfAprRq(i.rq); setTimeout(() => setConfAprRq(c => c === i.rq ? null : c), 5000); }}
+                              className="mt-1 text-[9px] text-slate-500 underline decoration-dotted hover:text-green-400">
+                              ≡ Aprobar todo el RQ ({rqDe.items.filter(x => x.decision === 'Pendiente').length} pend.)</button>
+                          )
+                        )}
                       </div>
                     )}
                     {enRechazo && (
@@ -1306,21 +1380,28 @@ function Compras({ user, db, api, modo }) {
                           : <span className="text-slate-600">Sin factura</span>
                       )}
                       {enFact && (
-                        <div className="mt-1.5 w-56 bg-slate-950 border border-yellow-400 rounded p-2">
+                        <div className="form-factura mt-1.5 w-60 bg-slate-950 border border-yellow-400 rounded p-2">
                           <div className="flex items-center mb-1.5">
-                            <div className="text-[9px] font-bold text-yellow-400 uppercase">Datos de factura (obligatorios)</div>
+                            <div className="text-[9px] font-bold text-yellow-400 uppercase">Datos de factura (obligatorios) · Enter salta al siguiente</div>
                             <button onClick={() => cerrarFactura(i.id)} className="ml-auto text-[10px] text-slate-500 hover:text-slate-200">✕</button>
                           </div>
-                          <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} placeholder="N° factura: F001-000123" className={`w-full mb-1 ${inputCls} font-mono`} />
-                          <input list={`fprov-${i.id}`} value={ff.prov} onChange={e => setFF(i.id, 'prov', e.target.value)} placeholder="Proveedor (razón social)" className={`w-full mb-1 ${inputCls}`} />
+                          <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} onKeyDown={enterSiguiente}
+                            placeholder="N° factura: F001-000123" className={`w-full mb-1 ${pendCls(!!ff.serie.trim())} font-mono`} />
+                          <input list={`fprov-${i.id}`} value={ff.prov} onChange={e => setFF(i.id, 'prov', e.target.value)} onKeyDown={enterSiguiente}
+                            disabled={!ff.serie.trim()} placeholder="Proveedor (razón social)"
+                            className={`w-full mb-1 ${pendCls(!!ff.prov.trim())} ${!ff.serie.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           <datalist id={`fprov-${i.id}`}>{proveedores.map(p => <option key={p[0]} value={p[1]} />)}</datalist>
-                          <input value={ff.ruc} onChange={e => setFF(i.id, 'ruc', e.target.value)} placeholder="RUC (11 dígitos)" maxLength={11} className={`w-full mb-1 ${inputCls} font-mono`} />
+                          <input value={ff.ruc} onChange={e => setFF(i.id, 'ruc', e.target.value)} onKeyDown={enterSiguiente}
+                            disabled={!ff.prov.trim()} placeholder="RUC (11 dígitos)" maxLength={11}
+                            className={`w-full mb-1 ${pendCls(/^\d{11}$/.test(ff.ruc))} font-mono ${!ff.prov.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           {ff.ruc && !/^\d{11}$/.test(ff.ruc) && <div className="text-[9px] text-red-400 mb-1">RUC inválido</div>}
                           {ff.ruc && /^\d{11}$/.test(ff.ruc) && !proveedores.some(p => p[0] === ff.ruc) && <div className="text-[9px] text-sky-400 mb-1">Proveedor nuevo: se agregará al maestro.</div>}
-                          <FechaInput value={ff.fecha} onChange={e => setFF(i.id, 'fecha', e.target.value)} className={`w-full mb-1 ${inputCls}`} />
-                          <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} placeholder="Monto TOTAL S/ (inc. IGV)" className={`w-full mb-1 ${inputCls} font-mono`} />
+                          <FechaInput value={ff.fecha} onChange={e => setFF(i.id, 'fecha', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`} />
+                          <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} onKeyDown={enterSiguiente}
+                            disabled={!/^\d{11}$/.test(ff.ruc)} placeholder="Monto TOTAL S/ (inc. IGV)"
+                            className={`w-full mb-1 ${pendCls(Number(ff.monto) > 0)} font-mono ${!/^\d{11}$/.test(ff.ruc) ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           {!ff.efectivo && (
-                            <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} className={`w-full mb-1 ${inputCls}`}>
+                            <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
                               {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
                           )}
                           <label className="flex items-start gap-1.5 mb-1 cursor-pointer text-[10px] text-slate-300">
@@ -1342,15 +1423,24 @@ function Compras({ user, db, api, modo }) {
                           )}
                           <div className="mb-1.5 border-t border-slate-700 pt-1.5">
                             <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">Desglose: S/ por unidad de cada ítem (según factura)</div>
-                            {cubiertosFF.map(x => (
-                              <div key={x.id} className="flex items-center gap-1 mb-1">
-                                <span className="flex-1 text-[10px] text-slate-300 leading-tight">{x.desc.length > 26 ? x.desc.slice(0, 26) + '…' : x.desc} × {x.cant} {x.und}</span>
-                                <input type="number" min="0.01" step="any" value={ff.precios[x.id] || ''}
-                                  onChange={e => setFF(i.id, 'precios', { ...ff.precios, [x.id]: e.target.value })}
-                                  placeholder="S/ und" className={`w-16 ${inputCls} font-mono`} />
-                                <span className="text-[10px] font-mono text-slate-400 w-14 text-right">{((Number(ff.precios[x.id]) || 0) * x.cant).toFixed(2)}</span>
+                            {cubiertosFF.map(x => {
+                              const uc = ultimaCompra && ultimaCompra[x.cod];
+                              const precioIng = Number(ff.precios[x.id]) || 0;
+                              const subio = uc && precioIng > 0 && precioIng > uc.precio * 1.05;
+                              return (
+                              <div key={x.id} className="mb-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="flex-1 text-[10px] text-slate-300 leading-tight">{x.desc.length > 26 ? x.desc.slice(0, 26) + '…' : x.desc} × {x.cant} {x.und}</span>
+                                  <input type="number" min="0.01" step="any" value={ff.precios[x.id] || ''}
+                                    onChange={e => setFF(i.id, 'precios', { ...ff.precios, [x.id]: e.target.value })} onKeyDown={enterSiguiente}
+                                    placeholder="S/ und" className={`w-16 ${pendCls(precioIng > 0)} font-mono`} />
+                                  <span className="text-[10px] font-mono text-slate-400 w-14 text-right">{(precioIng * x.cant).toFixed(2)}</span>
+                                </div>
+                                {uc && <div className={`text-[9px] ${subio ? 'text-yellow-400' : 'text-slate-500'}`}>
+                                  últ. compra S/ {uc.precio.toFixed(2)} · {uc.prov.length > 18 ? uc.prov.slice(0, 18) + '…' : uc.prov} · {fmt(uc.fecha)}{subio ? ' · ▲ sube' : ''}</div>}
                               </div>
-                            ))}
+                              );
+                            })}
                             <div className={`text-[10px] font-mono text-right ${cuadra ? 'text-green-400' : 'text-red-400'}`}>
                               Desglosado S/ {sumaDesglose.toFixed(2)} de S/ {(Number(ff.monto) || 0).toFixed(2)}
                               {!cuadra && Number(ff.monto) > 0 ? ` · falta cuadrar S/ ${(Number(ff.monto) - sumaDesglose).toFixed(2)}` : ''}
@@ -2536,6 +2626,20 @@ export default function App() {
     });
     const precioProm = {};
     Object.entries(acumPrecio).forEach(([k, v]) => { if (v.c > 0) precioProm[k] = v.m / v.c; });
+    // Última compra por material (referencia anti-sobreprecio al facturar)
+    const ultimaCompra = {};
+    fitR.data.forEach(fi => {
+      if (fi.precio_unitario == null) return;
+      const it = itemById[fi.rq_item_id]; if (!it) return;
+      const fx = factMap[fi.factura_id]; if (!fx) return;
+      const u = ultimaCompra[it.codigo];
+      if (!u || fx.fecha > u.fecha || (fx.fecha === u.fecha && fx.numero > u.n)) {
+        ultimaCompra[it.codigo] = {
+          precio: Number(fi.precio_unitario), fecha: fx.fecha, n: fx.numero,
+          prov: provMap[fx.proveedor_ruc] ? provMap[fx.proveedor_ruc].razon_social : fx.proveedor_ruc,
+        };
+      }
+    });
     const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
       factDeItem[fi.rq_item_id] = factMap[fi.factura_id] || null;
@@ -2642,7 +2746,7 @@ export default function App() {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
-      precioProm,
+      precioProm, ultimaCompra,
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
       factorMap,
