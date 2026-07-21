@@ -346,13 +346,16 @@ function FiltroProyecto({ value, onChange, todos, excluir }) {
   );
 }
 
-function FechaInput({ value, onChange, className, min }) {
+function FechaInput({ value, onChange, className, min, disabled }) {
   return (
-    <input type="date" value={value} onChange={onChange} min={min}
+    <input type="date" value={value} onChange={onChange} min={min} disabled={disabled}
       onClick={e => { try { e.target.showPicker(); } catch (_) {} }}
-      className={`${className} cursor-pointer`} />
+      className={`${className} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`} />
   );
 }
+
+// Estilo de campo obligatorio pendiente: amarillo hasta que se llena
+const pendCls = ok => ok ? inputCls : `${inputCls.replace('border-slate-700', 'border-yellow-400')} bg-yellow-950`;
 
 // Búsqueda por palabras: ignora espacios extra y encuentra materiales que
 // contengan TODAS las palabras escritas, en cualquier orden.
@@ -365,14 +368,15 @@ function buscarEnCatalogo(catalogo, q, max) {
   }).slice(0, max);
 }
 
-function Buscador({ catalogo, onPick, stockDe }) {
+function Buscador({ catalogo, onPick, stockDe, deshabilitado }) {
   const [q, setQ] = useState('');
-  const res = useMemo(() => buscarEnCatalogo(catalogo, q, 8), [q, catalogo]);
+  const res = useMemo(() => buscarEnCatalogo(catalogo, deshabilitado ? '' : q, 8), [q, catalogo, deshabilitado]);
   return (
     <div className="relative">
       <label className={lblCls}>Buscar material en catálogo · {catalogo.length} materiales</label>
-      <input value={q} onChange={e => setQ(e.target.value)} placeholder="Escribe descripción o código…"
-        className={`w-full ${inputCls} py-2 text-sm`} />
+      <input value={q} onChange={e => setQ(e.target.value)} disabled={deshabilitado}
+        placeholder={deshabilitado ? 'Primero completa la cabecera: 1. partida → 2. nivel → 3. fecha (y justificación si es urgente)' : 'Escribe descripción o código…'}
+        className={`w-full ${inputCls} py-2 text-sm ${deshabilitado ? 'opacity-60 cursor-not-allowed' : ''}`} />
       {res.length > 0 && (
         <div className="absolute top-full left-0 right-0 bg-slate-950 border border-yellow-400 border-t-0 rounded-b max-h-56 overflow-y-auto z-50">
           {res.map(m => (
@@ -449,6 +453,14 @@ function Residente({ user, db, api }) {
   const upd = (id, k, v) => setItems(p => p.map(i => i.id === id ? { ...i, [k]: v } : i));
   const del = id => setItems(p => p.filter(i => i.id !== id));
 
+  // Orden de llenado exigido: 1) partida → 2) nivel → 3) fecha → (4) justificación si urgente.
+  // El campo pendiente se pinta amarillo y el siguiente queda bloqueado.
+  const partidaOk = cab.partida.trim().length > 0;
+  const nivelOk = !!cab.piso;
+  const fechaOk = !!cab.fecha && cab.fecha >= HOY_ISO;
+  const justOk = !urgente || !!just.trim();
+  const cabeceraLista = partidaOk && nivelOk && fechaOk && justOk;
+
   const cabOk = cab.residente.trim() && cab.almacen.trim() && cab.piso && cab.fecha && cab.fecha >= HOY_ISO;
   const itemsOk = items.length > 0 && items.every(i => Number(i.cant) > 0 && i.destino.trim());
   const hayFechaPasada = cab.fecha && cab.fecha < HOY_ISO;
@@ -499,18 +511,20 @@ function Residente({ user, db, api }) {
         <div className="grid md:grid-cols-3 gap-3 mb-3">
           <div><label className={lblCls}>Proyecto (asignado a tu usuario)</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{codIni} · {user.proyecto}</div></div>
-          <div><label className={lblCls}>Partida</label>
-            <input value={cab.partida} onChange={e => setC('partida', e.target.value)} className={`w-full ${inputCls}`} /></div>
+          <div><label className={lblCls}>1. Partida *</label>
+            <input value={cab.partida} onChange={e => setC('partida', e.target.value)} className={`w-full ${pendCls(partidaOk)}`} /></div>
           <div><label className={lblCls}>Residente de obra *</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
           <div><label className={lblCls}>Adm. de almacén *</label>
             <input value={cab.almacen} onChange={e => setC('almacen', e.target.value)} placeholder="Responsable" className={`w-full ${inputCls}`} /></div>
-          <div><label className={lblCls}>Nivel donde se utilizará *</label>
-            <select value={cab.piso} onChange={e => setC('piso', e.target.value)} className={`w-full ${inputCls}`}>
+          <div><label className={lblCls}>2. Nivel donde se utilizará *</label>
+            <select value={cab.piso} onChange={e => setC('piso', e.target.value)} disabled={!partidaOk}
+              className={`w-full ${pendCls(nivelOk)} ${!partidaOk ? 'opacity-60 cursor-not-allowed' : ''}`}>
               <option value="">— Elegir nivel —</option>
               {NIVELES.map(p => <option key={p}>{p}</option>)}</select></div>
-          <div><label className={lblCls}>Fecha necesitada (todo el RQ) *</label>
-            <FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setC('fecha', e.target.value)} className={`w-full ${inputCls}`} />
+          <div><label className={lblCls}>3. Fecha necesitada (todo el RQ) *</label>
+            <FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setC('fecha', e.target.value)}
+              disabled={!nivelOk} className={`w-full ${pendCls(fechaOk)}`} />
             {hayFechaPasada && <div className="text-[9px] text-red-400 mt-1">Fecha en el pasado</div>}</div>
           <div><label className={lblCls}>Fecha del RQ</label>
             <div className={`${inputCls} bg-slate-800 text-slate-400`}>{fmt(HOY_ISO)} (automática)</div></div>
@@ -518,7 +532,16 @@ function Residente({ user, db, api }) {
             <div className={`px-2 py-1.5 rounded text-[11px] font-bold tracking-widest uppercase text-center border ${ch ? ch.cls : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
               {ch ? ch.k : 'sin fecha'}</div></div>
         </div>
-        <Buscador catalogo={catalogo} onPick={add} stockDe={esRes ? stockObra : null} />
+        {urgente && (
+          <div className="mb-3">
+            <div className="bg-yellow-950 border border-yellow-800 text-yellow-400 px-3 py-2 rounded text-xs">
+              4. Canal urgente: la justificación es obligatoria. ¿Por qué no se previó?</div>
+            <textarea rows={2} value={just} onChange={e => setJust(e.target.value)}
+              placeholder="Ej: rotura imprevista de equipo en obra…"
+              className={`w-full mt-2 ${pendCls(justOk)} text-sm`} />
+          </div>
+        )}
+        <Buscador catalogo={catalogo} onPick={add} stockDe={esRes ? stockObra : null} deshabilitado={!cabeceraLista} />
         <div className="mt-2">
           {!solForm ? (
             <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', famIu: '', perecedero: false })}
@@ -547,15 +570,6 @@ function Residente({ user, db, api }) {
             </div>
           )}
         </div>
-        {urgente && (
-          <div className="mt-3">
-            <div className="bg-yellow-950 border border-yellow-800 text-yellow-400 px-3 py-2 rounded text-xs">
-              Canal urgente: la justificación es obligatoria. ¿Por qué no se previó?</div>
-            <textarea rows={2} value={just} onChange={e => setJust(e.target.value)}
-              placeholder="Ej: rotura imprevista de equipo en obra…"
-              className={`w-full mt-2 ${inputCls} text-sm`} />
-          </div>
-        )}
       </div>
       )}
 
