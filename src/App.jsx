@@ -110,11 +110,10 @@ function stockDetalleObra(db, proy) {
   return Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto }));
 }
 
-// Niveles de obra para análisis de gasto por piso
-const PISOS = [
-  'PLATEA / CIMENTACIÓN', 'SÓTANO 3', 'SÓTANO 2', 'SÓTANO 1',
-  ...Array.from({ length: 20 }, (_, i) => `PISO ${i + 1}`),
-  'AZOTEA', 'ÁREAS COMUNES', 'TODA LA OBRA',
+// Niveles de obra para análisis de gasto por nivel
+const NIVELES = [
+  'SÓTANO 1', 'SÓTANO 2', 'SEMI SÓTANO', 'PLATEA CIMENTACIÓN', 'ESTRUCTURA',
+  ...Array.from({ length: 11 }, (_, i) => `NIVEL ${i + 1}`),
 ];
 
 const pillEstado = e =>
@@ -168,7 +167,7 @@ function AnularBox({ label = 'Anular', onConfirm }) {
 }
 
 function descargarCSV(items, nombre) {
-  const cab = ['Canal', 'RQ', 'Partida', 'Piso', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
+  const cab = ['Canal', 'RQ', 'Partida', 'Nivel', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
   const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const filas = items.map(i => {
     const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : '';
@@ -238,7 +237,7 @@ function imprimirRQ(r) {
   <table class="meta">
     <tr><td class="l">Proyecto</td><td>${r.proyecto}</td><td class="l">Partida</td><td>${r.partida}</td></tr>
     <tr><td class="l">Residente de obra</td><td>${r.residente}</td><td class="l">Adm. de almacén</td><td>${r.almacen}</td></tr>
-    <tr><td class="l">Piso / nivel</td><td>${r.piso || '—'}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
+    <tr><td class="l">Nivel</td><td>${r.piso || '—'}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
   </table>
   ${r.just ? `<div class="just"><b>Justificación (¿por qué no se previó?):</b> ${r.just}</div>` : ''}
   <table class="items">
@@ -506,10 +505,10 @@ function Residente({ user, db, api }) {
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
           <div><label className={lblCls}>Adm. de almacén *</label>
             <input value={cab.almacen} onChange={e => setC('almacen', e.target.value)} placeholder="Responsable" className={`w-full ${inputCls}`} /></div>
-          <div><label className={lblCls}>Piso / nivel donde se utilizará *</label>
+          <div><label className={lblCls}>Nivel donde se utilizará *</label>
             <select value={cab.piso} onChange={e => setC('piso', e.target.value)} className={`w-full ${inputCls}`}>
               <option value="">— Elegir nivel —</option>
-              {PISOS.map(p => <option key={p}>{p}</option>)}</select></div>
+              {NIVELES.map(p => <option key={p}>{p}</option>)}</select></div>
           <div><label className={lblCls}>Fecha necesitada (todo el RQ) *</label>
             <FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setC('fecha', e.target.value)} className={`w-full ${inputCls}`} />
             {hayFechaPasada && <div className="text-[9px] text-red-400 mt-1">Fecha en el pasado</div>}</div>
@@ -1194,7 +1193,7 @@ function Compras({ user, db, api, modo }) {
       {flat.length > 0 && (
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
-          <thead><tr>{['RQ', 'Proyecto', 'Piso', 'Canal', 'Residente', 'Descripción', 'Cant', 'Necesitada', 'Decisión', 'Estado', 'Pago', 'Fecha entrega', 'Llegó en', 'Holgura', 'Recojo saldo', 'Entrega saldo', 'Saldo en', '¿Comunicó residente?', 'Destino saldo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+          <thead><tr>{['RQ', 'Proyecto', 'Nivel', 'Canal', 'Residente', 'Descripción', 'Cant', 'Necesitada', 'Decisión', 'Estado', 'Pago', 'Fecha entrega', 'Llegó en', 'Holgura', 'Recojo saldo', 'Entrega saldo', 'Saldo en', '¿Comunicó residente?', 'Destino saldo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
           <tbody>
             {flat.map(i => {
               const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : null;
@@ -2363,7 +2362,7 @@ function Tablero({ db }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Canal', 'RQ', 'Partida', 'Piso', 'Proyecto', 'Código', 'Descripción', 'Destino', 'Und', 'Cant', 'F. Req', 'F. Nec', 'Decisión', 'Estado', 'M. rechazo / anulación', 'Pago', 'Factura', 'F. entrega', 'Recibido', 'Obs. almacén', 'Llegó', 'Holgura', 'Saldo'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Canal', 'RQ', 'Partida', 'Nivel', 'Proyecto', 'Código', 'Descripción', 'Destino', 'Und', 'Cant', 'F. Req', 'F. Nec', 'Decisión', 'Estado', 'M. rechazo / anulación', 'Pago', 'Factura', 'F. entrega', 'Recibido', 'Obs. almacén', 'Llegó', 'Holgura', 'Saldo'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {flatShown.map((i, k) => {
                   const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : null;
