@@ -21,7 +21,7 @@ const TABS_POR_ROL = {
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
-  comprador: [['dia', 'Compras del día'], ['fac', 'Facturar'], ['ren', 'Rendiciones']],
+  comprador: [['dia', 'Compras del día'], ['ren', 'Rendiciones']],
 };
 const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren', comprador: 'dia' };
 const UMBRAL_MONTO_INUSUAL = 10000; // S/ — pagos por encima se marcan para revisión
@@ -1249,12 +1249,13 @@ function Compras({ user, db, api, modo }) {
     .map(([c, p]) => ({ obra: p, ...((stocks[p] || {})[g.cod] || { cant: 0, cadMin: null }) }))
     .filter(x => x.cant > 0);
 
+  const EN_LETRAS = { 1: 'una', 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
   return (
     <div>
-    {!facturarSolo && porComprar.length > 0 && (
+    {porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-          Consolidado por comprar · {porComprar.length} material(es) · une pedidos de varias obras (la factura sigue siendo una por obra)</div>
+          {facturarSolo ? 'Qué comprar hoy' : 'Consolidado por comprar'} · {porComprar.length} material(es) · une pedidos de varias obras (la factura sigue siendo una por obra)</div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead><tr>{['Material', 'Total a comprar', 'Detalle por obra', 'Más urgente', 'Stock en otras obras'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
@@ -1269,7 +1270,11 @@ function Compras({ user, db, api, modo }) {
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {Object.entries(g.porObra).map(([o, c]) => `${o}: ${c}`).join(' · ')}
-                      {Object.keys(g.porObra).length > 1 && <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-green-950 text-green-400">consolidable</span>}</td>
+                      {Object.keys(g.porObra).length > 1 && <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-green-950 text-green-400">consolidable</span>}
+                      <div className={Object.keys(g.porObra).length > 1 ? 'text-green-400 font-semibold' : 'text-slate-500'}>
+                        {Object.keys(g.porObra).length > 1
+                          ? `Pedir ${EN_LETRAS[Object.keys(g.porObra).length] || Object.keys(g.porObra).length} facturas (una por obra)`
+                          : `Pedir una factura (${Object.keys(g.porObra)[0]})`}</div></td>
                     <td className={`py-2 px-1.5 whitespace-nowrap ${urg < 2 ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}{urg < 2 ? ' · URGENTE' : ''}</td>
                     <td className="py-2 px-1.5 text-[10px]">
                       {otras.length === 0 ? <span className="text-slate-600">—</span> : otras.map(x => {
@@ -1295,7 +1300,7 @@ function Compras({ user, db, api, modo }) {
     )}
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
       <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Gestión de compras · aprobación, estado y seguimiento</div>
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{facturarSolo ? 'Ítems por comprar · registra la factura de cada compra' : 'Gestión de compras · aprobación, estado y seguimiento'}</div>
         <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
       </div>
       <div className="flex items-center gap-1.5 mb-3 flex-wrap">
@@ -1370,7 +1375,8 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
                     {i.just && <div className="text-yellow-400 text-[10px] mt-1">Motivo: {i.just}</div>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200">{i.cant}</td>
-                  <td className="py-2 px-1.5 text-slate-200">{fmt(i.fecha)}</td>
+                  <td className="py-2 px-1.5 text-slate-200">{fmt(i.fecha)}
+                    {i.decision === 'Aprobado' && !i.factura && (() => { const esp = -diasHoy(i.fechaRQ); return esp > 0 ? <div className={`text-[9px] ${esp >= 3 ? 'text-red-400 font-bold' : 'text-slate-500'}`}>esperando {esp}d</div> : null; })()}</td>
                   <td className="py-2 px-1.5">
                     {i.decision === 'Pendiente' && !enRechazo && (
                       <div>
@@ -1418,7 +1424,7 @@ function Compras({ user, db, api, modo }) {
                     <div>
                       {!i.factura && !enFact && (
                         puedeFacturar
-                          ? <button onClick={() => abrirFactura(i)} className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">＋ Factura</button>
+                          ? <button onClick={() => abrirFactura(i)} className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">{facturarSolo ? '🛒 Comprar' : '＋ Factura'}</button>
                           : <span className="text-slate-600">Sin factura</span>
                       )}
                       {enFact && (
@@ -1535,7 +1541,9 @@ function Compras({ user, db, api, modo }) {
         </table>
       </div>
       )}
-      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: Compras marca "En camino" cuando el pedido está en tránsito; "Entregado" e "Incompleto" los fija el almacén automáticamente al registrar la recepción. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
+      <div className="mt-3 text-slate-500 text-[11px]">{facturarSolo
+        ? 'Cada ítem aprobado es una compra pendiente. Toca 🛒 Comprar para registrar la factura (o el compromiso de crédito, o el efectivo de caja chica). Lo que no compres hoy queda en la cola y muestra los días que lleva esperando. Los precios y el pago los gestiona Lucía/Pagos; tú solo registras la compra.'
+        : 'Paso 1: Aprobar o Rechazar. Paso 2: Compras marca "En camino" cuando el pedido está en tránsito; "Entregado" e "Incompleto" los fija el almacén automáticamente al registrar la recepción. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.'}</div>
     </div>
 
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -1896,69 +1904,6 @@ function Almacen({ user, db, api }) {
             </table>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// Vista del COMPRADOR (Frank): su lista de trabajo del día.
-// Prioriza urgentes y fechas necesitadas; consolida el mismo material
-// entre obras y le dice cuántas facturas pedir.
-function ComprasDelDia({ db }) {
-  const { rqs } = db;
-  const EN_LETRAS = { 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
-
-  const pendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
-    .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—');
-
-  const grupos = Object.values(pendientes.reduce((acc, i) => {
-    if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porRQ: [], minFecha: i.fecha, proyectos: new Set() };
-    const g = acc[i.cod];
-    g.total += Number(i.cant);
-    g.porRQ.push({ rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha });
-    if (i.fecha < g.minFecha) g.minFecha = i.fecha;
-    g.proyectos.add(i.proyecto);
-    return acc;
-  }, {}))
-    .map(g => ({ ...g, urgente: diasHoy(g.minFecha) < 2, nProy: g.proyectos.size }))
-    .sort((a, b) => (a.urgente !== b.urgente) ? (a.urgente ? -1 : 1) : (a.minFecha < b.minFecha ? -1 : 1));
-
-  return (
-    <div>
-      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-          Compras del día · {grupos.length} material(es) por comprar · urgentes primero</div>
-        {grupos.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Nada por comprar: no hay ítems aprobados pendientes. ¡Buen día!</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead><tr>{['', 'Ítem', 'Cantidad total', 'Por RQ / obra', 'Necesitado para', 'Observación'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
-              <tbody>
-                {grupos.map(g => (
-                  <tr key={g.cod} className="border-b border-slate-800 align-top">
-                    <td className="py-2 px-1.5">
-                      {g.urgente && <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">URGENTE</span>}</td>
-                    <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
-                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
-                    <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 whitespace-nowrap">{g.total} {g.und}</td>
-                    <td className="py-2 px-1.5 text-slate-300 text-[10px]">
-                      {g.porRQ.map((x, k) => (
-                        <div key={k}>RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b>{x.cant}</b> (para {fmt(x.fecha)})</div>
-                      ))}</td>
-                    <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${g.urgente ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}</td>
-                    <td className="py-2 px-1.5 text-[10px]">
-                      {g.nProy > 1
-                        ? <span className="text-green-400 font-semibold">Consolidar: pedir {EN_LETRAS[g.nProy] || g.nProy} facturas (una por obra)</span>
-                        : <span className="text-slate-400">Pedir una factura ({[...g.proyectos][0]})</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <div className="mt-3 text-slate-500 text-[11px]">Negocia el total por material con el proveedor. Cuando un material lo piden varias obras, pide facturas separadas (una por obra) para no mezclar presupuestos. Las facturas se registran en la pestaña Facturar; las de efectivo entran a tu rendición del día.</div>
       </div>
     </div>
   );
@@ -3046,10 +2991,9 @@ export default function App() {
       <div className="p-4">
         {tab === 'res' && <Residente user={user} db={db} api={api} />}
         {tab === 'com' && <Compras user={user} db={db} api={api} />}
-        {tab === 'dia' && <ComprasDelDia db={db} />}
+        {tab === 'dia' && <Compras user={user} db={db} api={api} modo="facturar" />}
         {tab === 'sto' && <AlmacenResidente user={user} db={db} />}
         {tab === 'his' && <HistorialMateriales user={user} db={db} />}
-        {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
         {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
