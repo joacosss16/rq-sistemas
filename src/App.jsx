@@ -239,7 +239,7 @@ function imprimirRQ(r) {
     <tr><td class="l">Residente de obra</td><td>${r.residente}</td><td class="l">Adm. de almacén</td><td>${r.almacen}</td></tr>
     <tr><td class="l">Nivel</td><td>${r.piso || '—'}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
   </table>
-  ${r.just ? `<div class="just"><b>Justificación (¿por qué no se previó?):</b> ${r.just}</div>` : ''}
+  ${r.just ? `<div class="just"><b>Motivo (¿por qué no se previó?):</b> ${r.just}</div>` : ''}
   <table class="items">
     <thead><tr><th>Ítem</th><th>Código</th><th>Descripción</th><th>Und</th><th>Cant</th><th>Fecha necesitada</th><th>Destino</th><th>Color</th><th>Obs</th></tr></thead>
     <tbody>${filas}</tbody>
@@ -377,7 +377,7 @@ function Buscador({ catalogo, onPick, stockDe, deshabilitado, inputRef }) {
       <label className={lblCls}>Buscar material en catálogo · {catalogo.length} materiales</label>
       <input value={q} onChange={e => setQ(e.target.value)} disabled={deshabilitado} ref={inputRef}
         onKeyDown={e => { if (e.key === 'Enter' && res.length > 0) { e.preventDefault(); onPick(res[0]); setQ(''); } }}
-        placeholder={deshabilitado ? 'Primero completa la cabecera: 1. partida → 2. nivel → 3. fecha (y justificación si es urgente)' : 'Escribe descripción o código… (Enter agrega el primer resultado)'}
+        placeholder={deshabilitado ? 'Primero completa la cabecera: 1. partida → 2. nivel → 3. fecha (y motivo si es urgente)' : 'Escribe descripción o código… (Enter agrega el primer resultado)'}
         className={`w-full ${inputCls} py-2 text-sm ${deshabilitado ? 'opacity-60 cursor-not-allowed' : ''}`} />
       {res.length > 0 && (
         <div className="absolute top-full left-0 right-0 bg-slate-950 border border-yellow-400 border-t-0 rounded-b max-h-56 overflow-y-auto z-50">
@@ -436,7 +436,7 @@ function Residente({ user, db, api }) {
   const esRes = user.rol === 'residente';
   const proyIni = esRes ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : '');
   const codIni = codProy[proyIni] || '';
-  const [cab, setCab] = useState({ proyecto: proyIni, partida: codIni ? codIni + '.02.02' : '', residente: user.nombre, almacen: ALMACENEROS[proyIni] || '', piso: '', fecha: '' });
+  const [cab, setCab] = useState({ proyecto: proyIni, partida: '', residente: user.nombre, almacen: ALMACENEROS[proyIni] || '', piso: '', fecha: '' });
   const [items, setItems] = useState([]);
   const [just, setJust] = useState('');
   const [solForm, setSolForm] = useState(null);
@@ -528,6 +528,7 @@ function Residente({ user, db, api }) {
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{codIni} · {user.proyecto}</div></div>
           <div><label className={lblCls}>1. Partida *</label>
             <input value={cab.partida} onChange={e => setC('partida', e.target.value)}
+              placeholder={codIni ? `Ej: ${codIni}.02.02` : 'Partida'}
               onKeyDown={saltarA(refNivel)} className={`w-full ${pendCls(partidaOk)}`} /></div>
           <div><label className={lblCls}>Residente de obra *</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
@@ -553,7 +554,7 @@ function Residente({ user, db, api }) {
         {urgente && (
           <div className="mb-3">
             <div className="bg-yellow-950 border border-yellow-800 text-yellow-400 px-3 py-2 rounded text-xs">
-              4. Canal urgente: la justificación es obligatoria. ¿Por qué no se previó?</div>
+              4. Canal urgente: el motivo es obligatorio. ¿Por qué no se previó?</div>
             <textarea rows={2} ref={refJust} value={just} onChange={e => setJust(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (refBuscar.current && !refBuscar.current.disabled) refBuscar.current.focus(); } }}
               placeholder="Ej: rotura imprevista de equipo en obra… (Enter continúa; Shift+Enter para otra línea)"
@@ -630,7 +631,7 @@ function Residente({ user, db, api }) {
               className={`px-5 py-2.5 rounded text-xs font-bold tracking-wider uppercase ${ok ? 'bg-yellow-400 text-slate-950 hover:bg-yellow-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
               {enviando ? 'Enviando…' : 'Enviar requerimiento'}</button>
             {!ok && !enviando && <span className="text-slate-500 text-[11px]">
-              {!cabOk ? 'Completa adm. de almacén, piso y fecha necesitada (no puede ser pasada)' : !itemsOk ? 'Completa cantidad y destino en cada ítem' : 'Falta la justificación del canal urgente'}</span>}
+              {!cabOk ? 'Completa partida, nivel y fecha necesitada (no puede ser pasada)' : !itemsOk ? 'Completa cantidad y destino en cada ítem' : 'Falta el motivo del canal urgente'}</span>}
           </div>
         </div>
       )}
@@ -1264,7 +1265,7 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 ${i.canal === 'URGENTE' ? 'text-red-400' : i.canal === 'GENERAL' ? 'text-green-400' : 'text-yellow-400'}`}>{i.canal}</span></td>
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.residente}</td>
                   <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
-                    {i.just && <div className="text-yellow-400 text-[10px] mt-1">Justif.: {i.just}</div>}</td>
+                    {i.just && <div className="text-yellow-400 text-[10px] mt-1">Motivo: {i.just}</div>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200">{i.cant}</td>
                   <td className="py-2 px-1.5 text-slate-200">{fmt(i.fecha)}</td>
                   <td className="py-2 px-1.5">
