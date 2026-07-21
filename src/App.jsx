@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import { supabase } from './supabaseClient';
 
 const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
@@ -15,9 +15,9 @@ const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso i
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
 
 const TABS_POR_ROL = {
-  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero']],
+  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
-  residente: [['res', 'Mis requerimientos']],
+  residente: [['res', 'Mis requerimientos'], ['sto', 'Mi almacén'], ['his', 'Historial']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
@@ -81,6 +81,33 @@ function calcularStocks(db) {
     ent(p.destino, p.cod).cant += p.cant;
   });
   return map;
+}
+
+// Detalle de stock de una obra (inicial/recibido/salidas/préstamos/caducidad).
+// Lo usan la vista del almacenero y la vista de solo lectura del residente.
+function stockDetalleObra(db, proy) {
+  const stockMap = {};
+  const entrada = (cod, desc, und) => {
+    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0, cadMin: null };
+    return stockMap[cod];
+  };
+  db.stockInicial.filter(si => si.proyecto === proy).forEach(si => { entrada(si.cod, si.desc, si.und).inicial += si.cant; });
+  db.rqs.filter(r => r.proyecto === proy).forEach(r => r.items.forEach(i => {
+    if (i.decision !== 'Aprobado') return;
+    const rec = Number(i.cantRecibida || 0);
+    if (rec > 0) {
+      const e = entrada(i.cod, i.desc, i.und);
+      e.recibido += rec;
+      if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
+    }
+  }));
+  db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += Number(s.cant); });
+  db.prestamos.forEach(p => {
+    if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
+    if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
+    if (p.destino === proy) entrada(p.cod, p.desc, p.und).prestNeto += Number(p.cant);
+  });
+  return Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto }));
 }
 
 // Niveles de obra para análisis de gasto por piso
@@ -339,7 +366,7 @@ function buscarEnCatalogo(catalogo, q, max) {
   }).slice(0, max);
 }
 
-function Buscador({ catalogo, onPick }) {
+function Buscador({ catalogo, onPick, stockDe }) {
   const [q, setQ] = useState('');
   const res = useMemo(() => buscarEnCatalogo(catalogo, q, 8), [q, catalogo]);
   return (
@@ -353,7 +380,8 @@ function Buscador({ catalogo, onPick }) {
             <div key={m[0]} onClick={() => { onPick(m); setQ(''); }}
               className="px-3 py-2 cursor-pointer border-b border-slate-800 hover:bg-slate-800">
               <div className="text-xs font-medium text-slate-100">{m[1]}</div>
-              <div className="text-[10px] font-mono text-slate-500">{m[0]} · {m[4] ? `${m[5]} de ${m[4]} ${m[2]}` : m[2]} · {m[3]}</div>
+              <div className="text-[10px] font-mono text-slate-500">{m[0]} · {m[4] ? `${m[5]} de ${m[4]} ${m[2]}` : m[2]} · {m[3]}
+                {stockDe && stockDe[m[0]] && stockDe[m[0]].cant > 0 && <span className="text-green-400"> · en tu almacén: {stockDe[m[0]].cant}</span>}</div>
             </div>
           ))}
         </div>
@@ -414,6 +442,8 @@ function Residente({ user, db, api }) {
   const ch = canalDeFecha(cab.fecha);
   const urgente = ch && ch.k === 'URGENTE';
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
+  // stock de SU obra: informa al pedir para que solo pida lo que falta
+  const stockObra = useMemo(() => (esRes ? (calcularStocks(db)[user.proyecto] || {}) : {}), [db, esRes, user.proyecto]);
 
   const setC = (k, v) => setCab({ ...cab, [k]: v });
   const add = m => setItems(p => [...p, { id: Date.now() + Math.random(), cod: m[0], desc: m[1], und: m[2], cant: '', destino: '', color: '', obs: '' }]);
@@ -480,7 +510,7 @@ function Residente({ user, db, api }) {
             <div className={`px-2 py-1.5 rounded text-[11px] font-bold tracking-widest uppercase text-center border ${ch ? ch.cls : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
               {ch ? ch.k : 'sin fecha'}</div></div>
         </div>
-        <Buscador catalogo={catalogo} onPick={add} />
+        <Buscador catalogo={catalogo} onPick={add} stockDe={esRes ? stockObra : null} />
         <div className="mt-2">
           {!solForm ? (
             <button onClick={() => setSolForm({ desc: '', und: unds[0] || 'UND', famIu: '', perecedero: false })}
@@ -533,7 +563,11 @@ function Residente({ user, db, api }) {
                 {items.map(i => (
                   <tr key={i.id} className="border-b border-slate-800 align-top">
                     <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{i.cod}</td>
-                    <td className="py-2 px-1.5 text-slate-200">{i.desc}</td>
+                    <td className="py-2 px-1.5 text-slate-200">{i.desc}
+                      {stockObra[i.cod] && stockObra[i.cod].cant > 0 && (
+                        <div className="text-[10px] text-sky-400 mt-1">
+                          📦 En tu almacén ya hay <b>{stockObra[i.cod].cant} {i.und}</b> — pide solo lo que falte.</div>
+                      )}</td>
                     <td className="py-2 px-1.5 text-slate-500">{i.und}</td>
                     <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={i.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) upd(i.id, 'cant', v); }} className={`w-16 ${inputCls}`} /></td>
                     <td className="py-2 px-1.5">
@@ -623,6 +657,130 @@ function Residente({ user, db, api }) {
           </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// Almacén del residente: la misma foto que ve su almacenero, en solo lectura
+function AlmacenResidente({ user, db }) {
+  const stock = stockDetalleObra(db, user.proyecto).sort((a, b) => a.desc.localeCompare(b.desc));
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
+          Mi almacén · {user.proyecto} · solo consulta (lo gestiona {ALMACENEROS[user.proyecto] || 'el almacenero'})</div>
+        {stock.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Tu almacén aún no tiene materiales registrados.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Código', 'Material', 'Und', 'Caducidad', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {stock.map(s => {
+                  const cad = estadoCaducidad(s.cadMin);
+                  return (
+                    <tr key={s.cod} className="border-b border-slate-800">
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
+                      <td className="py-2 px-1.5 text-slate-200">{s.desc}</td>
+                      <td className="py-2 px-1.5 text-slate-500">{s.und}</td>
+                      <td className="py-2 px-1.5">{cad ? <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase whitespace-nowrap ${cad.cls}`}>{cad.k}</span> : <span className="text-slate-600">—</span>}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-400">{s.inicial}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-300">{s.recibido}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
+                      <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
+                      <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Antes de pedir un material, revisa aquí si ya lo tienes. Las salidas, recepciones y préstamos los registra tu almacenero.</div>
+      </div>
+    </div>
+  );
+}
+
+// Historial de pedidos por material (residente: su obra · gerencia: todas)
+function HistorialMateriales({ user, db }) {
+  const esRes = user.rol === 'residente';
+  const [proy, setProy] = useState(esRes ? user.proyecto : 'TODOS');
+  const [abierto, setAbierto] = useState(null);
+  const stocks = calcularStocks(db);
+
+  const flat = db.rqs
+    .filter(r => (esRes ? r.proyecto === user.proyecto : (proy === 'TODOS' || r.proyecto === proy)))
+    .flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, proyecto: r.proyecto })))
+    .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado');
+
+  const grupos = Object.values(flat.reduce((acc, i) => {
+    if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, pedidos: [] };
+    acc[i.cod].total += Number(i.cant);
+    acc[i.cod].pedidos.push(i);
+    return acc;
+  }, {})).map(g => ({
+    ...g,
+    stock: (esRes || proy !== 'TODOS')
+      ? (((stocks[esRes ? user.proyecto : proy] || {})[g.cod] || {}).cant || 0)
+      : PROYECTOS.reduce((a, [, p]) => a + (((stocks[p] || {})[g.cod] || {}).cant || 0), 0),
+  })).sort((a, b) => b.total - a.total);
+
+  return (
+    <div>
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+            Historial por material · {esRes ? user.proyecto : ''} · cuánto se ha pedido de cada material</div>
+          {!esRes && <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>}
+        </div>
+        {grupos.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Aún no hay pedidos registrados.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Material', 'Veces pedido', 'Cantidad total pedida', 'En almacén ahora', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {grupos.map(g => (
+                  <Fragment key={g.cod}>
+                    <tr onClick={() => setAbierto(abierto === g.cod ? null : g.cod)}
+                      className="border-b border-slate-800 cursor-pointer hover:bg-slate-800">
+                      <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
+                        <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
+                      <td className="py-2 px-1.5 font-mono text-slate-300">{g.pedidos.length}</td>
+                      <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
+                      <td className={`py-2 px-1.5 font-mono font-bold ${g.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{g.stock}</td>
+                      <td className="py-2 px-1.5 text-slate-500 text-[10px]">{abierto === g.cod ? '▲ cerrar' : '▼ ver desglose'}</td>
+                    </tr>
+                    {abierto === g.cod && (
+                      <tr className="border-b border-slate-800">
+                        <td colSpan={5} className="py-2 px-4 bg-slate-950">
+                          <table className="w-full text-xs">
+                            <thead><tr>{['Fecha', 'RQ', ...(esRes || proy !== 'TODOS' ? [] : ['Obra']), 'Cantidad', 'Decisión', 'Estado'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+                            <tbody>
+                              {[...g.pedidos].sort((a, b) => (a.fechaRQ < b.fechaRQ ? 1 : -1)).map((p, k) => (
+                                <tr key={k} className="border-b border-slate-800">
+                                  <td className="py-1.5 px-1.5 text-slate-400">{fmt(p.fechaRQ)}</td>
+                                  <td className="py-1.5 px-1.5 font-mono text-slate-300">RQ-{String(p.rq).padStart(3, '0')}</td>
+                                  {!(esRes || proy !== 'TODOS') && <td className="py-1.5 px-1.5 text-slate-400">{p.proyecto}</td>}
+                                  <td className="py-1.5 px-1.5 font-mono text-slate-200">{p.cant} {p.und}</td>
+                                  <td className="py-1.5 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(p.decision)}`}>{p.decision}</span></td>
+                                  <td className="py-1.5 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(p.estado)}`}>{p.estado}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Clic en un material para ver el desglose de todos sus pedidos (fecha, RQ, cantidad y estado). No incluye rechazados ni anulados.</div>
       </div>
     </div>
   );
@@ -1247,29 +1405,7 @@ function Almacen({ user, db, api }) {
   };
 
   const salidasProy = salidas.filter(s => s.proyecto === proy);
-  const stockMap = {};
-  const entrada = (cod, desc, und) => {
-    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0, cadMin: null };
-    return stockMap[cod];
-  };
-  // saldo inicial por inventario físico (tabla stock_inicial)
-  stockInicial.filter(si => si.proyecto === proy).forEach(si => { entrada(si.cod, si.desc, si.und).inicial += si.cant; });
-  rqs.filter(r => r.proyecto === proy).forEach(r => r.items.forEach(i => {
-    if (i.decision !== 'Aprobado') return;
-    const rec = Number(i.cantRecibida || 0);
-    if (rec > 0) {
-      const e = entrada(i.cod, i.desc, i.und);
-      e.recibido += rec;
-      if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
-    }
-  }));
-  salidasProy.filter(s => !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += Number(s.cant); });
-  prestamos.forEach(p => {
-    if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
-    if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
-    if (p.destino === proy) entrada(p.cod, p.desc, p.und).prestNeto += Number(p.cant);
-  });
-  const stock = Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto }));
+  const stock = stockDetalleObra(db, proy);
 
   const darSalida = async (s, f) => {
     const r = await api.darSalida({ proyecto: proy, cod: s.cod, cant: Number(f.cant), hoja: f.hoja.trim(), zona: f.zona.trim() });
@@ -2657,6 +2793,8 @@ export default function App() {
         {tab === 'res' && <Residente user={user} db={db} api={api} />}
         {tab === 'com' && <Compras user={user} db={db} api={api} />}
         {tab === 'dia' && <ComprasDelDia db={db} />}
+        {tab === 'sto' && <AlmacenResidente user={user} db={db} />}
+        {tab === 'his' && <HistorialMateriales user={user} db={db} />}
         {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
