@@ -478,6 +478,15 @@ function Residente({ user, db, api }) {
   const misRqs = esRes ? rqs.filter(r => r.proyecto === user.proyecto) : rqs;
   const misSol = esRes ? solicitudes.filter(s => s.solicitanteId === user.id) : solicitudes;
 
+  // Un RQ se archiva solo cuando ya no queda nada por atender:
+  // cada ítem está Entregado, o cerrado por rechazo/anulación.
+  const [verArchivados, setVerArchivados] = useState(false);
+  const rqCerrado = r => r.items.length > 0 &&
+    r.items.every(i => i.decision === 'Rechazado' || i.decision === 'Anulado' || i.estado === 'Entregado');
+  const rqsActivos = misRqs.filter(r => !rqCerrado(r));
+  const rqsArchivados = misRqs.filter(rqCerrado);
+  const mostrados = [...rqsActivos, ...(verArchivados ? rqsArchivados : [])];
+
   return (
     <div>
       <Aviso msg={aviso} />
@@ -618,7 +627,9 @@ function Residente({ user, db, api }) {
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Mis requerimientos · estado (solo lectura — lo gestiona Compras)</div>
         {misRqs.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Aún no has enviado requerimientos.</div>
-        ) : misRqs.map(r => {
+        ) : mostrados.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Todo atendido ✓ — tus requerimientos completos están en Archivados, abajo.</div>
+        ) : mostrados.map(r => {
           const decidido = r.items.length > 0 && r.items.every(i => i.decision !== 'Pendiente');
           const hayAprobados = r.items.some(i => i.decision === 'Aprobado');
           return (
@@ -626,6 +637,7 @@ function Residente({ user, db, api }) {
             <div className="flex items-center gap-2.5 mb-2 flex-wrap">
               <b className="font-mono text-sm text-slate-100">RQ-{String(r.n).padStart(3, '0')}</b>
               <span className={`px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase border ${canalClases[r.canal] || ''}`}>{r.canal}</span>
+              {rqCerrado(r) && <span className="px-2 py-1 rounded text-[9px] font-bold tracking-wider uppercase bg-slate-800 text-slate-400 border border-slate-700">📁 Archivado</span>}
               <span className="text-slate-500 text-[11px]">{r.proyecto} · {r.partida} · {r.piso || '—'} · {fmt(r.fechaRQ)}</span>
               {decidido && hayAprobados ? (
                 <button onClick={() => imprimirRQ(r)}
@@ -657,6 +669,13 @@ function Residente({ user, db, api }) {
           </div>
           );
         })}
+        {rqsArchivados.length > 0 && (
+          <div className="mt-2 pt-2 border-t border-slate-800">
+            <button onClick={() => setVerArchivados(!verArchivados)}
+              className="text-[11px] text-slate-500 hover:text-slate-300 underline underline-offset-2">
+              📁 {verArchivados ? 'Ocultar archivados' : `Ver archivados · ${rqsArchivados.length} requerimiento(s) completamente atendidos`}</button>
+          </div>
+        )}
       </div>
     </div>
   );
