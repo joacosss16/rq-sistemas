@@ -1171,7 +1171,7 @@ function Compras({ user, db, api, modo }) {
 
   const abrirFactura = i => {
     if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
-    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {}, efectivo: false } });
+    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {}, efectivo: false, compromiso: false } });
   };
   const cerrarFactura = id => { const f2 = { ...fFact }; delete f2[id]; setFFact(f2); };
 
@@ -1194,25 +1194,27 @@ function Compras({ user, db, api, modo }) {
     const f = fFact[i.id];
     const cubiertos = [i, ...flatBase.filter(x => f.extras.includes(x.id))];
     const suma = cubiertos.reduce((a, x) => a + (Number(f.precios[x.id]) || 0) * x.cant, 0);
-    const ok = f.serie.trim() && f.prov.trim() && /^\d{11}$/.test(f.ruc) && f.fecha && Number(f.monto) > 0
+    const ok = (f.compromiso || f.serie.trim()) && f.prov.trim() && /^\d{11}$/.test(f.ruc) && f.fecha && Number(f.monto) > 0
       && cubiertos.every(x => Number(f.precios[x.id]) > 0) && Math.abs(suma - Number(f.monto)) <= 0.1;
     if (!ok) return;
-    const serie = f.serie.trim().toUpperCase();
-    if (facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
+    const serie = f.compromiso ? 'CRED-PEND' : f.serie.trim().toUpperCase();
+    if (!f.compromiso && facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
       setAviso(`⚠ La factura ${serie} de ese RUC ya está registrada. Verifica el número.`);
       setTimeout(() => setAviso(''), 6000);
       return;
     }
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
-      monto: Number(f.monto), forma: f.efectivo ? 'Contado' : f.forma, proyecto: i.proyecto,
-      efectivo: !!f.efectivo,
+      monto: Number(f.monto), forma: f.compromiso ? 'Crédito' : f.efectivo ? 'Contado' : f.forma, proyecto: i.proyecto,
+      efectivo: !!f.efectivo, compromiso: !!f.compromiso,
       lineas: cubiertos.map(x => ({ id: x.id, precio: Number(f.precios[x.id]) })),
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fFact }; delete f2[i.id]; setFFact(f2);
-    setAviso(`Factura ${serie} registrada cubriendo ${cubiertos.length} ítem(s).`);
-    setTimeout(() => setAviso(''), 4000);
+    setAviso(f.compromiso
+      ? `Compromiso de crédito registrado cubriendo ${cubiertos.length} ítem(s): la deuda ya es visible en Pagos; la serie real se digita al pagar.`
+      : `Factura ${serie} registrada cubriendo ${cubiertos.length} ítem(s).`);
+    setTimeout(() => setAviso(''), 6000);
   };
 
   const factProy = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
@@ -1321,7 +1323,7 @@ function Compras({ user, db, api, modo }) {
               const cubiertosFF = enFact ? [i, ...flatBase.filter(x => ff.extras.includes(x.id))] : [];
               const sumaDesglose = cubiertosFF.reduce((a, x) => a + (Number(ff.precios[x.id]) || 0) * x.cant, 0);
               const cuadra = enFact && Number(ff.monto) > 0 && Math.abs(sumaDesglose - Number(ff.monto)) <= 0.1;
-              const factOk = ff && ff.serie.trim() && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
+              const factOk = ff && (ff.compromiso || ff.serie.trim()) && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
                 && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
               const candidatosExtra = enFact ? flatBase.filter(x => x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && x.pago !== 'Pagado') : [];
               const rqDe = rqMap[i.rq];
@@ -1404,11 +1406,22 @@ function Compras({ user, db, api, modo }) {
                             <div className="text-[9px] font-bold text-yellow-400 uppercase">Datos de factura (obligatorios) · Enter salta al siguiente</div>
                             <button onClick={() => cerrarFactura(i.id)} className="ml-auto text-[10px] text-slate-500 hover:text-slate-200">✕</button>
                           </div>
-                          <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} onKeyDown={enterSiguiente}
-                            placeholder="N° factura: F001-000123" className={`w-full mb-1 ${pendCls(!!ff.serie.trim())} font-mono`} />
+                          {!ff.efectivo && (
+                            <label className="flex items-start gap-1.5 mb-1.5 cursor-pointer text-[10px] text-slate-300">
+                              <input type="checkbox" checked={!!ff.compromiso} onChange={e => setFF(i.id, 'compromiso', e.target.checked)} className="mt-0.5" />
+                              <span><b>SIN factura aún</b>: el proveedor da crédito y emite la factura recién al pagar (compromiso)</span>
+                            </label>
+                          )}
+                          {ff.compromiso ? (
+                            <div className="mb-1 px-2 py-1.5 rounded border border-yellow-700 bg-yellow-950 text-[9px] text-yellow-400">
+                              Serie interna CRED-… asignada por el sistema. La serie real la digita Pagos al pagar, con la factura en mano.</div>
+                          ) : (
+                            <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} onKeyDown={enterSiguiente}
+                              placeholder="N° factura: F001-000123" className={`w-full mb-1 ${pendCls(!!ff.serie.trim())} font-mono`} />
+                          )}
                           <input list={`fprov-${i.id}`} value={ff.prov} onChange={e => setFF(i.id, 'prov', e.target.value)} onKeyDown={enterSiguiente}
-                            disabled={!ff.serie.trim()} placeholder="Proveedor (razón social)"
-                            className={`w-full mb-1 ${pendCls(!!ff.prov.trim())} ${!ff.serie.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
+                            disabled={!ff.compromiso && !ff.serie.trim()} placeholder="Proveedor (razón social)"
+                            className={`w-full mb-1 ${pendCls(!!ff.prov.trim())} ${!ff.compromiso && !ff.serie.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           <datalist id={`fprov-${i.id}`}>{proveedores.map(p => <option key={p[0]} value={p[1]} />)}</datalist>
                           <input value={ff.ruc} onChange={e => setFF(i.id, 'ruc', e.target.value)} onKeyDown={enterSiguiente}
                             disabled={!ff.prov.trim()} placeholder="RUC (11 dígitos)" maxLength={11}
@@ -1419,14 +1432,18 @@ function Compras({ user, db, api, modo }) {
                           <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} onKeyDown={enterSiguiente}
                             disabled={!/^\d{11}$/.test(ff.ruc)} placeholder="Monto TOTAL S/ (inc. IGV)"
                             className={`w-full mb-1 ${pendCls(Number(ff.monto) > 0)} font-mono ${!/^\d{11}$/.test(ff.ruc) ? 'opacity-60 cursor-not-allowed' : ''}`} />
-                          {!ff.efectivo && (
+                          {ff.compromiso ? (
+                            <div className={`w-full mb-1 ${inputCls} bg-slate-800 text-slate-400`}>Forma: Crédito (fija en compromisos)</div>
+                          ) : !ff.efectivo && (
                             <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
                               {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
                           )}
+                          {!ff.compromiso && (
                           <label className="flex items-start gap-1.5 mb-1 cursor-pointer text-[10px] text-slate-300">
                             <input type="checkbox" checked={!!ff.efectivo} onChange={e => setFF(i.id, 'efectivo', e.target.checked)} className="mt-0.5" />
                             <span>Ya pagada en <b>EFECTIVO</b> (caja chica de hoy) — queda Pagada y entra a la rendición del día</span>
                           </label>
+                          )}
                           {candidatosExtra.length > 0 && (
                             <div className="mb-1.5 border-t border-slate-700 pt-1.5">
                               <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">¿Esta factura cubre otros ítems? ({i.proyecto})</div>
@@ -1465,7 +1482,8 @@ function Compras({ user, db, api, modo }) {
                               {!cuadra && Number(ff.monto) > 0 ? ` · falta cuadrar S/ ${(Number(ff.monto) - sumaDesglose).toFixed(2)}` : ''}
                             </div>
                           </div>
-                          <button onClick={() => registrarFactura(i)} disabled={!factOk} className={`w-full ${btnOk(!!factOk)}`}>Registrar factura ({1 + ff.extras.length} ítem{ff.extras.length ? 's' : ''})</button>
+                          <button onClick={() => registrarFactura(i)} disabled={!factOk} className={`w-full ${btnOk(!!factOk)}`}>
+                            {ff.compromiso ? 'Registrar compromiso' : 'Registrar factura'} ({1 + ff.extras.length} ítem{ff.extras.length ? 's' : ''})</button>
                           <div className="text-[9px] text-slate-500 mt-1">El pago lo ejecuta el área de Pagos con banco y N° de operación.</div>
                         </div>
                       )}
@@ -1509,7 +1527,8 @@ function Compras({ user, db, api, modo }) {
             <tbody>
               {factProy.map(f => (
                 <tr key={f.n} className="border-b border-slate-800 align-top">
-                  <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                  <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
+                    {f.tipoDoc === 'Compromiso' && <div className="text-[8px] font-bold uppercase text-yellow-400">Sin factura · la emite al pagar</div>}</td>
                   <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
                   <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
@@ -1942,17 +1961,23 @@ function Pagos({ user, db, api }) {
 
   const vencimiento = vencimientoDe;
 
-  const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO };
+  const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO, serieReal: '' };
   const setP = (id, k, v) => setFPago({ ...fPago, [id]: { ...getP(id), [k]: v } });
 
   const pagar = async f => {
     const p = getP(f.id);
     const banco = (bancoDe[f.proyecto] || {}).banco || '';
-    if (!p.medio || !p.op.trim() || !p.fecha || !banco) return;
-    const r = await api.pagarFactura(f.id, { medio: p.medio, banco, op: p.op.trim(), fecha: p.fecha });
+    const esComp = f.tipoDoc === 'Compromiso';
+    if (!p.medio || !p.op.trim() || !p.fecha || !banco || (esComp && !(p.serieReal || '').trim())) return;
+    const r = await api.pagarFactura(f.id, {
+      medio: p.medio, banco, op: p.op.trim(), fecha: p.fecha,
+      serieReal: esComp ? p.serieReal.trim() : null,
+    });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fPago }; delete f2[f.id]; setFPago(f2);
-    setAviso(`Factura ${f.serie} pagada (${p.medio} · ${banco} · ${p.op}).`);
+    setAviso(esComp
+      ? `Compromiso ${f.serie} pagado y convertido en factura ${p.serieReal.trim().toUpperCase()} (${p.medio} · ${banco} · ${p.op}).`
+      : `Factura ${f.serie} pagada (${p.medio} · ${banco} · ${p.op}).`);
     setTimeout(() => setAviso(''), 5000);
   };
 
@@ -1989,10 +2014,18 @@ function Pagos({ user, db, api }) {
                   const atrasada = diasHoy(venc) < 0;
                   const bancoObra = (bancoDe[f.proyecto] || {}).banco || '—';
                   const cuentaObra = (bancoDe[f.proyecto] || {}).cuenta || '';
-                  const listo = puede && p.medio && p.op.trim() && p.fecha && bancoObra !== '—';
+                  const esComp = f.tipoDoc === 'Compromiso';
+                  const listo = puede && p.medio && p.op.trim() && p.fecha && bancoObra !== '—' && (!esComp || (p.serieReal || '').trim());
                   return (
                     <tr key={f.n} className="border-b border-slate-800 align-top">
-                      <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
+                        {esComp && (
+                          <div className="mt-1 w-32">
+                            <div className="text-[8px] font-bold uppercase text-yellow-400 mb-0.5">Sin factura · exige el comprobante al pagar</div>
+                            <input value={p.serieReal || ''} onChange={e => setP(f.id, 'serieReal', e.target.value)} disabled={!puede}
+                              placeholder="Serie real: F001-000123" className={`w-full ${pendCls(!!(p.serieReal || '').trim())} font-mono`} />
+                          </div>
+                        )}</td>
                       <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
                       <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
@@ -2702,7 +2735,7 @@ export default function App() {
     rqs.forEach(r => r.items.forEach(i => { rqNumDeItem[i.id] = r.n; descDeItem[i.id] = i.desc; }));
 
     const facturas = factR.data.map(f => ({
-      id: f.id, n: f.numero, serie: f.serie,
+      id: f.id, n: f.numero, serie: f.serie, tipoDoc: f.tipo_doc || 'Factura',
       prov: provMap[f.proveedor_ruc] ? provMap[f.proveedor_ruc].razon_social : f.proveedor_ruc,
       ruc: f.proveedor_ruc, fecha: f.fecha, monto: Number(f.monto), forma: f.forma_pago,
       proyecto: nomProy[f.proyecto] || f.proyecto,
@@ -2824,7 +2857,7 @@ export default function App() {
         return { numero: rq.numero };
       }),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
-      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, efectivo, lineas }) => wrap(async () => {
+      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, efectivo, compromiso, lineas }) => wrap(async () => {
         const existe = dbRef.current.proveedores.some(p => p[0] === ruc);
         if (!existe) {
           const { error: eP } = await supabase.from('proveedores').insert({ ruc, razon_social: prov });
@@ -2856,6 +2889,8 @@ export default function App() {
 
         const { data: fact, error } = await supabase.from('facturas').insert({
           serie, proveedor_ruc: ruc, fecha, monto, forma_pago: forma,
+          // solo se envía en compromisos: así las facturas normales no dependen de la migración 14
+          ...(compromiso ? { tipo_doc: 'Compromiso' } : {}),
           proyecto: cod(proyecto), registrado_por: u.id,
           ...(efectivo ? {
             estado_pago: 'Pagada', medio_pago: 'Efectivo', fecha_pago: HOY_ISO,
@@ -2867,12 +2902,16 @@ export default function App() {
         if (e2) return { error: e2 };
         return {};
       }),
-      pagarFactura: (id, { medio, banco, op, fecha }) => wrap(async () => {
+      pagarFactura: (id, { medio, banco, op, fecha, serieReal }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
-        return await supabase.from('facturas').update({
+        const r = await supabase.from('facturas').update({
           estado_pago: 'Pagada', medio_pago: medio, banco, numero_operacion: op,
           fecha_pago: fecha, pagado_por: u.id,
+          // compromiso → factura real: la serie llega con el comprobante al pagar
+          ...(serieReal ? { serie: serieReal.trim().toUpperCase(), tipo_doc: 'Factura' } : {}),
         }).eq('id', id);
+        if (r.error && r.error.code === '23505') return { error: { message: `La factura ${serieReal} de ese RUC ya está registrada. Verifica la serie.` } };
+        return r;
       }),
       resolverRendicion: (id, { estado, observacion }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
