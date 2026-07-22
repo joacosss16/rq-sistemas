@@ -1097,6 +1097,7 @@ function Compras({ user, db, api, modo }) {
   const [busca, setBusca] = useState('');
   const [confAprRq, setConfAprRq] = useState(null);
   const [verArch, setVerArch] = useState(false);
+  const [verPagadas, setVerPagadas] = useState(false);
 
   const updItem = async (i, patch, okMsg) => {
     const r = await api.updItem(i.id, patch);
@@ -1112,7 +1113,8 @@ function Compras({ user, db, api, modo }) {
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
     .filter(i => !(i.estado === 'Entregado' && i.pago === 'Pagado'))
     .filter(i => proy === 'TODOS' || i.proyecto === proy)
-    .filter(i => !facturarSolo || i.decision === 'Aprobado');
+    // el comprador (Frank) solo factura lo que ÉL marcó Comprado
+    .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
   const esTriage = {
     decidir: i => i.decision === 'Pendiente',
     facturar: i => i.decision === 'Aprobado' && !i.factura,
@@ -1137,7 +1139,7 @@ function Compras({ user, db, api, modo }) {
   const flatArchivado = flatBase
     .filter(i => i.estado === 'Entregado' && i.pago === 'Pagado')
     .filter(i => proy === 'TODOS' || i.proyecto === proy)
-    .filter(i => !facturarSolo || i.decision === 'Aprobado');
+    .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
   const flatActivos = ordenar(flatAbierto.filter(i => !triage || esTriage[triage](i)).filter(matchBusca));
   const archMostrados = verArch ? ordenar(flatArchivado.filter(matchBusca)) : [];
   const flat = [
@@ -1228,6 +1230,9 @@ function Compras({ user, db, api, modo }) {
   };
 
   const factProy = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
+  const factPendientes = factProy.filter(f => f.estadoPago !== 'Pagada');
+  const factPagadas = factProy.filter(f => f.estadoPago === 'Pagada');
+  const factMostradas = verPagadas ? factProy : factPendientes;
 
   // Consolidado por comprar: ítems aprobados sin gestionar (sin factura y
   // sin estado logístico), agrupados por material entre todas las obras.
@@ -1411,8 +1416,11 @@ function Compras({ user, db, api, modo }) {
                               title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
                           : <span className="text-slate-500 text-[10px]">Por comprar</span>
                       ) : (
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
-                          title="Comprado lo marca Compras o el comprador; Entregado e Incompleto los fija el almacén al recibir.">{i.estado}</span>
+                        <div>
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
+                            title="Comprado lo marca Compras o el comprador; Entregado e Incompleto los fija el almacén al recibir.">{i.estado}</span>
+                          {i.estado === 'Comprado' && i.compradoPor && <div className="text-[9px] text-slate-500 mt-0.5">por {i.compradoPor}</div>}
+                        </div>
                       )
                     ) : <span className="text-slate-600">—</span>}
                   </td>
@@ -1541,15 +1549,21 @@ function Compras({ user, db, api, modo }) {
     </div>
 
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-      <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Facturas registradas · {factProy.length}{factProy.length > 0 ? ` · S/ ${factProy.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
-      {factProy.length === 0 ? (
-        <div className="text-center py-6 text-slate-500 text-sm">Sin facturas. Se registran al marcar un ítem como Pagado.</div>
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+          Facturas {verPagadas ? 'registradas' : 'por pagar'} · {factMostradas.length}{factMostradas.length > 0 ? ` · S/ ${factMostradas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+        <button onClick={() => setVerPagadas(v => !v)}
+          className={`ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase border ${verPagadas ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
+          {verPagadas ? '✕ Solo pendientes' : `Ver pagadas · ${factPagadas.length}`}</button>
+      </div>
+      {factMostradas.length === 0 ? (
+        <div className="text-center py-6 text-slate-500 text-sm">{verPagadas ? 'Sin facturas registradas.' : 'Sin facturas por pagar. ✓ Todo al día con Pagos.'}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
-              {factProy.map(f => (
+              {factMostradas.map(f => (
                 <tr key={f.n} className="border-b border-slate-800 align-top">
                   <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
                     {f.tipoDoc === 'Compromiso' && <div className="text-[8px] font-bold uppercase text-yellow-400">Sin factura · la emite al pagar</div>}</td>
@@ -1955,7 +1969,7 @@ function ComprasDelDia({ db, api }) {
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 whitespace-nowrap">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {g.porRQ.map((x, k) => (
-                        <div key={k} className="h-6 flex items-center">RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b className="mx-1">{x.cant}</b> (para {fmt(x.fecha)})</div>
+                        <div key={k} className="h-7 flex items-center whitespace-nowrap">RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b className="mx-1">{x.cant}</b> (para {fmt(x.fecha)})</div>
                       ))}</td>
                     <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${g.urgente ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}</td>
                     <td className="py-2 px-1.5 text-[10px]">
@@ -1965,7 +1979,7 @@ function ComprasDelDia({ db, api }) {
                     </td>
                     <td className="py-2 px-1.5">
                       {g.porRQ.map((x, k) => (
-                        <div key={k} className="h-6 flex items-center">
+                        <div key={k} className="h-7 flex items-center">
                           <button onClick={() => marcarComprado(x)}
                             className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400 whitespace-nowrap"
                             title="Marca este ítem como comprado o recogido. Cambia el estado para todo el equipo.">✓ Comprado</button>
@@ -2047,7 +2061,7 @@ function Pagos({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Medio', 'Banco (según obra)', 'N°', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Rellenó', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Medio', 'Banco (según obra)', 'N°', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {pend.map(f => {
                   const p = getP(f.id);
@@ -2071,6 +2085,7 @@ function Pagos({ user, db, api }) {
                       <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
                       <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.proyecto}</td>
+                      <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap text-[10px]">{f.registradoPor || '—'}</td>
                       <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
                       <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.forma}</td>
@@ -2761,6 +2776,7 @@ export default function App() {
         comunicoResidente: r.comunico_residente === true ? 'Sí' : r.comunico_residente === false ? 'No' : '—',
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
         fechaCaducidad: r.fecha_caducidad || '',
+        compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
       };
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
     });
