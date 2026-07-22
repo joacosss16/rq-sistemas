@@ -1130,7 +1130,7 @@ function Compras({ user, db, api, modo }) {
   const matchBusca = i => {
     const q = busca.trim().toLowerCase();
     if (!q) return true;
-    const texto = `${i.desc} ${i.cod} rq-${String(i.rq).padStart(3, '0')} ${i.rq} ${i.residente} ${i.proyecto}`.toLowerCase();
+    const texto = `${i.desc} ${i.cod} rq-${String(i.rq).padStart(3, '0')} ${i.rq} ${i.residente} ${i.proyecto} ${i.compradoPor || ''}`.toLowerCase();
     return q.split(/\s+/).every(p => texto.includes(p));
   };
   const ordenar = arr => [...arr].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
