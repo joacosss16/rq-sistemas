@@ -119,7 +119,7 @@ const NIVELES = [
 const pillEstado = e =>
   e === 'Pendiente' ? 'bg-yellow-950 text-yellow-400'
   : e === 'Aprobado' ? 'bg-green-950 text-green-400'
-  : e === 'En camino' ? 'bg-sky-950 text-sky-400'
+  : e === 'Comprado' ? 'bg-sky-950 text-sky-400'
   : e === 'Entregado' ? 'bg-blue-950 text-blue-400'
   : e === 'Incompleto' ? 'bg-orange-950 text-orange-400'
   : e === 'Rechazado' ? 'bg-red-950 text-red-400'
@@ -1116,13 +1116,13 @@ function Compras({ user, db, api, modo }) {
   const esTriage = {
     decidir: i => i.decision === 'Pendiente',
     facturar: i => i.decision === 'Aprobado' && !i.factura,
-    camino: i => i.estado === 'En camino',
+    comprado: i => i.estado === 'Comprado',
     incompleto: i => i.estado === 'Incompleto',
   };
   const chips = [
     !facturarSolo && ['decidir', 'Por decidir', 'text-yellow-400'],
     ['facturar', 'Por facturar', 'text-sky-400'],
-    ['camino', 'En camino', 'text-green-400'],
+    ['comprado', 'Comprado', 'text-green-400'],
     ['incompleto', 'Incompletos', 'text-red-400'],
   ].filter(Boolean);
   const matchBusca = i => {
@@ -1404,13 +1404,15 @@ function Compras({ user, db, api, modo }) {
                   </td>
                   <td className="py-2 px-1.5">
                     {post ? (
-                      (facturarSolo || i.estado === 'Entregado' || i.estado === 'Incompleto') ? (
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
-                          title="Lo fija el almacén automáticamente al registrar la recepción.">{i.estado}</span>
+                      i.estado === '—' ? (
+                        puedeFacturar
+                          ? <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
+                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                              title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                          : <span className="text-slate-500 text-[10px]">Por comprar</span>
                       ) : (
-                        <select value={i.estado} onChange={e => updItem(i, { estado: e.target.value })} className={inputCls}
-                          title="Compras gestiona el tránsito. Entregado e Incompleto los fija el almacén al recibir.">
-                          {['—', 'En camino'].map(x => <option key={x}>{x}</option>)}</select>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
+                          title="Comprado lo marca Compras o el comprador; Entregado e Incompleto los fija el almacén al recibir.">{i.estado}</span>
                       )
                     ) : <span className="text-slate-600">—</span>}
                   </td>
@@ -1535,7 +1537,7 @@ function Compras({ user, db, api, modo }) {
         </table>
       </div>
       )}
-      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: Compras marca "En camino" cuando el pedido está en tránsito; "Entregado" e "Incompleto" los fija el almacén automáticamente al registrar la recepción. Compras registra la factura con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
+      <div className="mt-3 text-slate-500 text-[11px]">Paso 1: Aprobar o Rechazar. Paso 2: Compras o el comprador marca "Comprado" al comprar o recoger el ítem (visible para todos); "Entregado" e "Incompleto" los fija el almacén automáticamente al registrar la recepción. La factura se registra con desglose por ítem (una factura puede cubrir varios ítems); el pago lo ejecuta el área de Pagos y los ítems heredan el estado. Anular exige motivo y queda con rastro en el Tablero. Un ítem Entregado con factura Pagada se cierra y pasa solo al Tablero.</div>
     </div>
 
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -1904,9 +1906,17 @@ function Almacen({ user, db, api }) {
 // Vista del COMPRADOR (Frank): su lista de trabajo del día.
 // Prioriza urgentes y fechas necesitadas; consolida el mismo material
 // entre obras y le dice cuántas facturas pedir.
-function ComprasDelDia({ db }) {
+function ComprasDelDia({ db, api }) {
   const { rqs } = db;
   const EN_LETRAS = { 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
+  const [aviso, setAviso] = useState('');
+
+  const marcarComprado = async it => {
+    const r = await api.updItem(it.id, { estado: 'Comprado' });
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    setAviso(`RQ-${String(it.rq).padStart(3, '0')} · ${it.proyecto}: marcado como Comprado. Ya lo ve todo el equipo.`);
+    setTimeout(() => setAviso(''), 4000);
+  };
 
   const pendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
     .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—');
@@ -1915,7 +1925,7 @@ function ComprasDelDia({ db }) {
     if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porRQ: [], minFecha: i.fecha, proyectos: new Set() };
     const g = acc[i.cod];
     g.total += Number(i.cant);
-    g.porRQ.push({ rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha });
+    g.porRQ.push({ id: i.id, rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha });
     if (i.fecha < g.minFecha) g.minFecha = i.fecha;
     g.proyectos.add(i.proyecto);
     return acc;
@@ -1928,12 +1938,13 @@ function ComprasDelDia({ db }) {
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
           Compras del día · {grupos.length} material(es) por comprar · urgentes primero</div>
+        <Aviso msg={aviso} />
         {grupos.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Nada por comprar: no hay ítems aprobados pendientes. ¡Buen día!</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['', 'Ítem', 'Cantidad total', 'Por RQ / obra', 'Necesitado para', 'Observación'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['', 'Ítem', 'Cantidad total', 'Por RQ / obra', 'Necesitado para', 'Observación', 'Marcar'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {grupos.map(g => (
                   <tr key={g.cod} className="border-b border-slate-800 align-top">
@@ -1944,7 +1955,7 @@ function ComprasDelDia({ db }) {
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 whitespace-nowrap">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {g.porRQ.map((x, k) => (
-                        <div key={k}>RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b>{x.cant}</b> (para {fmt(x.fecha)})</div>
+                        <div key={k} className="h-6 flex items-center">RQ-{String(x.rq).padStart(3, '0')} · {x.proyecto}: <b className="mx-1">{x.cant}</b> (para {fmt(x.fecha)})</div>
                       ))}</td>
                     <td className={`py-2 px-1.5 whitespace-nowrap font-mono ${g.urgente ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}</td>
                     <td className="py-2 px-1.5 text-[10px]">
@@ -1952,13 +1963,21 @@ function ComprasDelDia({ db }) {
                         ? <span className="text-green-400 font-semibold">Consolidar: pedir {EN_LETRAS[g.nProy] || g.nProy} facturas (una por obra)</span>
                         : <span className="text-slate-400">Pedir una factura ({[...g.proyectos][0]})</span>}
                     </td>
+                    <td className="py-2 px-1.5">
+                      {g.porRQ.map((x, k) => (
+                        <div key={k} className="h-6 flex items-center">
+                          <button onClick={() => marcarComprado(x)}
+                            className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400 whitespace-nowrap"
+                            title="Marca este ítem como comprado o recogido. Cambia el estado para todo el equipo.">✓ Comprado</button>
+                        </div>
+                      ))}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Negocia el total por material con el proveedor. Cuando un material lo piden varias obras, pide facturas separadas (una por obra) para no mezclar presupuestos. Las facturas se registran en la pestaña Facturar; las de efectivo entran a tu rendición del día.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">Marca <b>✓ Comprado</b> cuando compres o recojas cada ítem (RQ por RQ): el estado cambia para todo el equipo y sale de esta lista. La factura de caja chica se registra aparte en la pestaña Facturar (sin factura no hay rendición); lo que ya pagó administración solo lo recoges y marcas Comprado.</div>
       </div>
     </div>
   );
@@ -3046,7 +3065,7 @@ export default function App() {
       <div className="p-4">
         {tab === 'res' && <Residente user={user} db={db} api={api} />}
         {tab === 'com' && <Compras user={user} db={db} api={api} />}
-        {tab === 'dia' && <ComprasDelDia db={db} />}
+        {tab === 'dia' && <ComprasDelDia db={db} api={api} />}
         {tab === 'sto' && <AlmacenResidente user={user} db={db} />}
         {tab === 'his' && <HistorialMateriales user={user} db={db} />}
         {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
