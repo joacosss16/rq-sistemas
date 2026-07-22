@@ -1526,11 +1526,11 @@ function Compras({ user, db, api, modo }) {
                       )}
                     </div>
                   ) : <span className="text-slate-600">—</span>}</td>
-                  <td className="py-2 px-1.5">{post ? (facturarSolo || i._arch ? <span className="text-slate-400">{fmt(i.fechaEntrega)}</span> : <FechaInput value={i.fechaEntrega} onChange={e => updItem(i, { fecha_entrega: e.target.value || null })} className={`w-32 ${inputCls}`} />) : <span className="text-slate-600">—</span>}</td>
+                  <td className="py-2 px-1.5">{post ? <span className="text-slate-400" title="La fija el almacén al registrar la recepción del primer lote; no se edita a mano.">{i.fechaEntrega ? fmt(i.fechaEntrega) : '—'}</span> : <span className="text-slate-600">—</span>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{llego !== null ? llego + 'd' : '—'}</td>
                   <td className={`py-2 px-1.5 font-mono ${holg === null ? 'text-slate-500' : holg < 0 ? 'text-red-400' : 'text-green-400'}`}>{holg !== null ? holg + 'd' : '—'}</td>
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? <FechaInput value={i.fechaRecojoSaldo} onChange={e => updItem(i, { fecha_recojo_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? fmt(i.fechaRecojoSaldo) : '—'}</span>}</td>
-                  <td className="py-2 px-1.5">{inc && !facturarSolo ? <FechaInput value={i.fechaEntregaSaldo} onChange={e => updItem(i, { fecha_entrega_saldo: e.target.value || null })} className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? fmt(i.fechaEntregaSaldo) : '—'}</span>}</td>
+                  <td className="py-2 px-1.5"><span className="text-slate-600" title="La fija el almacén al recibir el saldo; no se edita a mano.">{inc ? fmt(i.fechaEntregaSaldo) : '—'}</span></td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{saldoDias !== null ? saldoDias + 'd' : '—'}</td>
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? (
                     <select value={i.comunicoResidente} onChange={e => updItem(i, { comunico_residente: e.target.value === 'Sí' ? true : e.target.value === 'No' ? false : null })} className={inputCls}>
@@ -2986,8 +2986,10 @@ export default function App() {
         const total = Number(item.cantRecibida || 0) + rec;
         const esSaldo = item.estado === 'Incompleto';
         const patch = { cant_recibida: total };
+        // La fecha de entrega es la del PRIMER lote que ingresa (no editable a mano);
+        // la del saldo se estampa en la recepción del saldo.
         if (esSaldo) patch.fecha_entrega_saldo = HOY_ISO;
-        else patch.fecha_entrega = item.fechaEntrega || HOY_ISO;
+        else patch.fecha_entrega = HOY_ISO;
         if (obs) patch.obs_almacen = item.obsAlmacen ? item.obsAlmacen + ' · ' + obs : obs;
         // perecedero: se conserva la caducidad más próxima entre recepciones
         if (cad) patch.fecha_caducidad = (item.fechaCaducidad && item.fechaCaducidad < cad) ? item.fechaCaducidad : cad;
