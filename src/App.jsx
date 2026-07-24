@@ -74,7 +74,7 @@ function calcularStocks(db) {
       if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
     }
   }));
-  db.salidas.forEach(s => { if (!s.anulada) ent(s.proyecto, s.cod).cant -= s.cant; });
+  db.salidas.forEach(s => { if (!s.anulada) ent(s.proyecto, s.cod).cant -= (s.cant - (s.reingresada || 0)); });
   db.prestamos.forEach(p => {
     if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
     ent(p.origen, p.cod).cant -= p.cant;
@@ -101,7 +101,7 @@ function stockDetalleObra(db, proy) {
       if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
     }
   }));
-  db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += Number(s.cant); });
+  db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += (Number(s.cant) - Number(s.reingresada || 0)); });
   db.prestamos.forEach(p => {
     if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
     if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
@@ -1598,6 +1598,7 @@ function Almacen({ user, db, api }) {
   const [proy, setProy] = useState(esAlm ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : ''));
   const [fSal, setFSal] = useState({});
   const [verif, setVerif] = useState({});
+  const [fReing, setFReing] = useState({});
   const [fPres, setFPres] = useState({ cod: '', cant: '', destino: '', autoriza: '' });
 
   const avisar = (msg, ms = 5000) => { setAviso(msg); setTimeout(() => setAviso(''), ms); };
@@ -1659,6 +1660,18 @@ function Almacen({ user, db, api }) {
     if (!motivo) return;
     marcarUso(sa, 'Incorrecto', motivo);
     const v2 = { ...verif }; delete v2[sa.n]; setVerif(v2);
+  };
+
+  const reingresar = async sa => {
+    const f = fReing[sa.n] || {};
+    const cant = Number(f.cant);
+    const disponible = Number(sa.cant) - Number(sa.reingresada || 0);
+    if (!(cant > 0) || cant > disponible) return;
+    const total = Number(sa.reingresada || 0) + cant;
+    const r = await api.updSalida(sa.id, { cant_reingresada: total, reingreso: { cant: total, por: user.nombre, fecha: HOY_ISO } });
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    const f2 = { ...fReing }; delete f2[sa.n]; setFReing(f2);
+    avisar(`Reingreso: ${cant} ${sa.und} de "${sa.desc}" devueltos a stock. La salida queda con su registro de uso incorrecto.`);
   };
 
   const matPres = stock.find(s => s.cod === fPres.cod);
@@ -1881,7 +1894,8 @@ function Almacen({ user, db, api }) {
                         : sa.uso === 'Pendiente' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-yellow-950 text-yellow-400">Pendiente</span>
                         : sa.uso === 'Correcto' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400">Correcto uso</span>
                         : <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">Uso incorrecto</span>
-                            <div className="text-red-400 text-[10px] mt-1">{sa.motivoUso}</div></div>}
+                            <div className="text-red-400 text-[10px] mt-1">{sa.motivoUso}</div>
+                            {sa.reingresada > 0 && <div className="text-green-400 text-[10px] mt-1">↩ {sa.reingresada} {sa.und} reingresado a stock{sa.reingresoPor ? ` (${sa.reingresoPor})` : ''}</div>}</div>}
                       </td>
                       <td className="py-2 px-1.5">
                         {esAlm && !sa.anulada && sa.uso === 'Pendiente' && !v && (
@@ -1889,6 +1903,25 @@ function Almacen({ user, db, api }) {
                             <button onClick={() => marcarUso(sa, 'Correcto')} className={btnVerde}>Correcto uso</button>
                             <button onClick={() => setVerif({ ...verif, [sa.n]: { motivo: MOTIVOS_USO[0], otro: '' } })} className={btnRojo}>Uso incorrecto</button>
                           </div>
+                        )}
+                        {esAlm && !sa.anulada && sa.uso === 'Incorrecto' && sa.reingresada < sa.cant && (
+                          fReing[sa.n] !== undefined ? (
+                            <div className="w-40">
+                              <div className="text-[9px] text-slate-400 mb-1">Devolver a stock (máx {sa.cant - sa.reingresada} {sa.und}):</div>
+                              <input type="number" min="1" step="any" max={sa.cant - sa.reingresada}
+                                value={fReing[sa.n].cant} onChange={e => setFReing({ ...fReing, [sa.n]: { cant: e.target.value } })}
+                                placeholder="Cantidad" className={`w-full ${inputCls}`} />
+                              <div className="flex gap-1 mt-1">
+                                <button onClick={() => reingresar(sa)} disabled={!(Number(fReing[sa.n].cant) > 0 && Number(fReing[sa.n].cant) <= sa.cant - sa.reingresada)}
+                                  className={`flex-1 ${btnOk(Number(fReing[sa.n].cant) > 0 && Number(fReing[sa.n].cant) <= sa.cant - sa.reingresada)}`}>Reingresar</button>
+                                <button onClick={() => { const f2 = { ...fReing }; delete f2[sa.n]; setFReing(f2); }} className="px-2 py-1 rounded text-[9px] text-slate-500 hover:text-slate-200">✕</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button onClick={() => setFReing({ ...fReing, [sa.n]: { cant: '' } })}
+                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                              title="Devolver a stock lo recuperable de esta salida mal usada.">↩ Reingreso</button>
+                          )
                         )}
                         {v && (
                           <div className="w-48">
@@ -2820,6 +2853,8 @@ export default function App() {
       id: s.id, n: s.numero, fecha: s.fecha, proyecto: nomProy[s.proyecto] || s.proyecto,
       cod: s.codigo, desc: matMap[s.codigo] ? matMap[s.codigo].descripcion : s.codigo,
       und: undDe(matMap[s.codigo]), cant: Number(s.cant),
+      reingresada: Number(s.cant_reingresada || 0),
+      reingresoPor: s.reingreso ? s.reingreso.por : '', fechaReingreso: s.reingreso ? s.reingreso.fecha : '',
       hoja: s.hoja_trabajo, zona: s.zona, uso: s.uso, motivoUso: s.motivo_uso || '',
       registradoPor: usrMap[s.registrado_por] ? usrMap[s.registrado_por].nombre : '',
       anulada: !!s.anulacion, motivoAnulacion: s.anulacion ? s.anulacion.motivo : '',
