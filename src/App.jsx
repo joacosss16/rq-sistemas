@@ -1773,6 +1773,21 @@ function Almacen({ user, db, api }) {
   const salidasProy = salidas.filter(s => s.proyecto === proy);
   const stock = stockDetalleObra(db, proy);
 
+  // Alerta de materiales SIN MOVIMIENTO: con stock parado y sin entradas ni
+  // salidas hace más de 30 días (capital y espacio inmovilizados).
+  const DIAS_SIN_MOV = 30;
+  const ultimoMov = {};
+  const marcarMov = (c, d) => { if (d && (!ultimoMov[c] || d > ultimoMov[c])) ultimoMov[c] = d; };
+  stockInicial.filter(si => si.proyecto === proy).forEach(si => marcarMov(si.cod, si.fecha));
+  rqs.filter(r => r.proyecto === proy).forEach(r => r.items.forEach(i => {
+    if (i.decision === 'Aprobado' && Number(i.cantRecibida) > 0) marcarMov(i.cod, i.fechaEntregaSaldo || i.fechaEntrega);
+  }));
+  salidas.filter(s => s.proyecto === proy && !s.anulada && s.aprobacion === 'Aprobada').forEach(s => marcarMov(s.cod, s.fecha));
+  const sinMov = stock.filter(s => s.stock > 0)
+    .map(s => ({ ...s, dias: ultimoMov[s.cod] ? -diasHoy(ultimoMov[s.cod]) : null, desde: ultimoMov[s.cod] || null }))
+    .filter(s => s.dias === null || s.dias > DIAS_SIN_MOV)
+    .sort((a, b) => (b.dias ?? 99999) - (a.dias ?? 99999));
+
   const darSalida = async (s, f) => {
     const r = await api.darSalida({ proyecto: proy, cod: s.cod, cant: Number(f.cant), hoja: f.hoja.trim(), zona: f.zona.trim() });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
@@ -1951,6 +1966,35 @@ function Almacen({ user, db, api }) {
           </div>
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = inicial (inventario físico) + recibido − salidas ± préstamos.</div>
+      </div>
+
+      <div className={`bg-slate-900 border rounded-md p-4 mb-3 ${sinMov.length ? 'border-yellow-700' : 'border-slate-800'}`}>
+        <div className="text-[11px] font-bold tracking-widest uppercase mb-3 flex items-center gap-2">
+          <span className={sinMov.length ? 'text-yellow-400' : 'text-slate-500'}>⚠ Materiales sin movimiento · +{DIAS_SIN_MOV} días</span>
+          <span className="text-slate-500 normal-case tracking-normal font-normal">· {proy}</span>
+        </div>
+        {sinMov.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Nada parado: todo el stock tuvo entrada o salida en el último mes. 👍</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Código', 'Material', 'Stock parado', 'Último movimiento', 'Días sin mover', 'Sugerencia'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {sinMov.map(s => (
+                  <tr key={s.cod} className="border-b border-slate-800 align-top">
+                    <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
+                    <td className="py-2 px-1.5 text-slate-200">{s.desc} <span className="text-slate-500">({s.und})</span></td>
+                    <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{s.stock} {s.und}</td>
+                    <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{s.desde ? fmt(s.desde) : 'sin registro'}</td>
+                    <td className={`py-2 px-1.5 font-mono font-bold whitespace-nowrap ${s.dias === null || s.dias > 60 ? 'text-red-400' : 'text-yellow-400'}`}>{s.dias === null ? '+60d' : s.dias + 'd'}</td>
+                    <td className="py-2 px-1.5 text-slate-400 text-[10px]">Prestar a otra obra que lo necesite, o revisar con gerencia.</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-3 text-slate-500 text-[11px]">Material con stock que no entra ni sale hace más de un mes: capital y espacio inmovilizados. Considera prestarlo a otra obra (queda como deuda) antes de que se vuelva merma.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
