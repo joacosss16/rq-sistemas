@@ -17,7 +17,7 @@ const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
-  residente: [['res', 'Mis requerimientos'], ['sto', 'Mi almacén'], ['his', 'Historial']],
+  residente: [['res', 'Mis requerimientos'], ['sto', 'Mi almacén'], ['his', 'Historial'], ['apr', 'Aprobaciones']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
@@ -74,9 +74,9 @@ function calcularStocks(db) {
       if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
     }
   }));
-  db.salidas.forEach(s => { if (!s.anulada) ent(s.proyecto, s.cod).cant -= (s.cant - (s.reingresada || 0)); });
+  db.salidas.forEach(s => { if (!s.anulada && s.aprobacion === 'Aprobada') ent(s.proyecto, s.cod).cant -= (s.cant - (s.reingresada || 0)); });
   db.prestamos.forEach(p => {
-    if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
+    if (!['Prestado', 'Transferido'].includes(p.estado)) return;
     ent(p.origen, p.cod).cant -= p.cant;
     ent(p.destino, p.cod).cant += p.cant;
   });
@@ -88,7 +88,7 @@ function calcularStocks(db) {
 function stockDetalleObra(db, proy) {
   const stockMap = {};
   const entrada = (cod, desc, und) => {
-    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, prestNeto: 0, cadMin: null };
+    if (!stockMap[cod]) stockMap[cod] = { cod, desc, und, inicial: 0, recibido: 0, salido: 0, reservado: 0, prestNeto: 0, cadMin: null };
     return stockMap[cod];
   };
   db.stockInicial.filter(si => si.proyecto === proy).forEach(si => { entrada(si.cod, si.desc, si.und).inicial += si.cant; });
@@ -101,13 +101,18 @@ function stockDetalleObra(db, proy) {
       if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
     }
   }));
-  db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => { if (stockMap[s.cod]) stockMap[s.cod].salido += (Number(s.cant) - Number(s.reingresada || 0)); });
+  db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => {
+    if (!stockMap[s.cod]) return;
+    if (s.aprobacion === 'Aprobada') stockMap[s.cod].salido += (Number(s.cant) - Number(s.reingresada || 0));
+    else if (s.aprobacion === 'Pendiente') stockMap[s.cod].reservado += Number(s.cant);   // reservado hasta que el residente apruebe
+  });
   db.prestamos.forEach(p => {
-    if (p.estado === 'Devuelto' || p.estado === 'Anulado') return;
+    if (!['Prestado', 'Transferido'].includes(p.estado)) return;
     if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
     if (p.destino === proy) entrada(p.cod, p.desc, p.und).prestNeto += Number(p.cant);
   });
-  return Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto }));
+  // stock = físico disponible; disponible = lo que aún se puede pedir (descuenta lo reservado por pendientes)
+  return Object.values(stockMap).map(s => ({ ...s, stock: s.inicial + s.recibido - s.salido + s.prestNeto, disponible: s.inicial + s.recibido - s.salido + s.prestNeto - s.reservado }));
 }
 
 // Niveles de obra para análisis de gasto por nivel
@@ -117,7 +122,7 @@ const NIVELES = [
 ];
 
 const pillEstado = e =>
-  e === 'Pendiente' ? 'bg-yellow-950 text-yellow-400'
+  e === 'Pendiente' || e === 'Solicitado' ? 'bg-yellow-950 text-yellow-400'
   : e === 'Aprobado' ? 'bg-green-950 text-green-400'
   : e === 'Comprado' ? 'bg-sky-950 text-sky-400'
   : e === 'Entregado' ? 'bg-blue-950 text-blue-400'
@@ -1590,6 +1595,138 @@ function Compras({ user, db, api, modo }) {
   );
 }
 
+// Bandeja del RESIDENTE: aprueba/rechaza salidas de su obra y su lado de los préstamos.
+function AprobacionesResidente({ user, db, api }) {
+  const { salidas, prestamos } = db;
+  const [aviso, setAviso] = useState('');
+  const [rech, setRech] = useState({});
+  const avisar = (m, ms = 5000) => { setAviso(m); setTimeout(() => setAviso(''), ms); };
+
+  const salPend = salidas.filter(s => s.proyecto === user.proyecto && !s.anulada && s.aprobacion === 'Pendiente');
+  // préstamos donde falta MI lado
+  const presPend = prestamos.filter(p => p.estado === 'Solicitado' &&
+    ((p.origen === user.proyecto && !p.aprobOrigen) || (p.destino === user.proyecto && !p.aprobDestino)));
+
+  const aprobarSal = async sa => {
+    const r = await api.updSalida(sa.id, { aprobacion: 'Aprobada' });
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    avisar(`Salida #${sa.n} aprobada: ${sa.cant} ${sa.und} de "${sa.desc}". Ya descuenta stock.`);
+  };
+  const rechazarSal = async sa => {
+    const m = (rech['s' + sa.n] || '').trim();
+    if (!m) return;
+    const r = await api.updSalida(sa.id, { aprobacion: 'Rechazada', motivo_rechazo: m });
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    const r2 = { ...rech }; delete r2['s' + sa.n]; setRech(r2);
+    avisar(`Salida #${sa.n} rechazada. El stock no se tocó. El almacenero verá el motivo.`);
+  };
+  const aprobarPres = async p => {
+    const lado = p.origen === user.proyecto ? 'aprob_origen' : 'aprob_destino';
+    const r = await api.updPrestamo(p.id, { [lado]: { por: user.nombre, fecha: HOY_ISO } });
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    avisar(`Préstamo #${p.n}: tu lado (${p.origen === user.proyecto ? 'origen' : 'destino'}) aprobado. Se activa cuando ambos den el OK.`);
+  };
+  const rechazarPres = async p => {
+    const m = (rech['p' + p.n] || '').trim();
+    if (!m) return;
+    const r = await api.updPrestamo(p.id, { rechazo: { por: user.nombre, fecha: HOY_ISO, motivo: m } });
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    const r2 = { ...rech }; delete r2['p' + p.n]; setRech(r2);
+    avisar(`Préstamo #${p.n} rechazado. No se movió stock.`);
+  };
+
+  return (
+    <div>
+      <Aviso msg={aviso} />
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Salidas de almacén por aprobar · {salPend.length}</div>
+        {salPend.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Nada pendiente. Aquí llegan las salidas que pide el almacenero; sin tu OK no descuentan stock.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['#', 'Material', 'Cantidad', 'Hoja de trabajo', 'Zona', 'Pide', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {salPend.map(sa => (
+                  <tr key={sa.n} className="border-b border-slate-800 align-top">
+                    <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{sa.n}</td>
+                    <td className="py-2 px-1.5 text-slate-200">{sa.desc} <span className="text-slate-500">({sa.und})</span></td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200">{sa.cant}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200">{sa.hoja}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{sa.zona}</td>
+                    <td className="py-2 px-1.5 text-slate-400 text-[10px]">{sa.registradoPor}</td>
+                    <td className="py-2 px-1.5">
+                      {rech['s' + sa.n] !== undefined ? (
+                        <div className="w-44">
+                          <textarea rows={2} value={rech['s' + sa.n]} onChange={e => setRech({ ...rech, ['s' + sa.n]: e.target.value })}
+                            placeholder="Motivo del rechazo…" className={`w-full ${inputCls}`} />
+                          <div className="flex gap-1 mt-1">
+                            <button onClick={() => rechazarSal(sa)} disabled={!(rech['s' + sa.n] || '').trim()}
+                              className={`flex-1 px-2 py-1 rounded text-[9px] font-bold uppercase ${(rech['s' + sa.n] || '').trim() ? 'bg-red-950 text-red-400 border border-red-800' : 'bg-slate-800 text-slate-600'}`}>Confirmar rechazo</button>
+                            <button onClick={() => { const r2 = { ...rech }; delete r2['s' + sa.n]; setRech(r2); }} className="px-2 text-slate-500">✕</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button onClick={() => aprobarSal(sa)} className={btnVerde}>Aprobar</button>
+                          <button onClick={() => setRech({ ...rech, ['s' + sa.n]: '' })} className={btnRojo}>Rechazar</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Préstamos por aprobar (tu lado) · {presPend.length}</div>
+        {presPend.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">Nada pendiente. Un préstamo se activa solo cuando lo aprueban los residentes de origen y destino.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['#', 'Material', 'Cant', 'Origen', 'Destino', 'Tu rol', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {presPend.map(p => (
+                  <tr key={p.n} className="border-b border-slate-800 align-top">
+                    <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{p.n}</td>
+                    <td className="py-2 px-1.5 text-slate-200">{p.desc} <span className="text-slate-500">({p.und})</span></td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200">{p.cant}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{p.origen}</td>
+                    <td className="py-2 px-1.5 text-slate-300">{p.destino}</td>
+                    <td className="py-2 px-1.5 text-[10px] font-semibold text-slate-400">{p.origen === user.proyecto ? 'Prestas (origen)' : 'Recibes (destino)'}</td>
+                    <td className="py-2 px-1.5">
+                      {rech['p' + p.n] !== undefined ? (
+                        <div className="w-44">
+                          <textarea rows={2} value={rech['p' + p.n]} onChange={e => setRech({ ...rech, ['p' + p.n]: e.target.value })}
+                            placeholder="Motivo del rechazo…" className={`w-full ${inputCls}`} />
+                          <div className="flex gap-1 mt-1">
+                            <button onClick={() => rechazarPres(p)} disabled={!(rech['p' + p.n] || '').trim()}
+                              className={`flex-1 px-2 py-1 rounded text-[9px] font-bold uppercase ${(rech['p' + p.n] || '').trim() ? 'bg-red-950 text-red-400 border border-red-800' : 'bg-slate-800 text-slate-600'}`}>Confirmar rechazo</button>
+                            <button onClick={() => { const r2 = { ...rech }; delete r2['p' + p.n]; setRech(r2); }} className="px-2 text-slate-500">✕</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1">
+                          <button onClick={() => aprobarPres(p)} className={btnVerde}>Aprobar</button>
+                          <button onClick={() => setRech({ ...rech, ['p' + p.n]: '' })} className={btnRojo}>Rechazar</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Almacen({ user, db, api }) {
   const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap } = db;
   const esAlm = user.rol === 'almacen';
@@ -1640,7 +1777,7 @@ function Almacen({ user, db, api }) {
     const r = await api.darSalida({ proyecto: proy, cod: s.cod, cant: Number(f.cant), hoja: f.hoja.trim(), zona: f.zona.trim() });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
     const f2 = { ...fSal }; delete f2[s.cod]; setFSal(f2);
-    avisar(`Salida registrada: ${f.cant} ${s.und} de "${s.desc}" → ${f.zona} (${f.hoja}).`, 4000);
+    avisar(`Salida solicitada: ${f.cant} ${s.und} de "${s.desc}" → ${f.zona} (${f.hoja}). Pendiente de aprobación del residente; no descuenta stock hasta el OK.`, 6000);
   };
 
   const anularSalida = async (sa, motivo) => {
@@ -1675,12 +1812,12 @@ function Almacen({ user, db, api }) {
   };
 
   const matPres = stock.find(s => s.cod === fPres.cod);
-  const presOk = esAlm && matPres && Number(fPres.cant) > 0 && Number(fPres.cant) <= matPres.stock && fPres.destino && fPres.autoriza.trim();
+  const presOk = esAlm && matPres && Number(fPres.cant) > 0 && Number(fPres.cant) <= matPres.disponible && fPres.destino;
 
   const prestar = async () => {
-    const r = await api.prestar({ origen: proy, destino: fPres.destino, cod: matPres.cod, cant: Number(fPres.cant), autoriza: fPres.autoriza.trim() });
+    const r = await api.prestar({ origen: proy, destino: fPres.destino, cod: matPres.cod, cant: Number(fPres.cant) });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
-    avisar(`Préstamo registrado: ${fPres.cant} ${matPres.und} de "${matPres.desc}" → almacén ${fPres.destino}. Queda como deuda hasta devolución o transferencia al costo.`);
+    avisar(`Préstamo solicitado: ${fPres.cant} ${matPres.und} de "${matPres.desc}" → almacén ${fPres.destino}. Pendiente de aprobación de ambos residentes (origen y destino).`, 6000);
     setFPres({ cod: '', cant: '', destino: '', autoriza: '' });
   };
 
@@ -1781,7 +1918,7 @@ function Almacen({ user, db, api }) {
                   const setS = (k, v) => setFSal({ ...fSal, [s.cod]: { ...f, [k]: v } });
                   const cad = estadoCaducidad(s.cadMin);
                   const vencido = cad && cad.k === 'VENCIDO';
-                  const listo = esAlm && !vencido && Number(f.cant) > 0 && Number(f.cant) <= s.stock && f.hoja.trim() && f.zona.trim();
+                  const listo = esAlm && !vencido && Number(f.cant) > 0 && Number(f.cant) <= s.disponible && f.hoja.trim() && f.zona.trim();
                   return (
                     <tr key={s.cod} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
@@ -1798,13 +1935,14 @@ function Almacen({ user, db, api }) {
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.recibido}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
-                      <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}</td>
+                      <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}
+                        {s.reservado > 0 && <div className="text-[9px] text-yellow-400 font-normal">−{s.reservado} pend. aprob.</div>}</td>
                       <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setS('cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
-                        {Number(f.cant) > s.stock && <div className="text-[9px] text-red-400 mt-1">Excede stock</div>}</td>
+                        {Number(f.cant) > s.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({s.disponible})</div>}</td>
                       <td className="py-2 px-1.5"><input value={f.hoja} onChange={e => setS('hoja', e.target.value)} disabled={!esAlm} placeholder="HT-001" className={`w-20 ${inputCls} font-mono`} /></td>
                       <td className="py-2 px-1.5"><input value={f.zona} onChange={e => setS('zona', e.target.value)} disabled={!esAlm} placeholder="Piso 3 - Dpto 301" className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5">
-                        <button onClick={() => darSalida(s, f)} disabled={!listo} className={btnOk(listo)}>Registrar salida</button></td>
+                        <button onClick={() => darSalida(s, f)} disabled={!listo} className={btnOk(listo)}>Solicitar aprobación</button></td>
                     </tr>
                   );
                 })}
@@ -1817,36 +1955,37 @@ function Almacen({ user, db, api }) {
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Préstamos entre almacenes</div>
-        <div className="grid md:grid-cols-5 gap-2 mb-3">
+        <div className="grid md:grid-cols-4 gap-2 mb-3">
           <div className="md:col-span-2"><label className={lblCls}>Material (con stock)</label>
             <select value={fPres.cod} onChange={e => setFPres({ ...fPres, cod: e.target.value })} disabled={!esAlm} className={`w-full ${inputCls}`}>
               <option value="">— Elegir —</option>
-              {stock.filter(s => s.stock > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (stock: {s.stock})</option>)}</select></div>
+              {stock.filter(s => s.disponible > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (disp: {s.disponible})</option>)}</select></div>
           <div><label className={lblCls}>Cantidad</label>
             <input type="number" min="1" step="any" value={fPres.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setFPres({ ...fPres, cant: v }); }} disabled={!esAlm} className={`w-full ${inputCls}`} />
-            {matPres && Number(fPres.cant) > matPres.stock && <div className="text-[9px] text-red-400 mt-1">Excede stock</div>}</div>
+            {matPres && Number(fPres.cant) > matPres.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({matPres.disponible})</div>}</div>
           <div><label className={lblCls}>Almacén destino</label>
             <FiltroProyecto value={fPres.destino} onChange={v => setFPres({ ...fPres, destino: v })} excluir={proy} /></div>
-          <div><label className={lblCls}>Quién autoriza *</label>
-            <input value={fPres.autoriza} onChange={e => setFPres({ ...fPres, autoriza: e.target.value })} disabled={!esAlm} placeholder="Nombre" className={`w-full ${inputCls}`} /></div>
         </div>
-        <button onClick={prestar} disabled={!presOk} className={btnOk(!!presOk)}>Registrar préstamo</button>
+        <button onClick={prestar} disabled={!presOk} className={btnOk(!!presOk)}>Solicitar aprobación (origen + destino)</button>
 
         {presProy.length > 0 && (
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-xs">
-              <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Origen', 'Destino', 'Autoriza', 'Estado', 'Acción'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Origen', 'Destino', 'Aprobación', 'Estado', 'Acción'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {presProy.map(p => (
                   <tr key={p.n} className="border-b border-slate-800 align-top">
                     <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{p.n}</td>
                     <td className="py-2 px-1.5 text-slate-400">{fmt(p.fecha)}</td>
                     <td className="py-2 px-1.5 text-slate-200">{p.desc} <span className="text-slate-500">({p.cant} {p.und})</span>
-                      {p.motivoAnulacion && <div className="text-red-400 text-[10px] mt-1">Anulado: {p.motivoAnulacion} ({p.anuladoPor})</div>}</td>
+                      {p.motivoAnulacion && <div className="text-red-400 text-[10px] mt-1">Anulado: {p.motivoAnulacion} ({p.anuladoPor})</div>}
+                      {p.rechazoMotivo && <div className="text-red-400 text-[10px] mt-1">Rechazado: {p.rechazoMotivo} ({p.rechazoPor})</div>}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-200">{p.cant}</td>
                     <td className={`py-2 px-1.5 ${p.origen === proy ? 'text-purple-400 font-semibold' : 'text-slate-400'}`}>{p.origen}</td>
                     <td className={`py-2 px-1.5 ${p.destino === proy ? 'text-green-400 font-semibold' : 'text-slate-400'}`}>{p.destino}</td>
-                    <td className="py-2 px-1.5 text-slate-400">{p.autoriza}</td>
+                    <td className="py-2 px-1.5 text-[10px]">
+                      <div className={p.aprobOrigen ? 'text-green-400' : 'text-yellow-400'}>{p.aprobOrigen ? '✓' : '⋯'} origen{p.aprobOrigen ? ` (${p.aprobOrigen})` : ''}</div>
+                      <div className={p.aprobDestino ? 'text-green-400' : 'text-yellow-400'}>{p.aprobDestino ? '✓' : '⋯'} destino{p.aprobDestino ? ` (${p.aprobDestino})` : ''}</div></td>
                     <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(p.estado)}`}>{p.estado}{p.estado === 'Transferido' ? ' al costo' : ''}</span></td>
                     <td className="py-2 px-1.5">
                       {esAlm && p.estado === 'Prestado' && (
@@ -1866,7 +2005,7 @@ function Almacen({ user, db, api }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Un préstamo resta stock al origen y suma al destino, y queda como deuda. "Devuelto" revierte el stock; "Transferir al costo" lo vuelve permanente y el gasto pasa al proyecto destino. Anular exige motivo y solo procede si el destino no consumió el material.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">El préstamo nace "Solicitado" y recién mueve stock cuando lo aprueban los residentes de origen y destino. Ya activo: resta al origen y suma al destino como deuda. "Devuelto" revierte el stock; "Transferir al costo" lo vuelve permanente (gasto al destino). Anular exige motivo y solo procede si el destino no consumió el material.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -1876,7 +2015,7 @@ function Almacen({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Hoja de trabajo', 'Zona', 'Uso', 'Acción', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Hoja de trabajo', 'Zona', 'Aprobación', 'Uso', 'Acción', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {salidasProy.map(sa => {
                   const v = verif[sa.n];
@@ -1890,7 +2029,13 @@ function Almacen({ user, db, api }) {
                       <td className="py-2 px-1.5 font-mono text-slate-200">{sa.hoja}</td>
                       <td className="py-2 px-1.5 text-slate-400">{sa.zona}</td>
                       <td className="py-2 px-1.5">
+                        {sa.aprobacion === 'Aprobada' ? <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400">Salida aprobada</span>{sa.aprobadoPor && <div className="text-[9px] text-slate-500 mt-0.5">por {sa.aprobadoPor}</div>}</div>
+                        : sa.aprobacion === 'Rechazada' ? <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">Rechazada</span><div className="text-red-400 text-[10px] mt-0.5">{sa.motivoRechazo}</div></div>
+                        : <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-yellow-950 text-yellow-400">Pendiente aprob.</span>}
+                      </td>
+                      <td className="py-2 px-1.5">
                         {sa.anulada ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-red-300 line-through">Anulada</span>
+                        : sa.aprobacion !== 'Aprobada' ? <span className="text-slate-600">—</span>
                         : sa.uso === 'Pendiente' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-yellow-950 text-yellow-400">Pendiente</span>
                         : sa.uso === 'Correcto' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400">Correcto uso</span>
                         : <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">Uso incorrecto</span>
@@ -1898,7 +2043,7 @@ function Almacen({ user, db, api }) {
                             {sa.reingresada > 0 && <div className="text-green-400 text-[10px] mt-1">↩ {sa.reingresada} {sa.und} reingresado a stock{sa.reingresoPor ? ` (${sa.reingresoPor})` : ''}</div>}</div>}
                       </td>
                       <td className="py-2 px-1.5">
-                        {esAlm && !sa.anulada && sa.uso === 'Pendiente' && !v && (
+                        {esAlm && !sa.anulada && sa.aprobacion === 'Aprobada' && sa.uso === 'Pendiente' && !v && (
                           <div className="flex gap-1">
                             <button onClick={() => marcarUso(sa, 'Correcto')} className={btnVerde}>Correcto uso</button>
                             <button onClick={() => setVerif({ ...verif, [sa.n]: { motivo: MOTIVOS_USO[0], otro: '' } })} className={btnRojo}>Uso incorrecto</button>
@@ -2855,6 +3000,9 @@ export default function App() {
       und: undDe(matMap[s.codigo]), cant: Number(s.cant),
       reingresada: Number(s.cant_reingresada || 0),
       reingresoPor: s.reingreso ? s.reingreso.por : '', fechaReingreso: s.reingreso ? s.reingreso.fecha : '',
+      aprobacion: s.aprobacion || 'Aprobada',
+      aprobadoPor: usrMap[s.aprobado_por] ? usrMap[s.aprobado_por].nombre : '',
+      fechaAprobacion: s.fecha_aprobacion || '', motivoRechazo: s.motivo_rechazo || '',
       hoja: s.hoja_trabajo, zona: s.zona, uso: s.uso, motivoUso: s.motivo_uso || '',
       registradoPor: usrMap[s.registrado_por] ? usrMap[s.registrado_por].nombre : '',
       anulada: !!s.anulacion, motivoAnulacion: s.anulacion ? s.anulacion.motivo : '',
@@ -2867,6 +3015,8 @@ export default function App() {
       cod: p.codigo, desc: matMap[p.codigo] ? matMap[p.codigo].descripcion : p.codigo,
       und: undDe(matMap[p.codigo]), cant: Number(p.cant),
       autoriza: p.autoriza, estado: p.estado, fechaCierre: p.fecha_cierre,
+      aprobOrigen: p.aprob_origen ? p.aprob_origen.por : '', aprobDestino: p.aprob_destino ? p.aprob_destino.por : '',
+      rechazoMotivo: p.rechazo ? p.rechazo.motivo : '', rechazoPor: p.rechazo ? p.rechazo.por : '',
       motivoAnulacion: p.anulacion ? p.anulacion.motivo : '', anuladoPor: p.anulacion ? p.anulacion.por : '',
       registradoPor: usrMap[p.registrado_por] ? usrMap[p.registrado_por].nombre : '',
     }));
@@ -3037,10 +3187,10 @@ export default function App() {
         });
       }),
       updSalida: (id, patch) => wrap(async () => await supabase.from('salidas').update(patch).eq('id', id)),
-      prestar: ({ origen, destino, cod: codigo, cant, autoriza }) => wrap(async () => {
+      prestar: ({ origen, destino, cod: codigo, cant }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('prestamos').insert({
-          origen: cod(origen), destino: cod(destino), codigo, cant, autoriza, registrado_por: u.id,
+          origen: cod(origen), destino: cod(destino), codigo, cant, registrado_por: u.id,
         });
       }),
       updPrestamo: (id, patch) => wrap(async () => await supabase.from('prestamos').update(patch).eq('id', id)),
@@ -3121,6 +3271,7 @@ export default function App() {
         {tab === 'dia' && <ComprasDelDia db={db} api={api} />}
         {tab === 'sto' && <AlmacenResidente user={user} db={db} />}
         {tab === 'his' && <HistorialMateriales user={user} db={db} />}
+        {tab === 'apr' && <AprobacionesResidente user={user} db={db} api={api} />}
         {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
         {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
