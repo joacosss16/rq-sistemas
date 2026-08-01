@@ -17,7 +17,7 @@ const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
-  residente: [['res', 'Mis requerimientos'], ['sto', 'Mi almacén'], ['his', 'Historial'], ['apr', 'Aprobaciones']],
+  residente: [['res', 'Mis requerimientos'], ['apr', 'Aprobaciones'], ['sto', 'Mi almacén'], ['his', 'Historial']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   administracion: [['ren', 'Rendiciones']],
@@ -3194,6 +3194,14 @@ export default function App() {
     })();
   }, [session, cargarTodo]);
 
+  // Auto-refresco: trae los últimos datos cada 40 s (para que las salidas y
+  // préstamos por aprobar le aparezcan al residente sin refrescar a mano).
+  useEffect(() => {
+    if (!session) return;
+    const t = setInterval(() => { if (!document.hidden) cargarTodo(); }, 40000);
+    return () => clearInterval(t);
+  }, [session, cargarTodo]);
+
   const api = useMemo(() => {
     const cod = nombre => (dbRef.current ? dbRef.current.codProy[nombre] : null) || nombre;
     const wrap = async (fn) => {
@@ -3395,6 +3403,11 @@ export default function App() {
   );
 
   const tabs = TABS_POR_ROL[user.rol] || [];
+  // pendientes de aprobación del residente (para avisar en la pestaña)
+  const pendAprob = (user.rol === 'residente' && db) ? (
+    db.salidas.filter(s => s.proyecto === user.proyecto && !s.anulada && s.aprobacion === 'Pendiente').length +
+    db.prestamos.filter(p => p.estado === 'Solicitado' && ((p.origen === user.proyecto && !p.aprobOrigen) || (p.destino === user.proyecto && !p.aprobDestino))).length
+  ) : 0;
 
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>
@@ -3404,10 +3417,14 @@ export default function App() {
         <div className="text-slate-400 text-[11px]">{user.nombre}{user.proyecto ? ' · ' + user.proyecto : ''} <span className="text-slate-600">({user.rol})</span></div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 bg-slate-800 p-1 rounded">
-            {tabs.map(([k, l]) => (
+            {tabs.map(([k, l]) => {
+              const alerta = k === 'apr' && pendAprob > 0 && tab !== 'apr';
+              return (
               <button key={k} onClick={() => setTab(k)}
-                className={`px-3 py-1.5 rounded text-[11px] font-semibold tracking-wide uppercase ${tab === k ? 'bg-yellow-400 text-slate-950' : 'text-slate-400 hover:text-slate-200'}`}>{l}</button>
-            ))}
+                className={`px-3 py-1.5 rounded text-[11px] font-semibold tracking-wide uppercase ${tab === k ? 'bg-yellow-400 text-slate-950' : alerta ? 'text-yellow-400 ring-1 ring-yellow-400 bg-yellow-400/10' : 'text-slate-400 hover:text-slate-200'}`}>
+                {l}{k === 'apr' && pendAprob > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-yellow-400 text-slate-950 text-[9px] font-bold">{pendAprob}</span>}</button>
+              );
+            })}
           </div>
           <button onClick={() => cargarTodo()} title="Traer los últimos datos"
             className="px-2.5 py-1.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700 hover:text-yellow-400 hover:border-yellow-400">⟳ Actualizar</button>
