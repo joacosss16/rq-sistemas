@@ -506,7 +506,7 @@ function Residente({ user, db, api }) {
     setSolForm(null);
   };
 
-  const misRqs = esRes ? rqs.filter(r => r.proyecto === user.proyecto) : rqs;
+  const misRqs = esRes ? rqs.filter(r => r.proyecto === user.proyecto && r.tipo !== 'Cotizacion') : rqs;
   const misSol = esRes ? solicitudes.filter(s => s.solicitanteId === user.id) : solicitudes;
 
   // Un RQ se archiva solo cuando ya no queda nada por atender:
@@ -1090,6 +1090,82 @@ function Catalogo({ user, db, api }) {
   );
 }
 
+// Pedido por cotización (enchapes): lo registra Lucía con la cotización que
+// le alcanza el arquitecto. Crea cada material 97xxxx y el pedido, ya aprobado.
+function PedidoCotizacion({ user, db, api }) {
+  const [abierto, setAbierto] = useState(false);
+  const [cab, setCab] = useState({ proyecto: PROYECTOS[0] ? PROYECTOS[0][1] : '', ref: '', arq: '', fecha: HOY_ISO });
+  const [lineas, setLineas] = useState([{ desc: '', pzasCaja: '', cant: '', destino: '' }]);
+  const [aviso, setAviso] = useState('');
+  const avisar = (m, ms = 6000) => { setAviso(m); setTimeout(() => setAviso(''), ms); };
+
+  const setL = (i, k, v) => setLineas(lineas.map((l, j) => j === i ? { ...l, [k]: v } : l));
+  const addL = () => setLineas([...lineas, { desc: '', pzasCaja: '', cant: '', destino: '' }]);
+  const delL = i => setLineas(lineas.filter((_, j) => j !== i));
+
+  const lineasOk = lineas.filter(l => l.desc.trim() && Number(l.cant) > 0 && l.destino.trim());
+  const listo = cab.proyecto && cab.ref.trim() && cab.arq.trim() && cab.fecha >= HOY_ISO && lineasOk.length > 0;
+
+  const enviar = async () => {
+    if (!listo) return;
+    const r = await api.crearPedidoCotizacion({
+      proyecto: cab.proyecto, cotizacionRef: cab.ref, arquitecto: cab.arq, fecha: cab.fecha,
+      lineas: lineasOk.map(l => ({ desc: l.desc, pzasCaja: l.pzasCaja, cant: l.cant, destino: l.destino })),
+    });
+    if (r.error) { avisar('⚠ ' + r.error); return; }
+    avisar(`Pedido por cotización ${cab.ref} registrado (RQ-${String(r.numero).padStart(3, '0')}) con ${lineasOk.length} enchape(s). Ya está aprobado y listo para facturar y recibir en almacén.`);
+    setCab({ proyecto: cab.proyecto, ref: '', arq: '', fecha: HOY_ISO });
+    setLineas([{ desc: '', pzasCaja: '', cant: '', destino: '' }]);
+    setAbierto(false);
+  };
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Pedido por cotización · enchapes y acabados personalizados</div>
+        <button onClick={() => setAbierto(v => !v)}
+          className="ml-auto px-2.5 py-1.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">
+          {abierto ? '✕ Cerrar' : '＋ Nuevo pedido'}</button>
+      </div>
+      <Aviso msg={aviso} />
+      {!abierto ? (
+        <div className="text-slate-500 text-[11px] mt-2">Para materiales que elige el arquitecto con el propietario (no van por RQ del residente). Cada modelo se crea con código propio de la familia <b>97 · ENCHAPES</b> y entra al almacén de la obra como cualquier material.</div>
+      ) : (
+        <div className="mt-3">
+          <div className="grid md:grid-cols-4 gap-2 mb-3">
+            <div><label className={lblCls}>Obra</label><FiltroProyecto value={cab.proyecto} onChange={v => setCab({ ...cab, proyecto: v })} /></div>
+            <div><label className={lblCls}>N° de cotización *</label><input value={cab.ref} onChange={e => setCab({ ...cab, ref: e.target.value })} placeholder="COT-2503-011" className={`w-full ${inputCls} font-mono`} /></div>
+            <div><label className={lblCls}>Arquitecto que solicita *</label><input value={cab.arq} onChange={e => setCab({ ...cab, arq: e.target.value })} placeholder="Nombre del arquitecto" className={`w-full ${inputCls}`} /></div>
+            <div><label className={lblCls}>Fecha necesitada *</label><FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setCab({ ...cab, fecha: e.target.value })} className={`w-full ${inputCls}`} /></div>
+          </div>
+          <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">Enchapes de esta cotización</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Descripción (modelo · color · formato · m²)', 'Piezas/caja', 'Cantidad (piezas)', 'Destino (baño / depto)', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {lineas.map((l, i) => (
+                  <tr key={i} className="border-b border-slate-800">
+                    <td className="py-1.5 px-1"><input value={l.desc} onChange={e => setL(i, 'desc', e.target.value)} placeholder="Porcelanato gris 60x60" className={`w-full ${inputCls}`} /></td>
+                    <td className="py-1.5 px-1"><input type="number" min="1" step="any" value={l.pzasCaja} onChange={e => setL(i, 'pzasCaja', e.target.value)} placeholder="opc." className={`w-20 ${inputCls}`} /></td>
+                    <td className="py-1.5 px-1"><input type="number" min="1" step="any" value={l.cant} onChange={e => setL(i, 'cant', e.target.value)} placeholder="piezas" className={`w-24 ${inputCls}`} /></td>
+                    <td className="py-1.5 px-1"><input value={l.destino} onChange={e => setL(i, 'destino', e.target.value)} placeholder="Baño Dpto 302" className={`w-full ${inputCls}`} /></td>
+                    <td className="py-1.5 px-1">{lineas.length > 1 && <button onClick={() => delL(i)} className="text-slate-500 hover:text-red-400 text-sm">✕</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <button onClick={addL} className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-500">＋ Otro enchape</button>
+            <button onClick={enviar} disabled={!listo} className={`ml-auto ${btnOk(listo)}`}>Registrar pedido por cotización</button>
+          </div>
+          <div className="mt-2 text-slate-500 text-[10px]">Piezas/caja es opcional: si lo pones, el almacenero recibe en cajas y el sistema calcula las piezas. El precio (por m² o pieza) se registra al facturar, como cualquier material.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Compras({ user, db, api, modo }) {
   const { rqs, facturas, proveedores, ultimaCompra } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
@@ -1112,7 +1188,7 @@ function Compras({ user, db, api, modo }) {
   };
 
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
-  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso })));
+  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso, tipoRq: r.tipo, cotizacionRef: r.cotizacionRef })));
   // primero lo que se necesita antes (fecha necesitada ascendente)
   const flatAbierto = flatBase
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
@@ -1261,6 +1337,7 @@ function Compras({ user, db, api, modo }) {
 
   return (
     <div>
+    {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
     {!facturarSolo && porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
@@ -1376,7 +1453,8 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.proyecto}</td>
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap text-[10px]">{i.piso || '—'}</td>
                   <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 ${i.canal === 'URGENTE' ? 'text-red-400' : i.canal === 'GENERAL' ? 'text-green-400' : 'text-yellow-400'}`}>{i.canal}</span></td>
-                  <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.residente}</td>
+                  <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.residente}
+                    {i.tipoRq === 'Cotizacion' && <div className="text-[8px] font-bold uppercase text-amber-400">Cotización · {i.cotizacionRef}</div>}</td>
                   <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
                     {i.just && <div className="text-yellow-400 text-[10px] mt-1">Motivo: {i.just}</div>}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200">{i.cant}</td>
@@ -3005,7 +3083,9 @@ export default function App() {
 
     const rqs = rqsR.data.map(r => ({
       id: r.id, n: r.numero, proyecto: nomProy[r.proyecto] || r.proyecto, partida: r.partida,
-      residente: usrMap[r.residente_id] ? usrMap[r.residente_id].nombre : '', almacen: r.almacen_resp || '',
+      tipo: r.tipo || 'RQ', cotizacionRef: r.cotizacion_ref || '', arquitecto: r.solicitante_diseno || '',
+      residente: r.tipo === 'Cotizacion' ? (r.solicitante_diseno || 'Diseño') : (usrMap[r.residente_id] ? usrMap[r.residente_id].nombre : ''),
+      almacen: r.almacen_resp || '',
       piso: r.piso || '', canal: r.canal, just: r.justificacion || '', fechaRQ: r.fecha_rq,
       creadoPor: usrMap[r.creado_por] ? usrMap[r.creado_por].nombre : '', items: itemsPorRq[r.id] || [],
     }));
@@ -3254,6 +3334,33 @@ export default function App() {
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
         await supabase.from('familias').insert({ iu, nombre })),
+      // Pedido por cotización (enchapes): crea cada material 97xxxx + el pedido aprobado
+      crearPedidoCotizacion: ({ proyecto, cotizacionRef, arquitecto, fecha, lineas }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        const cat = dbRef.current.catalogo;
+        let cod97 = Math.max(970100, ...cat.filter(m => String(m[0]).startsWith('97')).map(m => Number(m[0])));
+        const mats = [];
+        for (const l of lineas) {
+          cod97 += 1;
+          const codigo = String(cod97);
+          const factor = Number(l.pzasCaja) || null;
+          const { error } = await supabase.from('materiales').insert({
+            codigo, descripcion: l.desc.trim().toUpperCase(), familia: 'ENCHAPES',
+            und: factor ? 'CAJA' : 'PZA', und_base: factor ? 'PZA' : null, factor_caja: factor,
+          });
+          if (error) return { error };
+          mats.push({ codigo, cant: Number(l.cant), destino: l.destino.trim() });
+        }
+        const { data: rq, error: e1 } = await supabase.from('rqs').insert({
+          proyecto: cod(proyecto), partida: cotizacionRef.trim(), residente_id: u.id, creado_por: u.id,
+          tipo: 'Cotizacion', cotizacion_ref: cotizacionRef.trim(), solicitante_diseno: arquitecto.trim(), canal: 'GENERAL',
+        }).select().single();
+        if (e1) return { error: e1 };
+        const rows = mats.map(m => ({ rq_id: rq.id, codigo: m.codigo, cant: m.cant, fecha_necesitada: fecha, destino: m.destino, decision: 'Aprobado' }));
+        const { error: e2 } = await supabase.from('rq_items').insert(rows);
+        if (e2) return { error: e2 };
+        return { numero: rq.numero };
+      }),
       setPerecedero: (codigo, valor) => wrap(async () =>
         await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo)),
       conciliarFactura: (id, valor) => wrap(async () => {
