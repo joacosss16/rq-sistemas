@@ -38,13 +38,13 @@ const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque',
 const canalClases = {
   URGENTE: 'bg-red-950 text-red-400 border-red-800',
   GENERAL: 'bg-green-950 text-green-400 border-green-800',
-  'ESPECIAL LIMA': 'bg-yellow-950 text-yellow-400 border-yellow-800',
+  ANTICIPADO: 'bg-yellow-950 text-yellow-400 border-yellow-800',
 };
 
 function canalDeFecha(f) {
   if (!f) return null;
   const m = diasHoy(f);
-  const k = m < 2 ? 'URGENTE' : m <= 7 ? 'GENERAL' : 'ESPECIAL LIMA';
+  const k = m < 2 ? 'URGENTE' : m <= 7 ? 'GENERAL' : 'ANTICIPADO';
   return { k, cls: canalClases[k] };
 }
 

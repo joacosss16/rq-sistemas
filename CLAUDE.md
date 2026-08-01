@@ -34,7 +34,7 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 ### Canales de RQ (automático por fecha necesitada mínima vs hoy)
 - **URGENTE**: < 2 días → justificación obligatoria ("¿por qué no se previó?")
 - **GENERAL**: ≤ 7 días
-- **ESPECIAL LIMA**: > 7 días (compras en Lima / importación, 1-4 semanas)
+- **ANTICIPADO**: > 7 días (compras planificadas con anticipación / importación, 1-4 semanas; antes "ESPECIAL LIMA", migración 21)
 
 ### Flujo por ítem
 1. Residente crea RQ (proyecto fijo por login, partida auto-prefijada con código de obra, fecha necesitada ≥ hoy obligatoria, destino detallado obligatorio, color opcional con nota "dejar vacío si no aplica"). Al enviar se genera PDF formal (réplica de la HOJA RQ con membrete y bloque de 4 firmas: Residente → V°B° Gerente de Operaciones → Recepción en obra → Entregado por). El PDF también se puede regenerar desde "Mis requerimientos" y desde Compras (clic en RQ-xxx).
