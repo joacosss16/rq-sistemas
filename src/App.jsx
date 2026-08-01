@@ -1632,7 +1632,7 @@ function Compras({ user, db, api, modo }) {
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
-          Facturas {verPagadas ? 'registradas' : 'por pagar'} · {factMostradas.length}{factMostradas.length > 0 ? ` · S/ ${factMostradas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+          Facturas {verPagadas ? 'registradas' : 'por pagar'} · {factMostradas.length}</div>
         <button onClick={() => setVerPagadas(v => !v)}
           className={`ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase border ${verPagadas ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
           {verPagadas ? '✕ Solo pendientes' : `Ver pagadas · ${factPagadas.length}`}</button>
