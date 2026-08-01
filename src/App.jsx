@@ -481,7 +481,7 @@ function Residente({ user, db, api }) {
   const justOk = !urgente || !!just.trim();
   const cabeceraLista = partidaOk && nivelOk && fechaOk && justOk;
 
-  const cabOk = cab.residente.trim() && cab.almacen.trim() && cab.piso && cab.fecha && cab.fecha >= HOY_ISO;
+  const cabOk = cab.residente.trim() && cab.piso && cab.fecha && cab.fecha >= HOY_ISO;
   const itemsOk = items.length > 0 && items.every(i => Number(i.cant) > 0 && i.destino.trim());
   const hayFechaPasada = cab.fecha && cab.fecha < HOY_ISO;
   const ok = esRes && cabOk && itemsOk && (!urgente || just.trim()) && !enviando;
@@ -546,8 +546,6 @@ function Residente({ user, db, api }) {
               onKeyDown={saltarA(refNivel)} className={`w-full ${pendCls(partidaOk)}`} /></div>
           <div><label className={lblCls}>Residente de obra *</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
-          <div><label className={lblCls}>Adm. de almacén *</label>
-            <input value={cab.almacen} onChange={e => setC('almacen', e.target.value)} placeholder="Responsable" className={`w-full ${inputCls}`} /></div>
           <div><label className={lblCls}>2. Nivel donde se utilizará *</label>
             <select ref={refNivel} value={cab.piso} onChange={e => setC('piso', e.target.value)} disabled={!partidaOk}
               onKeyDown={saltarA(refFecha)}
