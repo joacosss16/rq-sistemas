@@ -2951,6 +2951,7 @@ export default function App() {
   const [cargaError, setCargaError] = useState('');
   const [tab, setTab] = useState('tab');
   const dbRef = useRef(null);
+  const estaticosRef = useRef(null);   // cache de tablas casi-estáticas (catálogo, maestros)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -2969,7 +2970,7 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  const cargarTodo = useCallback(async () => {
+  const cargarTodo = useCallback(async (soloDinamicos = false) => {
     // Supabase devuelve máximo 1,000 filas por consulta: traer por lotes
     // hasta completar (el catálogo tiene 1,740 materiales).
     const LOTE = 1000;
@@ -2982,11 +2983,8 @@ export default function App() {
         if (data.length < LOTE) return { data: filas };
       }
     };
-    const q = [
-      fetchAll(() => supabase.from('proyectos').select('*').order('codigo')),
-      fetchAll(() => supabase.from('usuarios').select('*').order('id')),
-      fetchAll(() => supabase.from('materiales').select('*').eq('activo', true).order('codigo')),
-      fetchAll(() => supabase.from('proveedores').select('*').order('razon_social').order('ruc')),
+    // Transaccional: cambia seguido, se refresca en cada ciclo (auto-refresco de 40s)
+    const qDin = [
       fetchAll(() => supabase.from('rqs').select('*').order('numero')),
       fetchAll(() => supabase.from('rq_items').select('*').order('creado_en').order('id')),
       fetchAll(() => supabase.from('facturas').select('*').order('numero')),
@@ -2994,12 +2992,29 @@ export default function App() {
       fetchAll(() => supabase.from('salidas').select('*').order('numero')),
       fetchAll(() => supabase.from('prestamos').select('*').order('numero')),
       fetchAll(() => supabase.from('solicitudes_material').select('*').order('numero')),
-      fetchAll(() => supabase.from('familias').select('*').order('iu')),
       fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
       fetchAll(() => supabase.from('cajas_chicas').select('*').order('proyecto')),
       fetchAll(() => supabase.from('rendiciones').select('*').order('numero')),
     ];
-    const [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR] = await Promise.all(q);
+    // Casi-estático: catálogo + maestros. Se trae una vez (o en refresco completo);
+    // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
+    const usarCache = soloDinamicos && estaticosRef.current;
+    const qEst = usarCache ? [] : [
+      fetchAll(() => supabase.from('proyectos').select('*').order('codigo')),
+      fetchAll(() => supabase.from('usuarios').select('*').order('id')),
+      fetchAll(() => supabase.from('materiales').select('*').eq('activo', true).order('codigo')),
+      fetchAll(() => supabase.from('proveedores').select('*').order('razon_social').order('ruc')),
+      fetchAll(() => supabase.from('familias').select('*').order('iu')),
+    ];
+    const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
+    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
+    let prjR, usrR, matR, provR, famR;
+    if (usarCache) {
+      ({ prjR, usrR, matR, provR, famR } = estaticosRef.current);
+    } else {
+      [prjR, usrR, matR, provR, famR] = estR;
+      estaticosRef.current = { prjR, usrR, matR, provR, famR };
+    }
     const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
@@ -3198,7 +3213,7 @@ export default function App() {
   // préstamos por aprobar le aparezcan al residente sin refrescar a mano).
   useEffect(() => {
     if (!session) return;
-    const t = setInterval(() => { if (!document.hidden) cargarTodo(); }, 40000);
+    const t = setInterval(() => { if (!document.hidden) cargarTodo(true); }, 40000);
     return () => clearInterval(t);
   }, [session, cargarTodo]);
 
