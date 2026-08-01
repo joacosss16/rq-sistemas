@@ -3345,7 +3345,7 @@ export default function App() {
           const codigo = String(cod97);
           const factor = Number(l.pzasCaja) || null;
           const { error } = await supabase.from('materiales').insert({
-            codigo, descripcion: l.desc.trim().toUpperCase(), familia: 'ENCHAPES',
+            codigo, descripcion: l.desc.trim().toUpperCase(),
             und: factor ? 'CAJA' : 'PZA', und_base: factor ? 'PZA' : null, factor_caja: factor,
           });
           if (error) return { error };
