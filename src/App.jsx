@@ -16,7 +16,7 @@ const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 
 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
-  compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['ren', 'Rendiciones'], ['tab', 'Tablero']],
+  compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['tab', 'Tablero']],
   residente: [['res', 'Mis requerimientos'], ['apr', 'Aprobaciones'], ['sto', 'Mi almacén'], ['his', 'Historial']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
@@ -1449,12 +1449,14 @@ function Compras({ user, db, api, modo }) {
     .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
   const esTriage = {
     decidir: i => i.decision === 'Pendiente',
+    porComprar: i => i.decision === 'Aprobado' && i.estado === '—',
     facturar: i => i.decision === 'Aprobado' && !i.factura,
     comprado: i => i.estado === 'Comprado',
     incompleto: i => i.estado === 'Incompleto',
   };
   const chips = [
     !facturarSolo && ['decidir', 'Por decidir', 'text-yellow-400'],
+    !facturarSolo && ['porComprar', 'Por comprar', 'text-orange-400'],
     ['facturar', 'Por facturar', 'text-sky-400'],
     ['comprado', 'Comprado', 'text-green-400'],
     ['incompleto', 'Incompletos', 'text-red-400'],
@@ -3164,6 +3166,13 @@ function ReporteMensual({ db }) {
   }, [itemsM]);
 
   const sol = n => 'S/ ' + n.toFixed(2);
+
+  // Desglose: al hacer clic en un indicador se abre el detalle que hay detrás
+  const [detalle, setDetalle] = useState(null);   // { bloque, titulo, cols, filas }
+  const abrir = (bloque, titulo, cols, filas) =>
+    setDetalle(d => (d && d.titulo === titulo ? null : { bloque, titulo, cols, filas }));
+  const rqDe = n => 'RQ-' + String(n).padStart(3, '0');
+
   const csv = () => {
     const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const filas = [['Perfil', 'Nombre/Obra', 'Indicador', 'Valor']];
@@ -3190,18 +3199,50 @@ function ReporteMensual({ db }) {
     URL.revokeObjectURL(a.href);
   };
 
-  const Bloque = ({ titulo, sub, children }) => (
+  const Bloque = ({ id, titulo, sub, children }) => (
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
       <div className="text-[11px] font-bold tracking-widest text-yellow-400 uppercase">{titulo}</div>
       {sub && <div className="text-[10px] text-slate-500 mb-2">{sub}</div>}
       <div className="mt-2">{children}</div>
+      {detalle && detalle.bloque === id && (
+        <div className="mt-3 border-t border-slate-700 pt-3">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-yellow-400">
+              {detalle.titulo} · {detalle.filas.length}</div>
+            <button onClick={() => setDetalle(null)}
+              className="ml-auto px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200">✕ Cerrar</button>
+          </div>
+          {detalle.filas.length === 0 ? (
+            <div className="text-slate-500 text-[11px] py-2">Sin registros.</div>
+          ) : (
+            <div className="overflow-x-auto max-h-96 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead><tr>{detalle.cols.map((h, i) => <th key={i} className={`${thCls} sticky top-0 bg-slate-900`}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {detalle.filas.map((f, i) => (
+                    <tr key={i} className="border-b border-slate-800">
+                      {f.map((c, j) => <td key={j} className="py-1.5 px-1.5 text-slate-300 align-top">{c}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
-  const Tarjeta = ({ l, v, c = 'text-slate-100' }) => (
-    <div className="bg-slate-950 border border-slate-800 rounded p-2">
+  // Tarjeta clicable: si trae onClick, se puede desplegar su detalle
+  const Tarjeta = ({ l, v, c = 'text-slate-100', onClick, activa }) => (
+    <div onClick={onClick}
+      className={`bg-slate-950 border rounded p-2 ${onClick ? 'cursor-pointer hover:border-yellow-400' : ''} ${activa ? 'border-yellow-400' : 'border-slate-800'}`}>
       <div className={`text-sm font-bold ${c}`}>{v}</div>
-      <div className="text-[9px] uppercase tracking-wider text-slate-500 mt-0.5">{l}</div>
+      <div className="text-[9px] uppercase tracking-wider text-slate-500 mt-0.5">{l}{onClick ? ' ›' : ''}</div>
     </div>
+  );
+  // Celda de tabla clicable
+  const Cel = ({ children, onClick, cls = '' }) => (
+    <td onClick={onClick} className={`py-1.5 px-1.5 ${cls} ${onClick ? 'cursor-pointer hover:text-yellow-400 underline decoration-dotted underline-offset-2' : ''}`}>{children}</td>
   );
   const vacio = <div className="text-slate-500 text-[11px] py-2">Sin movimientos en este mes.</div>;
 
@@ -3227,79 +3268,154 @@ function ReporteMensual({ db }) {
         </div>
       </div>
 
-      <Bloque titulo="Residentes" sub="Quién planifica y quién apaga incendios: a más % urgentes, peor planificación.">
+      <Bloque id="res" titulo="Residentes" sub="Quién planifica y quién apaga incendios: a más % urgentes, peor planificación. Haz clic en cualquier número para ver el detalle.">
         {porResidente.length === 0 ? vacio : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr>{['Residente', 'Obra', 'RQs', 'Ítems', '% Urgentes', 'Rechazados', 'Holgura prom', 'A tiempo'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {porResidente.map(r => (
+                {porResidente.map(r => {
+                  const susRqs = rqsM.filter(x => (x.residente || '—') === r.nombre);
+                  const susItems = itemsM.filter(x => (x.residente || '—') === r.nombre);
+                  const conEntrega = susItems.filter(i => i.fechaEntrega && i.fecha);
+                  return (
                   <tr key={r.nombre} className="border-b border-slate-800">
                     <td className="py-1.5 px-1.5 text-slate-200">{r.nombre}</td>
                     <td className="py-1.5 px-1.5 text-slate-400">{r.obra}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{r.rqs}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{r.items}</td>
-                    <td className={`py-1.5 px-1.5 font-mono font-bold ${r.urgPct >= 50 ? 'text-red-400' : r.urgPct >= 25 ? 'text-yellow-400' : 'text-green-400'}`}>{r.urgPct}%</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-400">{r.rech}</td>
-                    <td className={`py-1.5 px-1.5 font-mono ${r.holgProm === null ? 'text-slate-500' : r.holgProm < 0 ? 'text-red-400' : 'text-green-400'}`}>{r.holgProm === null ? '—' : r.holgProm + 'd'}</td>
-                    <td className={`py-1.5 px-1.5 font-mono ${r.aTiempo === null ? 'text-slate-500' : r.aTiempo >= 80 ? 'text-green-400' : 'text-yellow-400'}`}>{r.aTiempo === null ? '—' : r.aTiempo + '%'}</td>
+                    <Cel cls="font-mono text-slate-300"
+                      onClick={() => abrir('res', `RQs de ${r.nombre}`, ['N° RQ', 'Fecha', 'Canal', 'Partida', 'Nivel', 'Ítems'],
+                        susRqs.map(x => [rqDe(x.n), fmt(x.fechaRQ), x.canal, x.partida, x.piso || '—', x.items.length]))}>{r.rqs}</Cel>
+                    <Cel cls="font-mono text-slate-300"
+                      onClick={() => abrir('res', `Ítems pedidos por ${r.nombre}`, ['RQ', 'Material', 'Cant', 'Necesitada', 'Decisión', 'Estado'],
+                        susItems.map(i => [rqDe(i.rq), i.desc, `${i.cant} ${i.und}`, fmt(i.fecha), i.decision || '—', i.estado || '—']))}>{r.items}</Cel>
+                    <Cel cls={`font-mono font-bold ${r.urgPct >= 50 ? 'text-red-400' : r.urgPct >= 25 ? 'text-yellow-400' : 'text-green-400'}`}
+                      onClick={() => abrir('res', `RQs URGENTES de ${r.nombre} · por qué no se previó`, ['N° RQ', 'Fecha', 'Partida', 'Justificación del residente'],
+                        susRqs.filter(x => x.canal === 'URGENTE').map(x => [rqDe(x.n), fmt(x.fechaRQ), x.partida, x.just || '— (sin justificar)']))}>{r.urgPct}%</Cel>
+                    <Cel cls="font-mono text-slate-400"
+                      onClick={() => abrir('res', `Ítems rechazados a ${r.nombre}`, ['RQ', 'Material', 'Cant', 'Motivo del rechazo'],
+                        susItems.filter(i => i.decision === 'Rechazado').map(i => [rqDe(i.rq), i.desc, `${i.cant} ${i.und}`, i.motivoRechazo || '—']))}>{r.rech}</Cel>
+                    <Cel cls={`font-mono ${r.holgProm === null ? 'text-slate-500' : r.holgProm < 0 ? 'text-red-400' : 'text-green-400'}`}
+                      onClick={() => abrir('res', `Holgura de ${r.nombre} (necesitada − entrega)`, ['RQ', 'Material', 'Necesitada', 'Entregado', 'Holgura'],
+                        conEntrega.map(i => { const h = dias(i.fecha, i.fechaEntrega); return [rqDe(i.rq), i.desc, fmt(i.fecha), fmt(i.fechaEntrega), h + 'd' + (h < 0 ? ' ⚠ tarde' : '')]; }))}>{r.holgProm === null ? '—' : r.holgProm + 'd'}</Cel>
+                    <Cel cls={`font-mono ${r.aTiempo === null ? 'text-slate-500' : r.aTiempo >= 80 ? 'text-green-400' : 'text-yellow-400'}`}
+                      onClick={() => abrir('res', `Entregas tarde a ${r.nombre}`, ['RQ', 'Material', 'Necesitada', 'Entregado', 'Días de atraso'],
+                        conEntrega.filter(i => dias(i.fecha, i.fechaEntrega) < 0).map(i => [rqDe(i.rq), i.desc, fmt(i.fecha), fmt(i.fechaEntrega), Math.abs(dias(i.fecha, i.fechaEntrega)) + 'd']))}>{r.aTiempo === null ? '—' : r.aTiempo + '%'}</Cel>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Bloque>
 
-      <Bloque titulo="Compras · Lucía Arana" sub="Decisiones sobre los ítems del mes y facturas registradas.">
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-          <Tarjeta l="Ítems aprobados" v={compras.aprobados} c="text-green-400" />
-          <Tarjeta l="Rechazados" v={compras.rechazados} c="text-red-400" />
-          <Tarjeta l="Anulados" v={compras.anulados} c="text-slate-400" />
-          <Tarjeta l="Sin decidir" v={compras.pendientes} c={compras.pendientes > 0 ? 'text-yellow-400' : 'text-slate-400'} />
-          <Tarjeta l="Facturas registradas" v={compras.facturas} />
-          <Tarjeta l="Monto facturado" v={sol(compras.monto)} />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mt-2">
-          <Tarjeta l="Materiales nuevos aprobados" v={compras.matAprobados} c="text-green-400" />
-          <Tarjeta l="Materiales rechazados" v={compras.matRechazados} c="text-slate-400" />
-        </div>
+      <Bloque id="com" titulo="Compras · Lucía Arana" sub="Decisiones sobre los ítems del mes y facturas registradas. Haz clic en un indicador para ver el detalle.">
+        {(() => {
+          const itemsPorDecision = d => itemsM.filter(i => d === 'Pendiente'
+            ? (!i.decision || i.decision === '—' || i.decision === 'Pendiente') : i.decision === d);
+          const colsItems = ['RQ', 'Obra', 'Material', 'Cant', 'Necesitada', 'Motivo'];
+          const filaItem = i => [rqDe(i.rq), i.proyecto, i.desc, `${i.cant} ${i.und}`, fmt(i.fecha),
+            i.motivoRechazo || i.motivoAnulacion || '—'];
+          return (
+          <>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            <Tarjeta l="Ítems aprobados" v={compras.aprobados} c="text-green-400"
+              onClick={() => abrir('com', 'Ítems aprobados', colsItems, itemsPorDecision('Aprobado').map(filaItem))} />
+            <Tarjeta l="Rechazados" v={compras.rechazados} c="text-red-400"
+              onClick={() => abrir('com', 'Ítems rechazados y su motivo', colsItems, itemsPorDecision('Rechazado').map(filaItem))} />
+            <Tarjeta l="Anulados" v={compras.anulados} c="text-slate-400"
+              onClick={() => abrir('com', 'Ítems anulados y su motivo', colsItems, itemsPorDecision('Anulado').map(filaItem))} />
+            <Tarjeta l="Sin decidir" v={compras.pendientes} c={compras.pendientes > 0 ? 'text-yellow-400' : 'text-slate-400'}
+              onClick={() => abrir('com', 'Ítems que siguen sin decisión', colsItems, itemsPorDecision('Pendiente').map(filaItem))} />
+            <Tarjeta l="Facturas registradas" v={compras.facturas}
+              onClick={() => abrir('com', 'Facturas registradas en el mes', ['Serie', 'Fecha', 'Proveedor', 'RUC', 'Obra', 'Monto', 'Forma', 'Estado'],
+                factM.map(f => [f.serie, fmt(f.fecha), f.prov, f.ruc, f.proyecto, sol(f.monto), f.forma, f.estadoPago]))} />
+            <Tarjeta l="Monto facturado" v={sol(compras.monto)}
+              onClick={() => abrir('com', 'Facturado del mes, de mayor a menor', ['Serie', 'Proveedor', 'Obra', 'Monto', 'Ítems que cubre'],
+                [...factM].sort((a, b) => b.monto - a.monto).map(f => [f.serie, f.prov, f.proyecto, sol(f.monto),
+                  (f.items || []).map(x => x.desc).join(' · ') || '—']))} />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mt-2">
+            <Tarjeta l="Materiales nuevos aprobados" v={compras.matAprobados} c="text-green-400"
+              onClick={() => abrir('com', 'Materiales nuevos aprobados al catálogo', ['Material', 'Und', 'Familia', 'Código asignado'],
+                solM.filter(s => s.estado === 'Aprobado').map(s => [s.desc, s.und, s.fam || '—', s.codigo || '—']))} />
+            <Tarjeta l="Materiales rechazados" v={compras.matRechazados} c="text-slate-400"
+              onClick={() => abrir('com', 'Solicitudes de material rechazadas', ['Material', 'Und', 'Motivo'],
+                solM.filter(s => s.estado === 'Rechazado').map(s => [s.desc, s.und, s.motivo || '—']))} />
+          </div>
+          </>
+          );
+        })()}
       </Bloque>
 
-      <Bloque titulo="Almacenes" sub="Recepción, salidas y calidad del uso del material por obra.">
+      <Bloque id="alm" titulo="Almacenes" sub="Recepción, salidas y calidad del uso del material por obra. Haz clic en cualquier número para ver qué hay detrás.">
         {porAlmacen.length === 0 ? vacio : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr>{['Obra', 'Ítems recibidos', 'Incompletos', 'Salidas', 'Verificadas', '% Uso incorrecto', 'Préstamos'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {porAlmacen.map(a => (
+                {porAlmacen.map(a => {
+                  const salObra = salM.filter(s => s.proyecto === a.obra && !s.anulada);
+                  const itemsObra = itemsM.filter(i => i.proyecto === a.obra);
+                  const colsSal = ['N°', 'Fecha', 'Material', 'Cant', 'Hoja trabajo', 'Zona', 'Uso', 'Registró'];
+                  const filaSal = s => [s.n, fmt(s.fecha), s.desc, `${s.cant} ${s.und}`, s.hoja || '—', s.zona || '—', s.uso || 'Pendiente', s.registradoPor || '—'];
+                  return (
                   <tr key={a.obra} className="border-b border-slate-800">
                     <td className="py-1.5 px-1.5 text-slate-200">{a.obra}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{a.recibidos}</td>
-                    <td className={`py-1.5 px-1.5 font-mono ${a.incompletos > 0 ? 'text-yellow-400' : 'text-slate-400'}`}>{a.incompletos}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{a.salidas}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-400">{a.verificadas}</td>
-                    <td className={`py-1.5 px-1.5 font-mono font-bold ${a.incorrPct === null ? 'text-slate-500' : a.incorrPct === 0 ? 'text-green-400' : a.incorrPct <= 10 ? 'text-yellow-400' : 'text-red-400'}`}>{a.incorrPct === null ? '—' : a.incorrPct + '%'}</td>
-                    <td className="py-1.5 px-1.5 font-mono text-slate-400">{a.prestamos}</td>
+                    <Cel cls="font-mono text-slate-300"
+                      onClick={() => abrir('alm', `Ítems recibidos en ${a.obra}`, ['RQ', 'Material', 'Pedido', 'Recibido', 'Entregado', 'Obs. almacén'],
+                        itemsObra.filter(i => i.estado === 'Entregado').map(i => [rqDe(i.rq), i.desc, `${i.cant} ${i.und}`, i.cantRecibida ?? '—', fmt(i.fechaEntrega), i.obsAlmacen || '—']))}>{a.recibidos}</Cel>
+                    <Cel cls={`font-mono ${a.incompletos > 0 ? 'text-yellow-400' : 'text-slate-400'}`}
+                      onClick={() => abrir('alm', `Entregas INCOMPLETAS en ${a.obra} · falta saldo`, ['RQ', 'Material', 'Pedido', 'Recibido', 'Falta', 'Obs. almacén'],
+                        itemsObra.filter(i => i.estado === 'Incompleto').map(i => [rqDe(i.rq), i.desc, `${i.cant} ${i.und}`, i.cantRecibida ?? '—',
+                          (Number(i.cant) - Number(i.cantRecibida || 0)) + ' ' + i.und, i.obsAlmacen || '—']))}>{a.incompletos}</Cel>
+                    <Cel cls="font-mono text-slate-300"
+                      onClick={() => abrir('alm', `Salidas de almacén en ${a.obra}`, colsSal, salObra.map(filaSal))}>{a.salidas}</Cel>
+                    <Cel cls="font-mono text-slate-400"
+                      onClick={() => abrir('alm', `Salidas ya verificadas en ${a.obra}`, colsSal, salObra.filter(s => s.uso && s.uso !== 'Pendiente').map(filaSal))}>{a.verificadas}</Cel>
+                    <Cel cls={`font-mono font-bold ${a.incorrPct === null ? 'text-slate-500' : a.incorrPct === 0 ? 'text-green-400' : a.incorrPct <= 10 ? 'text-yellow-400' : 'text-red-400'}`}
+                      onClick={() => abrir('alm', `USO INCORRECTO en ${a.obra} · material desperdiciado`,
+                        ['N°', 'Fecha', 'Material', 'Cant', 'Hoja trabajo', 'Zona', 'Motivo del uso incorrecto', 'Registró'],
+                        salObra.filter(s => s.uso === 'Incorrecto').map(s => [s.n, fmt(s.fecha), s.desc, `${s.cant} ${s.und}`,
+                          s.hoja || '—', s.zona || '—', s.motivoUso || '—', s.registradoPor || '—']))}>{a.incorrPct === null ? '—' : a.incorrPct + '%'}</Cel>
+                    <Cel cls="font-mono text-slate-400"
+                      onClick={() => abrir('alm', `Préstamos desde ${a.obra}`, ['N°', 'Fecha', 'Material', 'Cant', 'Destino', 'Estado'],
+                        presM.filter(p => p.origen === a.obra).map(p => [p.n, fmt(p.fecha), p.desc, `${p.cant} ${p.und}`, p.destino, p.estado]))}>{a.prestamos}</Cel>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </Bloque>
 
-      <Bloque titulo="Pagos" sub="Lo pagado en el mes y la deuda viva al cierre.">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-          <Tarjeta l="Facturas pagadas" v={pagos.pagadas} c="text-green-400" />
-          <Tarjeta l="Monto pagado" v={sol(pagos.montoPagado)} c="text-green-400" />
-          <Tarjeta l="Plazo prom. de pago" v={pagos.plazoProm === '—' ? '—' : pagos.plazoProm + 'd'} />
-          <Tarjeta l="Facturas pendientes" v={pagos.pendientes} c={pagos.pendientes > 0 ? 'text-yellow-400' : 'text-slate-400'} />
-          <Tarjeta l="Deuda pendiente" v={sol(pagos.deuda)} c="text-red-400" />
-        </div>
+      <Bloque id="pag" titulo="Pagos" sub="Lo pagado en el mes y la deuda viva al cierre. Haz clic en un indicador para ver las facturas.">
+        {(() => {
+          const pend = facturas.filter(f => f.estadoPago !== 'Pagada');
+          return (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            <Tarjeta l="Facturas pagadas" v={pagos.pagadas} c="text-green-400"
+              onClick={() => abrir('pag', 'Facturas pagadas en el mes', ['Serie', 'Proveedor', 'Obra', 'Monto', 'Banco', 'N° operación', 'Fecha de pago'],
+                pagadasM.map(f => [f.serie, f.prov, f.proyecto, sol(f.monto), f.banco || '—', f.numOp || '—', fmt(f.fechaPago)]))} />
+            <Tarjeta l="Monto pagado" v={sol(pagos.montoPagado)} c="text-green-400"
+              onClick={() => abrir('pag', 'Pagado del mes, de mayor a menor', ['Serie', 'Proveedor', 'Obra', 'Monto', 'Fecha de pago'],
+                [...pagadasM].sort((a, b) => b.monto - a.monto).map(f => [f.serie, f.prov, f.proyecto, sol(f.monto), fmt(f.fechaPago)]))} />
+            <Tarjeta l="Plazo prom. de pago" v={pagos.plazoProm === '—' ? '—' : pagos.plazoProm + 'd'}
+              onClick={() => abrir('pag', 'Días entre factura y pago', ['Serie', 'Proveedor', 'Fecha factura', 'Fecha de pago', 'Días'],
+                pagadasM.filter(f => f.fecha && f.fechaPago).map(f => [f.serie, f.prov, fmt(f.fecha), fmt(f.fechaPago), dias(f.fechaPago, f.fecha) + 'd']))} />
+            <Tarjeta l="Facturas pendientes" v={pagos.pendientes} c={pagos.pendientes > 0 ? 'text-yellow-400' : 'text-slate-400'}
+              onClick={() => abrir('pag', 'Facturas pendientes de pago (todas, no solo del mes)', ['Serie', 'Fecha', 'Proveedor', 'Obra', 'Monto', 'Forma', 'Días desde emisión'],
+                pend.map(f => [f.serie, fmt(f.fecha), f.prov, f.proyecto, sol(f.monto), f.forma, dias(HOY_ISO, f.fecha) + 'd']))} />
+            <Tarjeta l="Deuda pendiente" v={sol(pagos.deuda)} c="text-red-400"
+              onClick={() => abrir('pag', 'Deuda viva, de la más antigua a la más nueva', ['Serie', 'Fecha', 'Proveedor', 'Obra', 'Monto', 'Días esperando'],
+                [...pend].sort((a, b) => (a.fecha < b.fecha ? -1 : 1)).map(f => [f.serie, fmt(f.fecha), f.prov, f.proyecto, sol(f.monto), dias(HOY_ISO, f.fecha) + 'd']))} />
+          </div>
+          );
+        })()}
       </Bloque>
 
-      <Bloque titulo="Comprador · compras del día" sub="Ítems marcados como comprados en el mes.">
+      <Bloque id="cmp" titulo="Comprador · compras del día" sub="Ítems marcados como comprados en el mes.">
         {porComprador.length === 0 ? vacio : (
           <table className="w-full text-xs">
             <thead><tr>{['Comprador', 'Ítems comprados'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
@@ -3307,7 +3423,9 @@ function ReporteMensual({ db }) {
               {porComprador.map(c => (
                 <tr key={c.nombre} className="border-b border-slate-800">
                   <td className="py-1.5 px-1.5 text-slate-200">{c.nombre}</td>
-                  <td className="py-1.5 px-1.5 font-mono text-slate-300">{c.items}</td>
+                  <Cel cls="font-mono text-slate-300"
+                    onClick={() => abrir('cmp', `Ítems comprados por ${c.nombre}`, ['RQ', 'Obra', 'Material', 'Cant', 'Necesitada', 'Factura'],
+                      itemsM.filter(i => i.compradoPor === c.nombre).map(i => [rqDe(i.rq), i.proyecto, i.desc, `${i.cant} ${i.und}`, fmt(i.fecha), i.factura || '—']))}>{c.items}</Cel>
                 </tr>
               ))}
             </tbody>
