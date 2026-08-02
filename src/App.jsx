@@ -1093,12 +1093,12 @@ function Catalogo({ user, db, api }) {
 function PedidoCotizacion({ user, db, api }) {
   const [abierto, setAbierto] = useState(false);
   const [cab, setCab] = useState({ proyecto: PROYECTOS[0] ? PROYECTOS[0][1] : '', ref: '', arq: '', fecha: HOY_ISO });
-  const [lineas, setLineas] = useState([{ desc: '', pzasCaja: '', cant: '', destino: '' }]);
+  const [lineas, setLineas] = useState([{ desc: '', cant: '', destino: '' }]);
   const [aviso, setAviso] = useState('');
   const avisar = (m, ms = 6000) => { setAviso(m); setTimeout(() => setAviso(''), ms); };
 
   const setL = (i, k, v) => setLineas(lineas.map((l, j) => j === i ? { ...l, [k]: v } : l));
-  const addL = () => setLineas([...lineas, { desc: '', pzasCaja: '', cant: '', destino: '' }]);
+  const addL = () => setLineas([...lineas, { desc: '', cant: '', destino: '' }]);
   const delL = i => setLineas(lineas.filter((_, j) => j !== i));
 
   const lineasOk = lineas.filter(l => l.desc.trim() && Number(l.cant) > 0 && l.destino.trim());
@@ -1108,12 +1108,12 @@ function PedidoCotizacion({ user, db, api }) {
     if (!listo) return;
     const r = await api.crearPedidoCotizacion({
       proyecto: cab.proyecto, cotizacionRef: cab.ref, arquitecto: cab.arq, fecha: cab.fecha,
-      lineas: lineasOk.map(l => ({ desc: l.desc, pzasCaja: l.pzasCaja, cant: l.cant, destino: l.destino })),
+      lineas: lineasOk.map(l => ({ desc: l.desc, cant: l.cant, destino: l.destino })),
     });
     if (r.error) { avisar('⚠ ' + r.error); return; }
     avisar(`Pedido por cotización ${cab.ref} registrado (RQ-${String(r.numero).padStart(3, '0')}) con ${lineasOk.length} enchape(s). Ya está aprobado y listo para facturar y recibir en almacén.`);
     setCab({ proyecto: cab.proyecto, ref: '', arq: '', fecha: HOY_ISO });
-    setLineas([{ desc: '', pzasCaja: '', cant: '', destino: '' }]);
+    setLineas([{ desc: '', cant: '', destino: '' }]);
     setAbierto(false);
   };
 
@@ -1139,12 +1139,11 @@ function PedidoCotizacion({ user, db, api }) {
           <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">Enchapes de esta cotización</div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Descripción (modelo · color · formato · m²)', 'Piezas/caja', 'Cantidad (piezas)', 'Destino (baño / depto)', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Descripción (modelo · color · formato · m²)', 'Cantidad (piezas)', 'Destino (baño / depto)', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {lineas.map((l, i) => (
                   <tr key={i} className="border-b border-slate-800">
                     <td className="py-1.5 px-1"><input value={l.desc} onChange={e => setL(i, 'desc', e.target.value)} placeholder="Porcelanato gris 60x60" className={`w-full ${inputCls}`} /></td>
-                    <td className="py-1.5 px-1"><input type="number" min="1" step="any" value={l.pzasCaja} onChange={e => setL(i, 'pzasCaja', e.target.value)} placeholder="opc." className={`w-20 ${inputCls}`} /></td>
                     <td className="py-1.5 px-1"><input type="number" min="1" step="any" value={l.cant} onChange={e => setL(i, 'cant', e.target.value)} placeholder="piezas" className={`w-24 ${inputCls}`} /></td>
                     <td className="py-1.5 px-1"><input value={l.destino} onChange={e => setL(i, 'destino', e.target.value)} placeholder="Baño Dpto 302" className={`w-full ${inputCls}`} /></td>
                     <td className="py-1.5 px-1">{lineas.length > 1 && <button onClick={() => delL(i)} className="text-slate-500 hover:text-red-400 text-sm">✕</button>}</td>
@@ -1157,7 +1156,7 @@ function PedidoCotizacion({ user, db, api }) {
             <button onClick={addL} className="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-500">＋ Otro enchape</button>
             <button onClick={enviar} disabled={!listo} className={`ml-auto ${btnOk(listo)}`}>Registrar pedido por cotización</button>
           </div>
-          <div className="mt-2 text-slate-500 text-[10px]">Piezas/caja es opcional: si lo pones, el almacenero recibe en cajas y el sistema calcula las piezas. El precio (por m² o pieza) se registra al facturar, como cualquier material.</div>
+          <div className="mt-2 text-slate-500 text-[10px]">El precio (por m² o pieza) se registra al facturar, como cualquier material.</div>
         </div>
       )}
     </div>
@@ -3364,10 +3363,8 @@ export default function App() {
         for (const l of lineas) {
           cod97 += 1;
           const codigo = String(cod97);
-          const factor = Number(l.pzasCaja) || null;
           const { error } = await supabase.from('materiales').insert({
-            codigo, descripcion: l.desc.trim().toUpperCase(),
-            und: factor ? 'CAJA' : 'PZA', und_base: factor ? 'PZA' : null, factor_caja: factor,
+            codigo, descripcion: l.desc.trim().toUpperCase(), und: 'PZA',
           });
           if (error) return { error };
           mats.push({ codigo, cant: Number(l.cant), destino: l.destino.trim() });
