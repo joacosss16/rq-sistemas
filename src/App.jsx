@@ -1417,6 +1417,89 @@ function HistorialPrecios({ db }) {
   );
 }
 
+// Etapa COTIZADO: las cotizaciones que pidió Compras para un ítem.
+// Deja evidencia de que se comparó y de cuánto se ahorró.
+function CotizaBox({ item, api, puede, onAviso }) {
+  const [abierto, setAbierto] = useState(false);
+  const [f, setF] = useState({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
+  const cots = item.cotizaciones || [];
+  const ganadora = cots.find(c => c.ganadora);
+  const cara = cots.length > 1 ? Math.max(...cots.map(c => c.precio)) : null;
+  const ahorro = ganadora && cara ? (cara - ganadora.precio) * Number(item.cant) : null;
+
+  const guardar = async () => {
+    if (!f.prov.trim() || !(Number(f.precio) > 0)) return;
+    if (f.ruc && !/^\d{11}$/.test(f.ruc)) { onAviso('⚠ El RUC debe tener 11 dígitos.'); return; }
+    const r = await api.addCotizacion({
+      itemId: item.id, prov: f.prov, ruc: f.ruc || null, precio: Number(f.precio),
+      plazo: f.plazo === '' ? null : Number(f.plazo), obs: f.obs,
+    });
+    if (r.error) { onAviso('⚠ ' + r.error); return; }
+    setF({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
+  };
+
+  if (!abierto) {
+    return (
+      <button onClick={() => setAbierto(true)}
+        className={`text-[9px] underline underline-offset-2 ${cots.length ? 'text-sky-400 hover:text-sky-300' : 'text-slate-500 hover:text-sky-400'}`}
+        title="Registrar las cotizaciones que pediste y elegir la ganadora">
+        {cots.length ? `${cots.length} cotización(es)${ganadora ? ' · elegida' : ' · sin elegir'}` : '＋ Cotizaciones'}
+      </button>
+    );
+  }
+  return (
+    <div className="w-64 bg-slate-950 border border-slate-700 rounded p-2">
+      <div className="flex items-center gap-1 mb-1">
+        <div className="text-[9px] font-bold uppercase text-sky-400">Cotizaciones pedidas</div>
+        <button onClick={() => setAbierto(false)} className="ml-auto text-slate-500 hover:text-slate-200 text-[10px]">✕</button>
+      </div>
+      {cots.length === 0 ? (
+        <div className="text-[9px] text-slate-500 mb-1">Aún no registras ninguna. Compara al menos 2 o 3.</div>
+      ) : (
+        <table className="w-full text-[10px] mb-1">
+          <tbody>
+            {cots.map(c => (
+              <tr key={c.id} className={`border-b border-slate-800 ${c.ganadora ? 'bg-green-950/40' : ''}`}>
+                <td className="py-1 pr-1 text-slate-200 leading-tight">{c.prov}
+                  {c.plazo != null && <span className="text-slate-500"> · {c.plazo}d</span>}
+                  {c.obs && <div className="text-[9px] text-slate-500">{c.obs}</div>}</td>
+                <td className={`py-1 px-1 font-mono text-right ${c.ganadora ? 'text-green-400 font-bold' : 'text-slate-300'}`}>S/ {c.precio.toFixed(2)}</td>
+                <td className="py-1 pl-1 text-right whitespace-nowrap">
+                  {puede && (c.ganadora
+                    ? <span className="text-[8px] font-bold uppercase text-green-400">ganó</span>
+                    : <button onClick={async () => { const r = await api.elegirCotizacion({ itemId: item.id, id: c.id }); if (r.error) onAviso('⚠ ' + r.error); }}
+                        className="text-[8px] font-bold uppercase text-slate-400 hover:text-green-400 underline">elegir</button>)}
+                  {puede && !c.ganadora && (
+                    <button onClick={async () => { const r = await api.delCotizacion(c.id); if (r.error) onAviso('⚠ ' + r.error); }}
+                      className="ml-1 text-slate-600 hover:text-red-400">✕</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {ahorro != null && ahorro > 0 && (
+        <div className="text-[9px] text-green-400 mb-1">Ahorro vs. la más cara: S/ {ahorro.toFixed(2)}</div>
+      )}
+      {puede && (
+        <div className="space-y-1">
+          <input value={f.prov} onChange={e => setF({ ...f, prov: e.target.value })} placeholder="Proveedor" className={`w-full ${inputCls}`} />
+          <div className="flex gap-1">
+            <input type="number" step="any" min="0" value={f.precio} onChange={e => setF({ ...f, precio: e.target.value })} placeholder="S/ und" className={`w-20 ${inputCls}`} />
+            <input type="number" min="0" value={f.plazo} onChange={e => setF({ ...f, plazo: e.target.value })} placeholder="días" className={`w-16 ${inputCls}`} />
+            <input value={f.ruc} onChange={e => setF({ ...f, ruc: e.target.value.replace(/\D/g, '').slice(0, 11) })} placeholder="RUC (opc.)" className={`flex-1 ${inputCls}`} />
+          </div>
+          <input value={f.obs} onChange={e => setF({ ...f, obs: e.target.value })} placeholder="Nota (opcional)" className={`w-full ${inputCls}`} />
+          <button onClick={guardar} disabled={!f.prov.trim() || !(Number(f.precio) > 0)}
+            className={`w-full px-2 py-1 rounded text-[9px] font-bold uppercase ${f.prov.trim() && Number(f.precio) > 0 ? 'bg-sky-950 text-sky-400 border border-sky-800 hover:bg-sky-900' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
+            Agregar cotización</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Compras({ user, db, api, modo }) {
   const { rqs, facturas, proveedores, ultimaCompra } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
@@ -1450,14 +1533,19 @@ function Compras({ user, db, api, modo }) {
   const esTriage = {
     decidir: i => i.decision === 'Pendiente',
     porComprar: i => i.decision === 'Aprobado' && i.estado === '—',
+    anulPend: i => !!i.anulSolMotivo,
     facturar: i => i.decision === 'Aprobado' && !i.factura,
+    // Comprado hace más de 48 h y todavía sin factura: no entra a Pagos
+    sinFactura48: i => i.estado === 'Comprado' && !i.factura && dias(HOY_ISO, i.fechaCompra || i.fechaRQ) >= 2,
     comprado: i => i.estado === 'Comprado',
     incompleto: i => i.estado === 'Incompleto',
   };
   const chips = [
     !facturarSolo && ['decidir', 'Por decidir', 'text-yellow-400'],
     !facturarSolo && ['porComprar', 'Por comprar', 'text-orange-400'],
+    !facturarSolo && ['anulPend', 'Anulación en gerencia', 'text-red-400'],
     ['facturar', 'Por facturar', 'text-sky-400'],
+    ['sinFactura48', '+48h sin factura', 'text-red-400'],
     ['comprado', 'Comprado', 'text-green-400'],
     ['incompleto', 'Incompletos', 'text-red-400'],
   ].filter(Boolean);
@@ -1489,10 +1577,26 @@ function Compras({ user, db, api, modo }) {
     if (ok) { const r2 = { ...rechazo }; delete r2[i.id]; setRechazo(r2); }
   };
 
-  const anularItem = (i, motivo) => {
-    updItem(i, { decision: 'Anulado', anulacion: { motivo, por: user.nombre, fecha: HOY_ISO } },
-      `Ítem "${i.desc}" anulado por ${user.nombre}. Queda registrado en el Tablero con motivo.`);
+  // La anulación la confirma GERENCIA (migración 22): Compras solicita, gerencia decide.
+  const esGerente = user.rol === 'gerente';
+  const solicitarAnulacion = (i, motivo) => {
+    if (esGerente) {
+      updItem(i, { decision: 'Anulado', anulacion: { motivo, por: user.nombre, fecha: HOY_ISO }, anulacion_solicitud: null, anulacion_rechazo: null },
+        `Ítem "${i.desc}" anulado por ${user.nombre}. Queda registrado en el Tablero con motivo.`);
+      return;
+    }
+    updItem(i, { anulacion_solicitud: { motivo, por: user.nombre, fecha: HOY_ISO }, anulacion_rechazo: null },
+      `Anulación de "${i.desc}" enviada a gerencia. El ítem sigue activo hasta que gerencia la confirme.`);
   };
+  const aprobarAnulacion = i =>
+    updItem(i, {
+      decision: 'Anulado',
+      anulacion: { motivo: i.anulSolMotivo, por: user.nombre, fecha: HOY_ISO, solicitado_por: i.anulSolPor },
+      anulacion_solicitud: null,
+    }, `Anulación de "${i.desc}" confirmada. El ítem queda anulado con rastro completo.`);
+  const rechazarAnulacion = (i, motivo) =>
+    updItem(i, { anulacion_solicitud: null, anulacion_rechazo: { motivo, por: user.nombre, fecha: HOY_ISO } },
+      `Anulación de "${i.desc}" rechazada. El ítem sigue vigente y Compras verá el motivo.`);
 
   // Atajo: aprobar de un clic todos los pendientes de un RQ (con confirmación)
   const aprobarRq = async rqNum => {
@@ -1748,15 +1852,26 @@ function Compras({ user, db, api, modo }) {
                     {post ? (
                       i.estado === '—' ? (
                         puedeFacturar
-                          ? <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
-                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
-                              title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                          ? <div>
+                              <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
+                                className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                                title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                              <div className="mt-1"><CotizaBox item={i} api={api} puede={!facturarSolo} onAviso={m => { setAviso(m); setTimeout(() => setAviso(''), 6000); }} /></div>
+                            </div>
                           : <span className="text-slate-500 text-[10px]">Por comprar</span>
                       ) : (
                         <div>
                           <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
                             title="Comprado lo marca Compras o el comprador; Entregado e Incompleto los fija el almacén al recibir.">{i.estado}</span>
                           {i.estado === 'Comprado' && i.compradoPor && <div className="text-[9px] text-slate-500 mt-0.5">por {i.compradoPor}</div>}
+                          {esTriage.sinFactura48(i) && (
+                            <div className="text-[9px] text-red-400 font-bold mt-0.5"
+                              title="Comprado hace más de 48 h y todavía sin factura: no ha entrado a Pagos.">
+                              ⚠ {dias(HOY_ISO, i.fechaCompra || i.fechaRQ)}d sin factura</div>
+                          )}
+                          {(i.cotizaciones || []).length > 0 && (
+                            <div className="mt-1"><CotizaBox item={i} api={api} puede={!facturarSolo} onAviso={m => { setAviso(m); setTimeout(() => setAviso(''), 6000); }} /></div>
+                          )}
                         </div>
                       )
                     ) : <span className="text-slate-600">—</span>}
@@ -1873,7 +1988,31 @@ function Compras({ user, db, api, modo }) {
                     <select value={i.comunicoResidente} onChange={e => updItem(i, { comunico_residente: e.target.value === 'Sí' ? true : e.target.value === 'No' ? false : null })} className={inputCls}>
                       {['—', 'Sí', 'No'].map(x => <option key={x}>{x}</option>)}</select>) : <span className="text-slate-600">{inc ? i.comunicoResidente : '—'}</span>}</td>
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? <input defaultValue={i.destinoSaldo} onBlur={e => { if (e.target.value !== i.destinoSaldo) updItem(i, { destino_saldo: e.target.value || null }); }} placeholder="Almacén de obra…" className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? (i.destinoSaldo || '—') : '—'}</span>}</td>
-                  <td className="py-2 px-1.5">{!facturarSolo && !i._arch && <AnularBox onConfirm={m => anularItem(i, m)} />}</td>
+                  <td className="py-2 px-1.5">
+                    {!facturarSolo && !i._arch && (
+                      i.anulSolMotivo ? (
+                        <div className="w-44">
+                          <div className="text-[9px] font-bold uppercase text-orange-400">Anulación en gerencia</div>
+                          <div className="text-[9px] text-slate-500 leading-tight">{i.anulSolMotivo} · pidió {i.anulSolPor}</div>
+                          {esGerente && (
+                            <div className="mt-1">
+                              <button onClick={() => aprobarAnulacion(i)}
+                                className="w-full px-2 py-1 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400 border border-red-800 hover:bg-red-900">Confirmar anulación</button>
+                              <AnularBox label="Rechazar la anulación" onConfirm={m => rechazarAnulacion(i, m)} />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          {i.anulRechMotivo && (
+                            <div className="text-[9px] text-yellow-400 leading-tight mb-1">
+                              Gerencia rechazó anular: {i.anulRechMotivo} ({i.anulRechPor})</div>
+                          )}
+                          <AnularBox label={esGerente ? 'Anular' : 'Solicitar anulación'} onConfirm={m => solicitarAnulacion(i, m)} />
+                        </div>
+                      )
+                    )}
+                  </td>
                 </tr>
                 </Fragment>
               );
@@ -3680,6 +3819,7 @@ export default function App() {
       fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
       fetchAll(() => supabase.from('cajas_chicas').select('*').order('proyecto')),
       fetchAll(() => supabase.from('rendiciones').select('*').order('numero')),
+      fetchAll(() => supabase.from('cotizaciones').select('*').order('creado_en')),
     ];
     // Casi-estático: catálogo + maestros. Se trae una vez (o en refresco completo);
     // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
@@ -3692,7 +3832,7 @@ export default function App() {
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
     ];
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
-    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
+    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, cotR] = dinR;
     let prjR, usrR, matR, provR, famR;
     if (usarCache) {
       ({ prjR, usrR, matR, provR, famR } = estaticosRef.current);
@@ -3700,7 +3840,7 @@ export default function App() {
       [prjR, usrR, matR, provR, famR] = estR;
       estaticosRef.current = { prjR, usrR, matR, provR, famR };
     }
-    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
+    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR, cotR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
     const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
@@ -3763,6 +3903,17 @@ export default function App() {
     // de la compra más reciente a la más antigua
     Object.values(historialPrecios).forEach(l => l.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)));
 
+    // Cotizaciones por ítem (etapa Cotizado, migración 23)
+    const cotPorItem = {};
+    (cotR.data || []).forEach(c => {
+      (cotPorItem[c.rq_item_id] = cotPorItem[c.rq_item_id] || []).push({
+        id: c.id, prov: c.proveedor, ruc: c.ruc || '', precio: Number(c.precio_unitario),
+        plazo: c.plazo_dias == null ? null : Number(c.plazo_dias), obs: c.observacion || '',
+        ganadora: !!c.ganadora,
+      });
+    });
+    Object.values(cotPorItem).forEach(l => l.sort((a, b) => a.precio - b.precio));
+
     const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
       factDeItem[fi.rq_item_id] = factMap[fi.factura_id] || null;
@@ -3786,12 +3937,19 @@ export default function App() {
         canal: r.canal, decision: r.decision, estado: r.estado, motivoRechazo: r.motivo_rechazo || '',
         motivoAnulacion: r.anulacion ? r.anulacion.motivo : '', anuladoPor: r.anulacion ? r.anulacion.por : '',
         fechaAnulacion: r.anulacion ? r.anulacion.fecha : '',
+        // anulación pedida por Compras, pendiente del visto bueno de gerencia (migración 22)
+        anulSolMotivo: r.anulacion_solicitud ? r.anulacion_solicitud.motivo : '',
+        anulSolPor: r.anulacion_solicitud ? r.anulacion_solicitud.por : '',
+        anulSolFecha: r.anulacion_solicitud ? r.anulacion_solicitud.fecha : '',
+        anulRechMotivo: r.anulacion_rechazo ? r.anulacion_rechazo.motivo : '',
+        anulRechPor: r.anulacion_rechazo ? r.anulacion_rechazo.por : '',
         pago: pagoDe(factDeItem[r.id]), factura: factDeItem[r.id] ? factDeItem[r.id].serie : null,
         fechaEntrega: r.fecha_entrega || '', fechaRecojoSaldo: r.fecha_recojo_saldo || '', fechaEntregaSaldo: r.fecha_entrega_saldo || '',
         comunicoResidente: r.comunico_residente === true ? 'Sí' : r.comunico_residente === false ? 'No' : '—',
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
+        fechaCompra: r.fecha_compra || '', cotizaciones: cotPorItem[r.id] || [],
       };
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
     });
@@ -4057,6 +4215,20 @@ export default function App() {
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
         await supabase.from('familias').insert({ iu, nombre })),
+      // Cotizaciones por ítem (etapa Cotizado)
+      addCotizacion: ({ itemId, prov, ruc, precio, plazo, obs }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('cotizaciones').insert({
+          rq_item_id: itemId, proveedor: prov.trim().toUpperCase(), ruc: ruc || null,
+          precio_unitario: precio, plazo_dias: plazo, observacion: obs || null, registrado_por: u.id,
+        });
+      }),
+      delCotizacion: id => wrap(async () => await supabase.from('cotizaciones').delete().eq('id', id)),
+      elegirCotizacion: ({ itemId, id }) => wrap(async () => {
+        const r1 = await supabase.from('cotizaciones').update({ ganadora: false }).eq('rq_item_id', itemId);
+        if (r1.error) return r1;
+        return await supabase.from('cotizaciones').update({ ganadora: true }).eq('id', id);
+      }),
       // Pedido por cotización (enchapes): crea cada material 97xxxx + el pedido aprobado
       crearPedidoCotizacion: ({ proyecto, cotizacionRef, arquitecto, fecha, lineas }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
