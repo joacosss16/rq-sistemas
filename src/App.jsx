@@ -951,6 +951,22 @@ function Catalogo({ user, db, api }) {
 
   const res = useMemo(() => buscarEnCatalogo(catalogo, q, 15), [q, catalogo]);
 
+  // Lista completa agrupada: familia (2 primeros dígitos) → subfamilia/grupo (dígitos 3-4)
+  const [verLista, setVerLista] = useState(false);
+  const [famAbierta, setFamAbierta] = useState({});
+  const porFamilia = useMemo(() => {
+    const fams = {};
+    catalogo.forEach(m => {
+      const iu = String(m[0]).slice(0, 2), grupo = String(m[0]).slice(2, 4);
+      if (!fams[iu]) fams[iu] = { iu, nombre: m[3] || '(sin familia)', total: 0, grupos: {} };
+      if (!fams[iu].grupos[grupo]) fams[iu].grupos[grupo] = [];
+      fams[iu].grupos[grupo].push(m);
+      fams[iu].total += 1;
+    });
+    return Object.values(fams).sort((a, b) => a.iu.localeCompare(b.iu))
+      .map(f => ({ ...f, grupos: Object.keys(f.grupos).sort().map(g => ({ g, mats: f.grupos[g].sort((a, b) => String(a[0]).localeCompare(String(b[0]))) })) }));
+  }, [catalogo]);
+
   return (
     <div>
       <Aviso msg={aviso} />
@@ -1049,7 +1065,12 @@ function Catalogo({ user, db, api }) {
       )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Catálogo maestro · {catalogo.length} materiales</div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Catálogo maestro · {catalogo.length} materiales</div>
+          <button onClick={() => setVerLista(v => !v)}
+            className={`ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase border ${verLista ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
+            {verLista ? '✕ Cerrar lista' : '☰ Ver lista completa'}</button>
+        </div>
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar en el catálogo para verificar duplicados…" className={`w-full ${inputCls} py-2 text-sm mb-2`} />
         {res.length > 0 && (
           <table className="w-full text-xs">
@@ -1081,6 +1102,50 @@ function Catalogo({ user, db, api }) {
               ))}
             </tbody>
           </table>
+        )}
+        {verLista && (
+          <div className="mt-3 border-t border-slate-800 pt-3">
+            <div className="text-[10px] text-slate-500 mb-2">
+              Ordenado por familia (2 primeros dígitos) y subfamilia (dígitos 3-4). Haz clic en una familia para desplegar sus materiales.</div>
+            <div className="space-y-1">
+              {porFamilia.map(f => {
+                const abierta = !!famAbierta[f.iu];
+                return (
+                  <div key={f.iu} className="border border-slate-800 rounded">
+                    <button onClick={() => setFamAbierta(p => ({ ...p, [f.iu]: !p[f.iu] }))}
+                      className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-slate-800">
+                      <span className="text-slate-500 text-[10px] w-3">{abierta ? '▾' : '▸'}</span>
+                      <span className="font-mono text-[11px] text-yellow-400">{f.iu}</span>
+                      <span className="text-slate-200 text-[11px] font-semibold uppercase">{f.nombre}</span>
+                      <span className="ml-auto text-slate-500 text-[10px]">{f.total} material(es) · {f.grupos.length} subfamilia(s)</span>
+                    </button>
+                    {abierta && (
+                      <div className="px-2.5 pb-2">
+                        {f.grupos.map(({ g, mats }) => (
+                          <div key={g} className="mt-2">
+                            <div className="text-[9px] font-bold uppercase text-slate-500 tracking-wider border-b border-slate-800 pb-1 mb-1">
+                              Subfamilia {f.iu}{g} · {mats.length}</div>
+                            <table className="w-full text-xs">
+                              <tbody>
+                                {mats.map(m => (
+                                  <tr key={m[0]} className="border-b border-slate-900">
+                                    <td className="py-1 px-1.5 font-mono text-[11px] text-slate-500 w-20">{m[0]}</td>
+                                    <td className="py-1 px-1.5 text-slate-200">{m[1]}</td>
+                                    <td className="py-1 px-1.5 text-slate-500 w-24">{m[2]}{m[4] ? ` (${m[5]} de ${m[4]})` : ''}</td>
+                                    <td className="py-1 px-1.5 w-20 text-[10px] text-slate-500">{m[6] ? 'Perecedero' : ''}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Marca como perecederos los materiales con fecha de vencimiento (pinturas, aditivos, sellantes, cemento…): su recepción exigirá la fecha de caducidad y el stock mostrará el semáforo de vencimiento.</div>
       </div>
