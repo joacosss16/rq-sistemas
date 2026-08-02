@@ -1257,6 +1257,8 @@ function Compras({ user, db, api, modo }) {
   const { rqs, facturas, proveedores, ultimaCompra } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
+  // Los montos totales de factura son asunto de Pagos: Lucía no los necesita para comprar
+  const ocultarMontos = user.rol === 'compras';
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
@@ -1731,7 +1733,7 @@ function Compras({ user, db, api, modo }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', ...(ocultarMontos ? [] : ['Monto S/']), 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {factMostradas.map(f => (
                 <tr key={f.n} className="border-b border-slate-800 align-top">
@@ -1742,7 +1744,7 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
                   <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
                   <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
-                  <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                  {!ocultarMontos && <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>}
                   <td className="py-2 px-1.5 text-slate-400">{f.forma}</td>
                   <td className="py-2 px-1.5">
                     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(f.estadoPago)}`}>{f.estadoPago}</span>
