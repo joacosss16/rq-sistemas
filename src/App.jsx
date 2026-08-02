@@ -1253,12 +1253,174 @@ function PedidoCotizacion({ user, db, api }) {
   );
 }
 
+// Historial de precios por material: herramienta de negociación de Compras.
+// Todas las compras del material, comparativa por proveedor y tendencia.
+function HistorialPrecios({ db }) {
+  const { catalogo, historialPrecios } = db;
+  const [abierto, setAbierto] = useState(false);
+  const [q, setQ] = useState('');
+  const [cod, setCod] = useState('');
+
+  // solo materiales que ya se compraron alguna vez
+  const conCompras = useMemo(
+    () => catalogo.filter(m => (historialPrecios[m[0]] || []).length > 0),
+    [catalogo, historialPrecios]);
+  const res = useMemo(() => (q.trim() ? buscarEnCatalogo(conCompras, q, 12) : []), [q, conCompras]);
+
+  const mat = cod ? catalogo.find(m => m[0] === cod) : null;
+  const compras = cod ? (historialPrecios[cod] || []) : [];
+
+  const stats = useMemo(() => {
+    if (!compras.length) return null;
+    const ps = compras.map(c => c.precio);
+    const min = Math.min(...ps), max = Math.max(...ps);
+    const prom = ps.reduce((a, b) => a + b, 0) / ps.length;
+    const ult = compras[0].precio, prim = compras[compras.length - 1].precio;
+    const varPct = prim > 0 ? ((ult - prim) / prim) * 100 : 0;
+    return { min, max, prom, ult, varPct, n: compras.length };
+  }, [compras]);
+
+  // Comparativa por proveedor: quién lo vende más barato
+  const porProv = useMemo(() => {
+    const m = {};
+    compras.forEach(c => {
+      const p = (m[c.prov] = m[c.prov] || { prov: c.prov, ruc: c.ruc, veces: 0, suma: 0, min: Infinity, ult: null, ultFecha: '' });
+      p.veces += 1; p.suma += c.precio; p.min = Math.min(p.min, c.precio);
+      if (!p.ultFecha || c.fecha > p.ultFecha) { p.ultFecha = c.fecha; p.ult = c.precio; }
+    });
+    return Object.values(m).map(p => ({ ...p, prom: p.suma / p.veces })).sort((a, b) => a.prom - b.prom);
+  }, [compras]);
+
+  const csv = () => {
+    const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const cab = ['Codigo', 'Material', 'Und', 'Fecha', 'Proveedor', 'RUC', 'Precio_Unitario', 'Cantidad', 'Subtotal', 'Factura', 'Proyecto'];
+    const filas = compras.map(c => [cod, mat[1], mat[2], c.fecha, c.prov, c.ruc,
+      c.precio.toFixed(2), c.cant, (c.precio * c.cant).toFixed(2), c.serie, c.proyecto].map(esc).join(','));
+    const texto = '﻿' + cab.join(',') + '\n' + filas.join('\n');
+    const blob = new Blob([texto], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `precios_${cod}_${HOY_ISO}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const sol = n => 'S/ ' + n.toFixed(2);
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+          Historial de precios · negociación con proveedores</div>
+        <button onClick={() => setAbierto(v => !v)}
+          className="ml-auto px-2.5 py-1.5 rounded text-[10px] font-bold uppercase bg-slate-800 text-yellow-400 border border-slate-700 hover:border-yellow-400">
+          {abierto ? '✕ Cerrar' : '📈 Ver historial'}</button>
+      </div>
+      {!abierto ? (
+        <div className="text-slate-500 text-[11px] mt-2">
+          Qué te cobró cada proveedor por un material, cuándo, y si el precio subió. {conCompras.length} material(es) con compras registradas.</div>
+      ) : (
+        <div className="mt-3">
+          <input value={q} onChange={e => { setQ(e.target.value); setCod(''); }}
+            placeholder="Buscar el material que vas a negociar…" className={`w-full ${inputCls} py-2 text-sm`} />
+          {res.length > 0 && !cod && (
+            <div className="mt-2 border border-slate-800 rounded divide-y divide-slate-800">
+              {res.map(m => (
+                <button key={m[0]} onClick={() => { setCod(m[0]); setQ(m[1]); }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-slate-800">
+                  <span className="font-mono text-[11px] text-slate-500">{m[0]}</span>
+                  <span className="text-slate-200 text-xs">{m[1]}</span>
+                  <span className="ml-auto text-[10px] text-slate-500">{(historialPrecios[m[0]] || []).length} compra(s)</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {q.trim() && res.length === 0 && !cod && (
+            <div className="text-slate-500 text-[11px] mt-2">Sin coincidencias entre los materiales ya comprados.</div>
+          )}
+
+          {mat && stats && (
+            <div className="mt-3">
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <span className="font-mono text-[11px] text-slate-500">{mat[0]}</span>
+                <span className="text-slate-100 text-sm font-semibold">{mat[1]}</span>
+                <span className="text-slate-500 text-[10px]">({mat[2]})</span>
+                <button onClick={csv} className="ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-yellow-400 hover:text-yellow-400">
+                  ⤓ CSV</button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+                {[['Última compra', sol(stats.ult), 'text-slate-100'],
+                  ['Más barato', sol(stats.min), 'text-green-400'],
+                  ['Más caro', sol(stats.max), 'text-red-400'],
+                  ['Promedio', sol(stats.prom), 'text-slate-300'],
+                  ['Variación', (stats.varPct >= 0 ? '▲ +' : '▼ ') + stats.varPct.toFixed(1) + '%',
+                    stats.varPct > 5 ? 'text-red-400' : stats.varPct < -5 ? 'text-green-400' : 'text-slate-400']].map(([l, v, c]) => (
+                  <div key={l} className="bg-slate-950 border border-slate-800 rounded p-2">
+                    <div className={`text-sm font-bold ${c}`}>{v}</div>
+                    <div className="text-[9px] uppercase tracking-wider text-slate-500 mt-0.5">{l}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                Por proveedor · {porProv.length} — el más barato primero</div>
+              <table className="w-full text-xs mb-3">
+                <thead><tr>{['Proveedor', 'Veces', 'Promedio', 'Más barato', 'Último precio'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {porProv.map((p, idx) => (
+                    <tr key={p.prov} className="border-b border-slate-800">
+                      <td className="py-1.5 px-1.5 text-slate-200">{p.prov}
+                        {idx === 0 && porProv.length > 1 && <span className="ml-2 px-1.5 py-0.5 rounded bg-green-950 text-green-400 text-[8px] font-bold uppercase">mejor precio</span>}</td>
+                      <td className="py-1.5 px-1.5 text-slate-500">{p.veces}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-slate-300">{sol(p.prom)}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-green-400">{sol(p.min)}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-slate-200">{sol(p.ult)} <span className="text-slate-600 text-[9px]">{fmt(p.ultFecha)}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="text-[10px] font-bold uppercase text-slate-500 mb-1">
+                Todas las compras · {compras.length} — de la más reciente a la más antigua</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr>{['Fecha', 'Proveedor', 'Precio und', 'Cant', 'Subtotal', 'Factura', 'Obra'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {compras.map((c, i) => {
+                      const prev = compras[i + 1];   // la compra anterior en el tiempo
+                      const sube = prev && c.precio > prev.precio * 1.05;
+                      const baja = prev && c.precio < prev.precio * 0.95;
+                      return (
+                        <tr key={i} className="border-b border-slate-800">
+                          <td className="py-1.5 px-1.5 text-slate-400">{fmt(c.fecha)}</td>
+                          <td className="py-1.5 px-1.5 text-slate-300">{c.prov}</td>
+                          <td className={`py-1.5 px-1.5 font-mono ${sube ? 'text-red-400' : baja ? 'text-green-400' : 'text-slate-200'}`}>
+                            {sol(c.precio)} {sube && '▲'}{baja && '▼'}</td>
+                          <td className="py-1.5 px-1.5 text-slate-500">{c.cant}</td>
+                          <td className="py-1.5 px-1.5 font-mono text-slate-400">{sol(c.precio * c.cant)}</td>
+                          <td className="py-1.5 px-1.5 font-mono text-[10px] text-slate-500">{c.serie}</td>
+                          <td className="py-1.5 px-1.5 text-slate-500 text-[10px]">{c.proyecto}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="mt-2 text-slate-500 text-[10px]">
+                ▲ rojo: subió más de 5% respecto de la compra anterior · ▼ verde: bajó más de 5%.</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Compras({ user, db, api, modo }) {
   const { rqs, facturas, proveedores, ultimaCompra } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
-  // Los montos totales de factura son asunto de Pagos: Lucía no los necesita para comprar
-  const ocultarMontos = user.rol === 'compras';
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
@@ -1427,6 +1589,7 @@ function Compras({ user, db, api, modo }) {
   return (
     <div>
     {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
+    {!facturarSolo && <HistorialPrecios db={db} />}
     {!facturarSolo && porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
@@ -1733,7 +1896,7 @@ function Compras({ user, db, api, modo }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', ...(ocultarMontos ? [] : ['Monto S/']), 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {factMostradas.map(f => (
                 <tr key={f.n} className="border-b border-slate-800 align-top">
@@ -1744,7 +1907,7 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
                   <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
                   <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
-                  {!ocultarMontos && <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>}
+                  <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
                   <td className="py-2 px-1.5 text-slate-400">{f.forma}</td>
                   <td className="py-2 px-1.5">
                     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(f.estadoPago)}`}>{f.estadoPago}</span>
@@ -2846,7 +3009,7 @@ function Auditoria({ user, db, api }) {
   );
 }
 
-function Tablero({ db }) {
+function Tablero({ db, user }) {
   const { rqs, facturas, prestamos, salidas } = db;
   const [proy, setProy] = useState('TODOS');
   const [pagoF, setPagoF] = useState(null);
@@ -2895,7 +3058,9 @@ function Tablero({ db }) {
   }).filter(x => x.rqs > 0 || x.fact > 0 || x.pres > 0);
   const maxFact = Math.max(1, ...porProyecto.map(x => x.fact));
 
-  const kpis = [['RQs', rqsF.length], ['Ítems', flat.length], ['% Urgentes', pctUrg + '%'], ['Entregados', entregados], ['Llegaron tarde', tarde], ['Rechazados', flat.filter(i => i.decision === 'Rechazado').length], ['Anulados', flat.filter(i => i.decision === 'Anulado').length], ['Incompletos', flat.filter(i => i.estado === 'Incompleto').length], ['Facturado S/', factF.reduce((a, f) => a + f.monto, 0).toFixed(0)], ['Préstamos activos', presActivos], ['Holgura prom.', holgProm + (holgProm !== '—' ? 'd' : '')], ['Entrega a tiempo', aTiempo], ['Uso incorrecto', pctIncorrecto], ['Falta pago más antiguo', faltaMax]];
+  // El gasto acumulado es indicador de gerencia: Compras no lo ve (no cambia su decisión de comprar)
+  const verGasto = user.rol !== 'compras';
+  const kpis = [['RQs', rqsF.length], ['Ítems', flat.length], ['% Urgentes', pctUrg + '%'], ['Entregados', entregados], ['Llegaron tarde', tarde], ['Rechazados', flat.filter(i => i.decision === 'Rechazado').length], ['Anulados', flat.filter(i => i.decision === 'Anulado').length], ['Incompletos', flat.filter(i => i.estado === 'Incompleto').length], ...(verGasto ? [['Facturado S/', factF.reduce((a, f) => a + f.monto, 0).toFixed(0)]] : []), ['Préstamos activos', presActivos], ['Holgura prom.', holgProm + (holgProm !== '—' ? 'd' : '')], ['Entrega a tiempo', aTiempo], ['Uso incorrecto', pctIncorrecto], ['Falta pago más antiguo', faltaMax]];
   const nCredito = flat.filter(i => i.pago === 'Crédito').length;
   const nFalta = flat.filter(i => i.pago === 'Falta').length;
   const flatShown = pagoF ? flat.filter(i => i.pago === pagoF) : flat;
@@ -2951,17 +3116,19 @@ function Tablero({ db }) {
           {porProyecto.length === 0 ? <div className="text-slate-500 text-sm text-center py-4">Sin datos.</div> : (
           <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['Obra', 'RQs', '% Urg', 'Facturado S/', 'Holgura prom', 'A tiempo', '% Uso incorr.', 'Prést. activos'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['Obra', 'RQs', '% Urg', ...(verGasto ? ['Facturado S/'] : []), 'Holgura prom', 'A tiempo', '% Uso incorr.', 'Prést. activos'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {porProyecto.map(x => (
                 <tr key={x.p} className="border-b border-slate-800">
                   <td className="py-2 px-1.5 text-slate-200">{x.p}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-300">{x.rqs}</td>
                   <td className={`py-2 px-1.5 font-mono font-bold ${x.urgPct === null ? 'text-slate-500' : x.urgPct >= 50 ? 'text-red-400' : x.urgPct >= 25 ? 'text-yellow-400' : 'text-green-400'}`}>{x.urgPct === null ? '—' : x.urgPct + '%'}</td>
+                  {verGasto && (
                   <td className="py-2 px-1.5 font-mono text-slate-200 text-right">
                     {x.fact.toFixed(2)}
                     <div className="h-1 bg-slate-800 rounded mt-1"><div className="h-1 bg-yellow-400 rounded" style={{ width: `${Math.round(x.fact / maxFact * 100)}%` }} /></div>
                   </td>
+                  )}
                   <td className={`py-2 px-1.5 font-mono ${x.holg === null ? 'text-slate-500' : x.holg < 0 ? 'text-red-400 font-bold' : 'text-green-400'}`}>{x.holg === null ? '—' : x.holg + 'd'}</td>
                   <td className={`py-2 px-1.5 font-mono font-bold ${x.aTiempo === null ? 'text-slate-500' : x.aTiempo >= 80 ? 'text-green-400' : x.aTiempo >= 50 ? 'text-yellow-400' : 'text-red-400'}`}>{x.aTiempo === null ? '—' : x.aTiempo + '%'}</td>
                   <td className={`py-2 px-1.5 font-mono ${x.incorrPct === null ? 'text-slate-500' : x.incorrPct === 0 ? 'text-green-400' : x.incorrPct <= 10 ? 'text-yellow-400' : 'text-red-400 font-bold'}`}>{x.incorrPct === null ? '—' : x.incorrPct + '%'}</td>
@@ -3152,6 +3319,23 @@ export default function App() {
         };
       }
     });
+    // Historial de precios por material: todas las compras con proveedor y fecha.
+    // Es la herramienta de negociación de Compras (backlog 4).
+    const historialPrecios = {};
+    fitR.data.forEach(fi => {
+      if (fi.precio_unitario == null) return;
+      const it = itemById[fi.rq_item_id]; if (!it) return;
+      const fx = factMap[fi.factura_id]; if (!fx) return;
+      (historialPrecios[it.codigo] = historialPrecios[it.codigo] || []).push({
+        precio: Number(fi.precio_unitario), cant: Number(it.cant), fecha: fx.fecha,
+        serie: fx.serie, proyecto: nomProy[fx.proyecto] || fx.proyecto,
+        ruc: fx.proveedor_ruc,
+        prov: provMap[fx.proveedor_ruc] ? provMap[fx.proveedor_ruc].razon_social : fx.proveedor_ruc,
+      });
+    });
+    // de la compra más reciente a la más antigua
+    Object.values(historialPrecios).forEach(l => l.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)));
+
     const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
       factDeItem[fi.rq_item_id] = factMap[fi.factura_id] || null;
@@ -3268,7 +3452,7 @@ export default function App() {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
-      precioProm, ultimaCompra,
+      precioProm, ultimaCompra, historialPrecios,
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
       factorMap,
@@ -3548,7 +3732,7 @@ export default function App() {
         {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
         {tab === 'ren' && <Rendiciones user={user} db={db} api={api} />}
         {tab === 'aud' && <Auditoria user={user} db={db} api={api} />}
-        {tab === 'tab' && <Tablero db={db} />}
+        {tab === 'tab' && <Tablero db={db} user={user} />}
       </div>
     </div>
   );
