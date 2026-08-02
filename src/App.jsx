@@ -954,6 +954,22 @@ function Catalogo({ user, db, api }) {
   // Lista completa agrupada: familia (2 primeros dígitos) → subfamilia/grupo (dígitos 3-4)
   const [verLista, setVerLista] = useState(false);
   const [famAbierta, setFamAbierta] = useState({});
+  // Ubicar un material dentro de la lista: abre su familia, baja hasta él y lo resalta
+  const [resaltado, setResaltado] = useState('');
+  const [scrollA, setScrollA] = useState('');
+  const filaRefs = useRef({});
+  const irAMaterial = cod => {
+    if (!cod) return;
+    setVerLista(true);
+    setFamAbierta(p => ({ ...p, [String(cod).slice(0, 2)]: true }));
+    setResaltado(cod);
+    setScrollA(cod);
+  };
+  useEffect(() => {
+    if (!scrollA) return;
+    const el = filaRefs.current[scrollA];
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setScrollA(''); }
+  }, [scrollA, verLista, famAbierta]);
   const porFamilia = useMemo(() => {
     const fams = {};
     catalogo.forEach(m => {
@@ -1071,15 +1087,20 @@ function Catalogo({ user, db, api }) {
             className={`ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase border ${verLista ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
             {verLista ? '✕ Cerrar lista' : '☰ Ver lista completa'}</button>
         </div>
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar en el catálogo para verificar duplicados…" className={`w-full ${inputCls} py-2 text-sm mb-2`} />
+        <input value={q} onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && res.length > 0) { e.preventDefault(); irAMaterial(res[0][0]); } }}
+          placeholder="Buscar material… (Enter baja hasta él en la lista y lo resalta)" className={`w-full ${inputCls} py-2 text-sm mb-2`} />
+        {res.length > 0 && <div className="text-[10px] text-slate-500 mb-1">Clic en un resultado para ubicarlo dentro de su familia ↓</div>}
         {res.length > 0 && (
           <table className="w-full text-xs">
             <thead><tr>{['Código', 'Descripción', 'Und', 'Familia', 'Perecedero'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {res.map(m => (
                 <tr key={m[0]} className="border-b border-slate-800">
-                  <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{m[0]}</td>
-                  <td className="py-2 px-1.5 text-slate-200">{m[1]}</td>
+                  <td onClick={() => irAMaterial(m[0])} title="Ubicar en la lista completa"
+                    className="py-2 px-1.5 font-mono text-[11px] text-slate-500 cursor-pointer hover:text-yellow-400">{m[0]}</td>
+                  <td onClick={() => irAMaterial(m[0])} title="Ubicar en la lista completa"
+                    className="py-2 px-1.5 text-slate-200 cursor-pointer hover:text-yellow-400">{m[1]}</td>
                   <td className="py-2 px-1.5 text-slate-500">{m[2]}{m[4] ? ` (${m[5]} de ${m[4]})` : ''}</td>
                   <td className="py-2 px-1.5 text-slate-400">{m[3]}</td>
                   <td className="py-2 px-1.5">
@@ -1113,7 +1134,7 @@ function Catalogo({ user, db, api }) {
                 return (
                   <div key={f.iu} className="border border-slate-800 rounded">
                     <button onClick={() => setFamAbierta(p => ({ ...p, [f.iu]: !p[f.iu] }))}
-                      className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-slate-800">
+                      className="w-full flex items-center gap-2 px-2.5 py-2 text-left hover:bg-slate-800 sticky top-0 z-20 bg-slate-900 border-b border-slate-800">
                       <span className="text-slate-500 text-[10px] w-3">{abierta ? '▾' : '▸'}</span>
                       <span className="font-mono text-[11px] text-yellow-400">{f.iu}</span>
                       <span className="text-slate-200 text-[11px] font-semibold uppercase">{f.nombre}</span>
@@ -1123,18 +1144,22 @@ function Catalogo({ user, db, api }) {
                       <div className="px-2.5 pb-2">
                         {f.grupos.map(({ g, mats }) => (
                           <div key={g} className="mt-2">
-                            <div className="text-[9px] font-bold uppercase text-slate-500 tracking-wider border-b border-slate-800 pb-1 mb-1">
+                            <div className="text-[9px] font-bold uppercase text-slate-500 tracking-wider border-b border-slate-800 pb-1 mb-1 sticky top-9 z-10 bg-slate-900">
                               Subfamilia {f.iu}{g} · {mats.length}</div>
                             <table className="w-full text-xs">
                               <tbody>
-                                {mats.map(m => (
-                                  <tr key={m[0]} className="border-b border-slate-900">
-                                    <td className="py-1 px-1.5 font-mono text-[11px] text-slate-500 w-20">{m[0]}</td>
-                                    <td className="py-1 px-1.5 text-slate-200">{m[1]}</td>
+                                {mats.map(m => {
+                                  const esRes = resaltado === m[0];
+                                  return (
+                                  <tr key={m[0]} ref={el => { filaRefs.current[m[0]] = el; }}
+                                    className={`border-b border-slate-900 ${esRes ? 'bg-yellow-400/20 ring-1 ring-yellow-400' : ''}`}>
+                                    <td className={`py-1 px-1.5 font-mono text-[11px] w-20 ${esRes ? 'text-yellow-400 font-bold' : 'text-slate-500'}`}>{m[0]}</td>
+                                    <td className={`py-1 px-1.5 ${esRes ? 'text-yellow-300 font-semibold' : 'text-slate-200'}`}>{m[1]}</td>
                                     <td className="py-1 px-1.5 text-slate-500 w-24">{m[2]}{m[4] ? ` (${m[5]} de ${m[4]})` : ''}</td>
                                     <td className="py-1 px-1.5 w-20 text-[10px] text-slate-500">{m[6] ? 'Perecedero' : ''}</td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
