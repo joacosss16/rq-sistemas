@@ -508,6 +508,11 @@ function Residente({ user, db, api }) {
 
   const misRqs = esRes ? rqs.filter(r => r.proyecto === user.proyecto && r.tipo !== 'Cotizacion') : rqs;
   const misSol = esRes ? solicitudes.filter(s => s.solicitanteId === user.id) : solicitudes;
+  // Aviso: ítems míos anulados por Compras/gerencia en los últimos 15 días
+  const anuladosRecientes = misRqs
+    .flatMap(r => r.items.map(i => ({ ...i, rq: r.n })))
+    .filter(i => i.decision === 'Anulado' && i.fechaAnulacion && dias(HOY_ISO, i.fechaAnulacion) <= 15)
+    .sort((a, b) => (a.fechaAnulacion < b.fechaAnulacion ? 1 : -1));
 
   // Un RQ se archiva solo cuando ya no queda nada por atender:
   // cada ítem está Entregado, o cerrado por rechazo/anulación.
@@ -530,6 +535,29 @@ function Residente({ user, db, api }) {
   return (
     <div>
       <Aviso msg={aviso} />
+      {esRes && anuladosRecientes.length > 0 && (
+        <div className="bg-red-950 border border-red-800 rounded-md p-4 mb-3">
+          <div className="text-[11px] font-bold tracking-widest text-red-400 uppercase mb-2">
+            ⚠ Te anularon {anuladosRecientes.length} ítem(s) · últimos 15 días</div>
+          <table className="w-full text-xs">
+            <thead><tr>{['RQ', 'Material', 'Cant', 'Motivo', 'Anuló', 'Fecha'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <tbody>
+              {anuladosRecientes.map(i => (
+                <tr key={i.id} className="border-b border-red-900/50">
+                  <td className="py-1.5 px-1.5 font-mono text-slate-300">RQ-{String(i.rq).padStart(3, '0')}</td>
+                  <td className="py-1.5 px-1.5 text-slate-200">{i.desc}</td>
+                  <td className="py-1.5 px-1.5 font-mono text-slate-400">{i.cant} {i.und}</td>
+                  <td className="py-1.5 px-1.5 text-red-300">{i.motivoAnulacion || '—'}</td>
+                  <td className="py-1.5 px-1.5 text-slate-400">{i.anuladoPor || '—'}</td>
+                  <td className="py-1.5 px-1.5 text-slate-400">{fmt(i.fechaAnulacion)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="text-[10px] text-red-300/70 mt-2">
+            Si necesitas igual el material, vuelve a pedirlo en un RQ nuevo o conversa con Compras.</div>
+        </div>
+      )}
       {!esRes ? (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3 text-slate-400 text-xs">
           Los requerimientos los crean los residentes desde su propio usuario. Aquí ves el estado de todos los RQs.
@@ -1990,7 +2018,11 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5">{inc && !facturarSolo ? <input defaultValue={i.destinoSaldo} onBlur={e => { if (e.target.value !== i.destinoSaldo) updItem(i, { destino_saldo: e.target.value || null }); }} placeholder="Almacén de obra…" className={`w-32 ${inputCls}`} /> : <span className="text-slate-600">{inc ? (i.destinoSaldo || '—') : '—'}</span>}</td>
                   <td className="py-2 px-1.5">
                     {!facturarSolo && !i._arch && (
-                      i.anulSolMotivo ? (
+                      Number(i.cantRecibida) > 0 ? (
+                        <span className="text-[9px] text-slate-500 leading-tight block w-44"
+                          title="El material ya está en la obra: anularlo descuadraría el stock. Si hay que devolverlo, es una devolución al proveedor.">
+                          Ya recibido ({i.cantRecibida} {i.und}) — no se anula</span>
+                      ) : i.anulSolMotivo ? (
                         <div className="w-44">
                           <div className="text-[9px] font-bold uppercase text-orange-400">Anulación en gerencia</div>
                           <div className="text-[9px] text-slate-500 leading-tight">{i.anulSolMotivo} · pidió {i.anulSolPor}</div>
@@ -4295,6 +4327,12 @@ export default function App() {
     db.salidas.filter(s => s.proyecto === user.proyecto && !s.anulada && s.aprobacion === 'Pendiente').length +
     db.prestamos.filter(p => p.estado === 'Solicitado' && ((p.origen === user.proyecto && !p.aprobOrigen) || (p.destino === user.proyecto && !p.aprobDestino))).length
   ) : 0;
+  // Aviso al residente: ítems suyos anulados en los últimos 15 días
+  const anulRecientes = (user.rol === 'residente' && db)
+    ? db.rqs.filter(r => r.proyecto === user.proyecto)
+        .flatMap(r => r.items)
+        .filter(i => i.decision === 'Anulado' && i.fechaAnulacion && dias(HOY_ISO, i.fechaAnulacion) <= 15).length
+    : 0;
 
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>
@@ -4305,11 +4343,13 @@ export default function App() {
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 bg-slate-800 p-1 rounded">
             {tabs.map(([k, l]) => {
-              const alerta = k === 'apr' && pendAprob > 0 && tab !== 'apr';
+              const cuenta = k === 'apr' ? pendAprob : k === 'res' ? anulRecientes : 0;
+              const rojo = k === 'res' && anulRecientes > 0;   // anulaciones: aviso en rojo
+              const alerta = cuenta > 0 && tab !== k;
               return (
               <button key={k} onClick={() => setTab(k)}
-                className={`px-3 py-1.5 rounded text-[11px] font-semibold tracking-wide uppercase ${tab === k ? 'bg-yellow-400 text-slate-950' : alerta ? 'text-yellow-400 ring-1 ring-yellow-400 bg-yellow-400/10' : 'text-slate-400 hover:text-slate-200'}`}>
-                {l}{k === 'apr' && pendAprob > 0 && <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-yellow-400 text-slate-950 text-[9px] font-bold">{pendAprob}</span>}</button>
+                className={`px-3 py-1.5 rounded text-[11px] font-semibold tracking-wide uppercase ${tab === k ? 'bg-yellow-400 text-slate-950' : alerta ? (rojo ? 'text-red-400 ring-1 ring-red-400 bg-red-400/10' : 'text-yellow-400 ring-1 ring-yellow-400 bg-yellow-400/10') : 'text-slate-400 hover:text-slate-200'}`}>
+                {l}{cuenta > 0 && <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-bold ${rojo ? 'bg-red-500 text-white' : 'bg-yellow-400 text-slate-950'}`}>{cuenta}</span>}</button>
               );
             })}
           </div>
