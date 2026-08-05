@@ -3658,6 +3658,42 @@ function Tablero({ db, user }) {
 
   // El gasto acumulado es indicador de gerencia: Compras no lo ve (no cambia su decisión de comprar)
   const verGasto = user.rol !== 'compras';
+  const esGerencia = user.rol === 'gerente';
+
+  // ── Tiempo de respuesta de Compras, en HORAS (migración 25).
+  // Solo mide los ítems decididos DESPUÉS de la migración (los viejos no tienen sello).
+  const respuesta = useMemo(() => {
+    const medidos = flat.filter(i => i.creadoEn && i.decididoEn)
+      .map(i => ({ ...i, horas: (new Date(i.decididoEn) - new Date(i.creadoEn)) / 3600000 }))
+      .filter(i => i.horas >= 0);
+    const porCanal = ['URGENTE', 'GENERAL', 'ANTICIPADO'].map(c => {
+      const l = medidos.filter(i => i.canal === c);
+      return {
+        canal: c, n: l.length,
+        prom: l.length ? l.reduce((a, b) => a + b.horas, 0) / l.length : null,
+        peor: l.length ? Math.max(...l.map(i => i.horas)) : null,
+      };
+    });
+    const sinSello = flat.filter(i => i.decision !== 'Pendiente' && !i.decididoEn).length;
+    return { medidos, porCanal, sinSello };
+  }, [flat]);
+
+  // ── A qué hora entran los RQ (patrón de la obra).
+  // Un urgente pedido a las 6 p.m. ya no se puede comprar ese día.
+  const porHora = useMemo(() => {
+    const h = Array.from({ length: 24 }, (_, k) => ({ hora: k, total: 0, urg: 0 }));
+    rqsF.forEach(r => {
+      if (!r.creadoEn) return;
+      const k = new Date(r.creadoEn).getHours();   // hora local del navegador (Perú)
+      h[k].total += 1;
+      if (r.canal === 'URGENTE') h[k].urg += 1;
+    });
+    return h;
+  }, [rqsF]);
+  const maxHora = Math.max(1, ...porHora.map(x => x.total));
+  const urgTarde = porHora.filter(x => x.hora >= 15).reduce((a, b) => a + b.urg, 0);
+  const urgTotalHora = porHora.reduce((a, b) => a + b.urg, 0);
+  const fmtH = n => n == null ? '—' : n < 24 ? n.toFixed(1) + 'h' : (n / 24).toFixed(1) + 'd';
   const kpis = [['RQs', rqsF.length], ['Ítems', flat.length], ['% Urgentes', pctUrg + '%'], ['Entregados', entregados], ['Llegaron tarde', tarde], ['Rechazados', flat.filter(i => i.decision === 'Rechazado').length], ['Anulados', flat.filter(i => i.decision === 'Anulado').length], ['Incompletos', flat.filter(i => i.estado === 'Incompleto').length], ...(verGasto ? [['Facturado S/', factF.reduce((a, f) => a + f.monto, 0).toFixed(0)]] : []), ['Préstamos activos', presActivos], ['Holgura prom.', holgProm + (holgProm !== '—' ? 'd' : '')], ['Entrega a tiempo', aTiempo], ['Uso incorrecto', pctIncorrecto], ['Falta pago más antiguo', faltaMax]];
   const nCredito = flat.filter(i => i.pago === 'Crédito').length;
   const nFalta = flat.filter(i => i.pago === 'Falta').length;
@@ -3739,6 +3775,65 @@ function Tablero({ db, user }) {
         </div>
       </div>
       )}
+
+      {esGerencia && (
+      <div className="grid md:grid-cols-2 gap-3 mb-3">
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Tiempo de respuesta de Compras</div>
+          <div className="text-[10px] text-slate-500 mb-3">Horas entre que el residente envía y Compras decide.</div>
+          {respuesta.medidos.length === 0 ? (
+            <div className="text-slate-500 text-[11px] py-3">
+              Aún no hay ítems con marca de tiempo. Se empieza a medir con las decisiones nuevas.</div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead><tr>{['Canal', 'Decididos', 'Promedio', 'El peor'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {respuesta.porCanal.map(c => (
+                  <tr key={c.canal} className="border-b border-slate-800">
+                    <td className="py-1.5 px-1.5">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase border ${canalClases[c.canal]}`}>{c.canal}</span></td>
+                    <td className="py-1.5 px-1.5 font-mono text-slate-400">{c.n}</td>
+                    <td className={`py-1.5 px-1.5 font-mono font-bold ${c.prom == null ? 'text-slate-500' : c.canal === 'URGENTE' && c.prom > 6 ? 'text-red-400' : 'text-green-400'}`}>{fmtH(c.prom)}</td>
+                    <td className="py-1.5 px-1.5 font-mono text-slate-400">{fmtH(c.peor)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {respuesta.sinSello > 0 && (
+            <div className="text-[9px] text-slate-600 mt-2">
+              {respuesta.sinSello} ítem(s) se decidieron antes de que se midiera la hora: no entran al promedio.</div>
+          )}
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">¿A qué hora entran los RQ?</div>
+          <div className="text-[10px] text-slate-500 mb-2">
+            En rojo los urgentes. Un urgente que entra tarde ya no se compra ese día.</div>
+          <svg viewBox="0 0 480 120" className="w-full" style={{ height: 120 }}>
+            {porHora.map((h, i) => {
+              const x = i * 20 + 2, alto = Math.round((h.total / maxHora) * 78);
+              const altoUrg = h.total ? Math.round((h.urg / maxHora) * 78) : 0;
+              return (
+                <g key={i}>
+                  <rect x={x} y={100 - alto} width={16} height={alto} fill="#334155" rx="2" />
+                  <rect x={x} y={100 - altoUrg} width={16} height={altoUrg} fill="#f87171" rx="2" />
+                  {h.total > 0 && <text x={x + 8} y={96 - alto} textAnchor="middle" fill="#94a3b8" fontSize="8">{h.total}</text>}
+                  {i % 3 === 0 && <text x={x + 8} y={114} textAnchor="middle" fill="#64748b" fontSize="8">{h.hora}h</text>}
+                </g>
+              );
+            })}
+          </svg>
+          {urgTotalHora > 0 && (
+            <div className={`text-[10px] mt-1 ${urgTarde / urgTotalHora >= 0.4 ? 'text-red-400' : 'text-slate-400'}`}>
+              {urgTarde} de {urgTotalHora} urgentes ({Math.round(urgTarde / urgTotalHora * 100)}%) entran de las 3 p.m. en adelante
+              {urgTarde / urgTotalHora >= 0.4 ? ' — se compran recién al día siguiente.' : '.'}
+            </div>
+          )}
+        </div>
+      </div>
+      )}
+
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Registro consolidado{pagoF ? ` · mostrando solo ítems con pago "${pagoF}"` : ''}</div>
@@ -3982,6 +4077,7 @@ export default function App() {
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
         fechaCompra: r.fecha_compra || '', cotizaciones: cotPorItem[r.id] || [],
+        creadoEn: r.creado_en || null, decididoEn: r.decidido_en || null,
       };
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
     });
@@ -3992,6 +4088,7 @@ export default function App() {
       residente: r.tipo === 'Cotizacion' ? (r.solicitante_diseno || 'Diseño') : (usrMap[r.residente_id] ? usrMap[r.residente_id].nombre : ''),
       almacen: r.almacen_resp || '',
       piso: r.piso || '', canal: r.canal, just: r.justificacion || '', fechaRQ: r.fecha_rq,
+      creadoEn: r.creado_en || null,   // marca real con hora (auditoría y patrón horario)
       creadoPor: usrMap[r.creado_por] ? usrMap[r.creado_por].nombre : '', items: itemsPorRq[r.id] || [],
     }));
 
