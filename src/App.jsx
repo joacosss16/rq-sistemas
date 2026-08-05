@@ -1536,6 +1536,7 @@ function Compras({ user, db, api, modo }) {
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
   const [fFact, setFFact] = useState({});
+  const [buscaExtra, setBuscaExtra] = useState({});   // filtro de la lista "otros ítems que cubre"
   const [triage, setTriage] = useState(null);
   const [busca, setBusca] = useState('');
   const [confAprRq, setConfAprRq] = useState(null);
@@ -1958,14 +1959,31 @@ function Compras({ user, db, api, modo }) {
                           {candidatosExtra.length > 0 && (
                             <div className="mb-1.5 border-t border-slate-700 pt-1.5">
                               <div className="text-[9px] font-bold text-slate-400 uppercase mb-1">¿Esta factura cubre otros ítems? ({i.proyecto})</div>
-                              <div className="max-h-24 overflow-y-auto">
-                                {candidatosExtra.map(x => (
-                                  <label key={x.id} className="flex items-start gap-1.5 text-[10px] text-slate-300 mb-1 cursor-pointer">
-                                    <input type="checkbox" checked={ff.extras.includes(x.id)} onChange={() => toggleExtra(i.id, x.id)} className="mt-0.5" />
-                                    <span>RQ-{String(x.rq).padStart(3, '0')} · {x.desc}</span>
-                                  </label>
-                                ))}
-                              </div>
+                              {(() => {
+                                const q = (buscaExtra[i.id] || '').trim().toLowerCase();
+                                // los ya marcados quedan siempre visibles, aunque no coincidan con la búsqueda
+                                const vis = candidatosExtra.filter(x => ff.extras.includes(x.id) || !q
+                                  || `${x.desc} rq-${String(x.rq).padStart(3, '0')} ${x.rq} ${x.cod}`.toLowerCase().includes(q));
+                                return (
+                                  <>
+                                    {candidatosExtra.length > 4 && (
+                                      <input value={buscaExtra[i.id] || ''} onChange={e => setBuscaExtra({ ...buscaExtra, [i.id]: e.target.value })}
+                                        placeholder={`Buscar entre ${candidatosExtra.length} ítems…`} className={`w-full ${inputCls} mb-1`} />
+                                    )}
+                                    <div className="max-h-24 overflow-y-auto">
+                                      {vis.length === 0 ? (
+                                        <div className="text-[9px] text-slate-500">Sin coincidencias.</div>
+                                      ) : vis.map(x => (
+                                        <label key={x.id} className="flex items-start gap-1.5 text-[10px] text-slate-300 mb-1 cursor-pointer">
+                                          <input type="checkbox" checked={ff.extras.includes(x.id)} onChange={() => toggleExtra(i.id, x.id)} className="mt-0.5" />
+                                          <span>RQ-{String(x.rq).padStart(3, '0')} · {x.desc}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                    {q && <div className="text-[9px] text-slate-500">{vis.length} de {candidatosExtra.length} · {ff.extras.length} marcado(s)</div>}
+                                  </>
+                                );
+                              })()}
                             </div>
                           )}
                           <div className="mb-1.5 border-t border-slate-700 pt-1.5">
