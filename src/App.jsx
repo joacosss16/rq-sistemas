@@ -2925,6 +2925,7 @@ function Rendiciones({ user, db, api }) {
   const puede = user.rol === 'administracion' || user.rol === 'pagos';
   const [proy, setProy] = useState('TODOS');
   const [obs, setObs] = useState({});
+  const [corr, setCorr] = useState({});   // texto de la corrección de una rendición observada
   const [aviso, setAvisoRaw] = useState('');
   const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
 
@@ -2936,6 +2937,15 @@ function Rendiciones({ user, db, api }) {
       return { ...r, facturas: fs, total, sobrante: r.montoFondo - total };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+
+  const corregir = async r => {
+    const detalle = (corr[r.id] || '').trim();
+    if (!detalle) { setAviso('⚠ Escribe qué corregiste antes de aprobar.'); return; }
+    const res = await api.corregirRendicion(r.id, { detalle, nombre: user.nombre });
+    if (res.error) { setAviso('⚠ ' + res.error); return; }
+    const c2 = { ...corr }; delete c2[r.id]; setCorr(c2);
+    setAviso(`Rendición de ${r.proyecto} corregida y aprobada. Gerencia verá qué se corrigió y cuándo.`);
+  };
 
   const resolver = async (r, estado) => {
     const observacion = (obs[r.id] || '').trim();
@@ -2991,9 +3001,33 @@ function Rendiciones({ user, db, api }) {
                 <button onClick={() => resolver(r, 'Observada')} className={btnRojo}>Observar</button>
               </div>
             )}
-            {r.estado === 'Observada' && <div className="text-red-400 text-[11px]">Observada: {r.observacion} ({r.aprobadoPor})</div>}
+            {r.estado === 'Observada' && (
+              <div>
+                <div className="text-red-400 text-[11px]">Observada: {r.observacion} ({r.aprobadoPor})</div>
+                {puede && (
+                  <div className="mt-2 bg-slate-950 border border-slate-700 rounded p-2">
+                    <div className="text-[9px] font-bold uppercase text-slate-400 mb-1">Corregir y aprobar</div>
+                    <div className="flex gap-2 flex-wrap items-start">
+                      <input value={corr[r.id] || ''} onChange={e => setCorr({ ...corr, [r.id]: e.target.value })}
+                        placeholder="¿Qué corregiste? (obligatorio — lo revisa gerencia)"
+                        className={`${inputCls} flex-1`} style={{ minWidth: '280px' }} />
+                      <button onClick={() => corregir(r)} disabled={!(corr[r.id] || '').trim()}
+                        className={btnOk(!!(corr[r.id] || '').trim())}>Guardar corrección y aprobar</button>
+                    </div>
+                    <div className="text-[9px] text-slate-500 mt-1">
+                      Queda aprobada y pasa a la cola de reposición. El detalle y la fecha quedan visibles para gerencia.</div>
+                  </div>
+                )}
+              </div>
+            )}
             {r.estado === 'Aprobada' && (
               <div className="text-[11px] text-slate-500">
+                {r.corrDetalle && (user.rol === 'gerente' || user.rol === 'administracion') && (
+                  <div className="text-yellow-400 mb-1">
+                    ⚠ Corregida por {r.corrPor} el {fmt(r.corrFecha)}: {r.corrDetalle}
+                    {r.observacion && <span className="text-slate-500"> · se observó: {r.observacion}</span>}
+                  </div>
+                )}
                 Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)} ·
                 {r.repOp
                   ? ` repuesta: ${(bancoDe[r.proyecto] || {}).banco || ''} op. ${r.repOp} (${fmt(r.repFecha)}, ${r.repuestoPor})`
@@ -4136,6 +4170,9 @@ export default function App() {
       aprobadoPor: usrMap[r.aprobado_por] ? usrMap[r.aprobado_por].nombre : '',
       fechaAprobacion: r.fecha_aprobacion || '', repOp: r.reposicion_operacion || '',
       repFecha: r.reposicion_fecha || '', repuestoPor: usrMap[r.repuesto_por] ? usrMap[r.repuesto_por].nombre : '',
+      // corrección hecha por administración (la ve gerencia, migración 26)
+      corrDetalle: r.correccion ? r.correccion.detalle : '', corrPor: r.correccion ? r.correccion.por : '',
+      corrFecha: r.correccion ? r.correccion.fecha : '',
     }));
 
     const salidas = salR.data.map(s => ({
@@ -4311,6 +4348,14 @@ export default function App() {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('rendiciones').update({
           estado, observacion: observacion || null, aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
+        }).eq('id', id);
+      }),
+      // Administración corrige una rendición observada: queda aprobada con rastro
+      corregirRendicion: (id, { detalle, nombre }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('rendiciones').update({
+          estado: 'Aprobada', aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
+          correccion: { detalle, por: nombre, fecha: HOY_ISO },
         }).eq('id', id);
       }),
       reponerRendicion: (id, { op, fecha }) => wrap(async () => {
