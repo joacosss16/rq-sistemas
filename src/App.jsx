@@ -2920,12 +2920,15 @@ function Pagos({ user, db, api }) {
 }
 
 function Rendiciones({ user, db, api }) {
-  const { rendiciones, facturas, cajas, bancoDe } = db;
+  const { rendiciones, facturas, cajas, tolerancias = {}, bancoDe } = db;
   // administración aprueba; el rol pagos también (Mónica lleva ambos frentes)
   const puede = user.rol === 'administracion' || user.rol === 'pagos';
   const [proy, setProy] = useState('TODOS');
   const [obs, setObs] = useState({});
   const [corr, setCorr] = useState({});   // texto de la corrección de una rendición observada
+  const [arqueo, setArqueo] = useState({});     // efectivo contado al cerrar el día
+  const [difMot, setDifMot] = useState({});     // motivo cuando la diferencia excede la tolerancia
+  const [difNota, setDifNota] = useState({});   // decisión de gerencia sobre la diferencia
   const [aviso, setAvisoRaw] = useState('');
   const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
 
@@ -2937,6 +2940,25 @@ function Rendiciones({ user, db, api }) {
       return { ...r, facturas: fs, total, sobrante: r.montoFondo - total };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+
+  const cerrarArqueo = async (r, contado, diferencia, excede, motivo) => {
+    const res = await api.cerrarConArqueo(r.id, { contado, diferencia, excede, motivo, nombre: user.nombre });
+    if (res.error) { setAviso('⚠ ' + res.error); return; }
+    const a2 = { ...arqueo }; delete a2[r.id]; setArqueo(a2);
+    const m2 = { ...difMot }; delete m2[r.id]; setDifMot(m2);
+    setAviso(excede
+      ? `Diferencia de S/ ${Math.abs(diferencia).toFixed(2)} en ${r.proyecto}: enviada a gerencia. Pagos no repone hasta que la resuelvan.`
+      : `Rendición de ${r.proyecto} cerrada y aprobada${Math.abs(diferencia) >= 0.005 ? ` (diferencia de S/ ${Math.abs(diferencia).toFixed(2)}, dentro de la tolerancia)` : ' — la caja cuadra exacto'}.`);
+  };
+
+  const resolverDif = async r => {
+    const nota = (difNota[r.id] || '').trim();
+    if (!nota) return;
+    const res = await api.resolverDiferencia(r.id, { decision: 'Resuelta', nota, nombre: user.nombre });
+    if (res.error) { setAviso('⚠ ' + res.error); return; }
+    const n2 = { ...difNota }; delete n2[r.id]; setDifNota(n2);
+    setAviso(`Diferencia de ${r.proyecto} resuelta. La reposición pasó a la cola de Pagos.`);
+  };
 
   const corregir = async r => {
     const detalle = (corr[r.id] || '').trim();
@@ -2993,9 +3015,70 @@ function Rendiciones({ user, db, api }) {
                 </tbody>
               </table>
             )}
+            {r.estado === 'Abierta' && puede && (() => {
+              const tol = tolerancias[r.proyecto] ?? 20;
+              const cont = arqueo[r.id];
+              const hayArqueo = cont !== undefined && cont !== '' && !isNaN(Number(cont));
+              const dif = hayArqueo ? Number(cont) - r.sobrante : null;
+              const excede = dif != null && Math.abs(dif) > tol;
+              const motivo = (difMot[r.id] || '').trim();
+              return (
+              <div className="bg-slate-950 border border-slate-700 rounded p-2 mb-2">
+                <div className="text-[9px] font-bold uppercase text-slate-400 mb-1">
+                  Cierre del día · arqueo de caja (tolerancia de {r.proyecto}: S/ {tol.toFixed(2)})</div>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <label className="text-[10px] text-slate-400">Efectivo contado S/</label>
+                  <input type="number" step="any" min="0" value={cont ?? ''}
+                    onChange={e => setArqueo({ ...arqueo, [r.id]: e.target.value })}
+                    placeholder={r.sobrante.toFixed(2)} className={`w-28 ${inputCls} font-mono`} />
+                  {hayArqueo && (
+                    <span className={`text-[11px] font-mono font-bold ${Math.abs(dif) < 0.005 ? 'text-green-400' : excede ? 'text-red-400' : 'text-yellow-400'}`}>
+                      {Math.abs(dif) < 0.005 ? '✓ Cuadra exacto'
+                        : `${dif < 0 ? 'Falta' : 'Sobra'} S/ ${Math.abs(dif).toFixed(2)}`}
+                      {hayArqueo && Math.abs(dif) >= 0.005 && (excede
+                        ? ' · supera la tolerancia: lo resuelve gerencia'
+                        : ' · dentro de la tolerancia')}
+                    </span>
+                  )}
+                </div>
+                {excede && (
+                  <input value={difMot[r.id] || ''} onChange={e => setDifMot({ ...difMot, [r.id]: e.target.value })}
+                    placeholder="¿Qué pasó con el dinero? (obligatorio para enviar a gerencia)"
+                    className={`w-full ${inputCls} mt-2`} />
+                )}
+                <div className="flex gap-2 mt-2 flex-wrap">
+                  <button onClick={() => cerrarArqueo(r, Number(cont), dif, excede, motivo)}
+                    disabled={!hayArqueo || (excede && !motivo)}
+                    className={excede ? btnOk(!!(hayArqueo && motivo)) : btnOk(hayArqueo)}>
+                    {excede ? 'Enviar a gerencia' : 'Cerrar y aprobar'}</button>
+                  <span className="text-[9px] text-slate-500 self-center">
+                    Cuenta el efectivo que queda en la caja y anótalo. La diferencia la calcula el sistema.</span>
+                </div>
+              </div>
+              );
+            })()}
+            {r.estado === 'Con diferencia' && (
+              <div className="bg-red-950 border border-red-800 rounded p-2 mb-2">
+                <div className="text-[10px] font-bold uppercase text-red-400">
+                  Diferencia de caja · {r.diferencia < 0 ? 'faltan' : 'sobran'} S/ {Math.abs(r.diferencia || 0).toFixed(2)} — esperando a gerencia</div>
+                <div className="text-[10px] text-slate-300 mt-1">
+                  Contado S/ {(r.efectivoContado ?? 0).toFixed(2)} vs. teórico S/ {r.sobrante.toFixed(2)}
+                  {r.difMotivo && <> · <span className="text-slate-400">{r.difMotivo}</span></>}</div>
+                <div className="text-[9px] text-slate-500 mt-1">Pagos no repone el fondo hasta que gerencia lo resuelva.</div>
+                {user.rol === 'gerente' && (
+                  <div className="mt-2 flex gap-2 flex-wrap items-start">
+                    <input value={difNota[r.id] || ''} onChange={e => setDifNota({ ...difNota, [r.id]: e.target.value })}
+                      placeholder="Decisión de gerencia (se asume, se descuenta, se justificó…)"
+                      className={`${inputCls} flex-1`} style={{ minWidth: '260px' }} />
+                    <button onClick={() => resolverDif(r)} disabled={!(difNota[r.id] || '').trim()}
+                      className={btnOk(!!(difNota[r.id] || '').trim())}>Resolver y aprobar</button>
+                  </div>
+                )}
+              </div>
+            )}
             {r.estado === 'Abierta' && puede && (
               <div className="flex gap-2 items-start flex-wrap">
-                <button onClick={() => resolver(r, 'Aprobada')} className={btnVerde}>Aprobar rendición</button>
+                <button onClick={() => resolver(r, 'Aprobada')} className={btnVerde}>Aprobar sin arqueo</button>
                 <input value={obs[r.id] || ''} onChange={e => setObs({ ...obs, [r.id]: e.target.value })}
                   placeholder="Motivo de observación (obligatorio para observar)" className={`${inputCls}`} style={{ minWidth: '260px' }} />
                 <button onClick={() => resolver(r, 'Observada')} className={btnRojo}>Observar</button>
@@ -3022,6 +3105,13 @@ function Rendiciones({ user, db, api }) {
             )}
             {r.estado === 'Aprobada' && (
               <div className="text-[11px] text-slate-500">
+                {r.diferencia != null && Math.abs(r.diferencia) >= 0.005 && (
+                  <div className={`mb-1 ${r.difPor ? 'text-red-400' : 'text-yellow-400'}`}>
+                    {r.diferencia < 0 ? 'Faltaron' : 'Sobraron'} S/ {Math.abs(r.diferencia).toFixed(2)} en el arqueo
+                    {r.difMotivo && <> · {r.difMotivo}</>}
+                    {r.difPor && <> · resuelto por {r.difPor} el {fmt(r.difFecha)}: {r.difNota}</>}
+                  </div>
+                )}
                 {r.corrDetalle && (user.rol === 'gerente' || user.rol === 'administracion') && (
                   <div className="text-yellow-400 mb-1">
                     ⚠ Corregida por {r.corrPor} el {fmt(r.corrFecha)}: {r.corrDetalle}
@@ -3263,7 +3353,7 @@ function BarrasMes({ datos, color = '#facc15', sufijo = '', titulo }) {
 // Reporte mensual por perfil — solo gerencia. Cabecera con gráficos de desempeño
 // y luego un bloque por rol con sus indicadores del mes.
 function ReporteMensual({ db }) {
-  const { rqs, facturas, salidas, prestamos, solicitudes } = db;
+  const { rqs, facturas, salidas, prestamos, solicitudes, rendiciones = [] } = db;
   const [mes, setMes] = useState(HOY_ISO.slice(0, 7));
 
   const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
@@ -3377,6 +3467,32 @@ function ReporteMensual({ db }) {
     pendientes: facturas.filter(f => f.estadoPago !== 'Pagada').length,
     deuda: facturas.filter(f => f.estadoPago !== 'Pagada').reduce((a, f) => a + f.monto, 0),
   };
+
+  // ── DIFERENCIAS DE CAJA CHICA (la goterita diaria es lo que importa)
+  const renM = rendiciones.filter(r => delMes(r.fecha, mes)).map(r => {
+    const rendido = facturas.filter(f => f.rendicionId === r.id).reduce((a, f) => a + f.monto, 0);
+    return { ...r, rendido, teorico: r.montoFondo - rendido };
+  });
+  const difCaja = useMemo(() => {
+    const conDif = renM.filter(r => r.diferencia != null && Math.abs(r.diferencia) >= 0.005);
+    const porObra = {};
+    conDif.forEach(r => {
+      const k = `${r.proyecto}||${r.responsable || '—'}`;
+      const a = (porObra[k] = porObra[k] || { obra: r.proyecto, responsable: r.responsable || '—', dias: 0, falta: 0, sobra: 0, neto: 0, escaladas: 0 });
+      a.dias += 1;
+      if (r.diferencia < 0) a.falta += -r.diferencia; else a.sobra += r.diferencia;
+      a.neto += r.diferencia;
+      if (r.difPor) a.escaladas += 1;
+    });
+    return {
+      filas: Object.values(porObra).sort((a, b) => a.neto - b.neto),
+      conDif,
+      arqueadas: renM.filter(r => r.efectivoContado != null).length,
+      total: renM.length,
+      netoTotal: conDif.reduce((a, r) => a + r.diferencia, 0),
+      faltanteTotal: conDif.filter(r => r.diferencia < 0).reduce((a, r) => a - r.diferencia, 0),
+    };
+  }, [renM]);
 
   // ── COMPRADOR (Frank)
   const porComprador = useMemo(() => {
@@ -3636,6 +3752,45 @@ function ReporteMensual({ db }) {
           </div>
           );
         })()}
+      </Bloque>
+
+      <Bloque id="caj" titulo="Diferencias de caja chica"
+        sub="Lo que falta o sobra al contar el efectivo. La goterita diaria importa más que un día suelto: mira el acumulado.">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+          <Tarjeta l="Faltante acumulado" v={sol(difCaja.faltanteTotal)} c={difCaja.faltanteTotal > 0 ? 'text-red-400' : 'text-slate-400'}
+            onClick={() => abrir('caj', 'Días con faltante de caja', ['Obra', 'Fecha', 'Responsable', 'Teórico', 'Contado', 'Falta', 'Motivo'],
+              difCaja.conDif.filter(r => r.diferencia < 0).map(r => [r.proyecto, fmt(r.fecha), r.responsable || '—',
+                sol(r.teorico), sol(r.efectivoContado ?? 0), sol(-r.diferencia), r.difMotivo || '—']))} />
+          <Tarjeta l="Neto del mes" v={sol(difCaja.netoTotal)} c={difCaja.netoTotal < 0 ? 'text-red-400' : difCaja.netoTotal > 0 ? 'text-yellow-400' : 'text-green-400'}
+            onClick={() => abrir('caj', 'Todas las diferencias del mes', ['Obra', 'Fecha', 'Responsable', 'Diferencia', 'Motivo', 'Resolución'],
+              difCaja.conDif.map(r => [r.proyecto, fmt(r.fecha), r.responsable || '—',
+                (r.diferencia < 0 ? '−' : '+') + ' S/ ' + Math.abs(r.diferencia).toFixed(2), r.difMotivo || '—',
+                r.difPor ? `${r.difNota} (${r.difPor}, ${fmt(r.difFecha)})` : '—']))} />
+          <Tarjeta l="Días con diferencia" v={`${difCaja.conDif.length}`} />
+          <Tarjeta l="Rendiciones arqueadas" v={`${difCaja.arqueadas} de ${difCaja.total}`}
+            c={difCaja.total && difCaja.arqueadas < difCaja.total ? 'text-yellow-400' : 'text-slate-100'} />
+        </div>
+        {difCaja.filas.length === 0 ? (
+          <div className="text-slate-500 text-[11px] py-2">
+            {difCaja.total === 0 ? 'Sin rendiciones este mes.' : 'Ninguna diferencia: todas las cajas cuadraron.'}</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead><tr>{['Obra', 'Responsable', 'Días con dif.', 'Faltó', 'Sobró', 'Neto', 'Fueron a gerencia'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <tbody>
+              {difCaja.filas.map(f => (
+                <tr key={f.obra + f.responsable} className="border-b border-slate-800">
+                  <td className="py-1.5 px-1.5 text-slate-200">{f.obra}</td>
+                  <td className="py-1.5 px-1.5 text-slate-300">{f.responsable}</td>
+                  <td className="py-1.5 px-1.5 font-mono text-slate-400">{f.dias}</td>
+                  <td className="py-1.5 px-1.5 font-mono text-red-400">{f.falta > 0 ? sol(f.falta) : '—'}</td>
+                  <td className="py-1.5 px-1.5 font-mono text-slate-400">{f.sobra > 0 ? sol(f.sobra) : '—'}</td>
+                  <td className={`py-1.5 px-1.5 font-mono font-bold ${f.neto < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{sol(f.neto)}</td>
+                  <td className="py-1.5 px-1.5 font-mono text-slate-400">{f.escaladas}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Bloque>
 
       <Bloque id="cmp" titulo="Comprador · compras del día" sub="Ítems marcados como comprados en el mes.">
@@ -4162,7 +4317,11 @@ export default function App() {
     }));
 
     const cajas = {};
-    cajR.data.forEach(c => { cajas[nomProy[c.proyecto] || c.proyecto] = Number(c.monto_fondo); });
+    const tolerancias = {};
+    cajR.data.forEach(c => {
+      cajas[nomProy[c.proyecto] || c.proyecto] = Number(c.monto_fondo);
+      tolerancias[nomProy[c.proyecto] || c.proyecto] = c.tolerancia == null ? 20 : Number(c.tolerancia);
+    });
     const rendiciones = renR.data.map(r => ({
       id: r.id, n: r.numero, proyecto: nomProy[r.proyecto] || r.proyecto, fecha: r.fecha,
       responsable: usrMap[r.responsable_id] ? usrMap[r.responsable_id].nombre : '',
@@ -4173,6 +4332,14 @@ export default function App() {
       // corrección hecha por administración (la ve gerencia, migración 26)
       corrDetalle: r.correccion ? r.correccion.detalle : '', corrPor: r.correccion ? r.correccion.por : '',
       corrFecha: r.correccion ? r.correccion.fecha : '',
+      // arqueo de caja (migración 27)
+      efectivoContado: r.efectivo_contado == null ? null : Number(r.efectivo_contado),
+      diferencia: r.diferencia == null ? null : Number(r.diferencia),
+      difMotivo: r.dif_motivo || '',
+      difDecision: r.dif_resolucion ? r.dif_resolucion.decision : '',
+      difNota: r.dif_resolucion ? r.dif_resolucion.nota : '',
+      difPor: r.dif_resolucion ? r.dif_resolucion.por : '',
+      difFecha: r.dif_resolucion ? r.dif_resolucion.fecha : '',
     }));
 
     const salidas = salR.data.map(s => ({
@@ -4218,7 +4385,7 @@ export default function App() {
     }));
 
     const nuevo = {
-      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, rendiciones, bancoDe,
+      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
       precioProm, ultimaCompra, historialPrecios,
@@ -4348,6 +4515,26 @@ export default function App() {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('rendiciones').update({
           estado, observacion: observacion || null, aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
+        }).eq('id', id);
+      }),
+      // Arqueo: cierra la rendición con el efectivo contado. Si la diferencia
+      // supera la tolerancia de la obra, queda "Con diferencia" para gerencia.
+      cerrarConArqueo: (id, { contado, diferencia, excede, motivo, nombre }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        const patch = {
+          efectivo_contado: contado, diferencia,
+          dif_motivo: motivo || null,
+          estado: excede ? 'Con diferencia' : 'Aprobada',
+        };
+        if (!excede) { patch.aprobado_por = u.id; patch.fecha_aprobacion = HOY_ISO; }
+        return await supabase.from('rendiciones').update(patch).eq('id', id);
+      }),
+      // Gerencia resuelve la diferencia: recién ahí Pagos puede reponer
+      resolverDiferencia: (id, { decision, nota, nombre }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('rendiciones').update({
+          estado: 'Aprobada', aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
+          dif_resolucion: { decision, nota: nota || null, por: nombre, fecha: HOY_ISO },
         }).eq('id', id);
       }),
       // Administración corrige una rendición observada: queda aprobada con rastro
