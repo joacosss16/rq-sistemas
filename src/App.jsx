@@ -2987,7 +2987,23 @@ function Rendiciones({ user, db, api }) {
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Rendiciones de caja chica · fondo fijo diario por obra</div>
           <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
         </div>
-        {!puede && <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: las rendiciones las aprueba administración.</div>}
+        {!puede && (
+          user.rol === 'comprador' ? (
+            <div className="bg-slate-950 border border-yellow-800 rounded p-3 mb-3">
+              <div className="text-yellow-400 text-[11px] font-bold uppercase tracking-wider mb-1">¿Cómo rindo mis compras en efectivo?</div>
+              <div className="text-slate-300 text-[11px] leading-relaxed">
+                La rendición <b>no se crea desde aquí</b>: se arma sola. Ve a la pestaña <b>Facturar</b>, registra la
+                factura de tu compra y marca <b>“Ya pagada en EFECTIVO (caja chica de hoy)”</b>. Esa factura entra
+                automáticamente a la rendición del día de esa obra. Esta pantalla es solo para consultar cómo van.
+              </div>
+              <div className="text-slate-500 text-[10px] mt-1">
+                Administración la aprueba al cierre del día y Pagos repone el fondo. Una rendición por obra y por día.
+              </div>
+            </div>
+          ) : (
+            <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: las rendiciones las aprueba administración.</div>
+          )
+        )}
         <Aviso msg={aviso} />
         {lista.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Sin rendiciones{proy !== 'TODOS' ? ' en ' + proy : ''}. Se crean solas cuando Compras registra la primera factura en efectivo del día.</div>
@@ -3052,7 +3068,7 @@ function Rendiciones({ user, db, api }) {
                     className={excede ? btnOk(!!(hayArqueo && motivo)) : btnOk(hayArqueo)}>
                     {excede ? 'Enviar a gerencia' : 'Cerrar y aprobar'}</button>
                   <span className="text-[9px] text-slate-500 self-center">
-                    Cuenta el efectivo que queda en la caja y anótalo. La diferencia la calcula el sistema.</span>
+                    Cuenta el efectivo que queda en la caja y anótalo: sin arqueo no se puede cerrar el día.</span>
                 </div>
               </div>
               );
@@ -3078,7 +3094,6 @@ function Rendiciones({ user, db, api }) {
             )}
             {r.estado === 'Abierta' && puede && (
               <div className="flex gap-2 items-start flex-wrap">
-                <button onClick={() => resolver(r, 'Aprobada')} className={btnVerde}>Aprobar sin arqueo</button>
                 <input value={obs[r.id] || ''} onChange={e => setObs({ ...obs, [r.id]: e.target.value })}
                   placeholder="Motivo de observación (obligatorio para observar)" className={`${inputCls}`} style={{ minWidth: '260px' }} />
                 <button onClick={() => resolver(r, 'Observada')} className={btnRojo}>Observar</button>
