@@ -1445,103 +1445,8 @@ function HistorialPrecios({ db }) {
   );
 }
 
-// Etapa COTIZADO: las cotizaciones que pidió Compras para un ítem.
-// Deja evidencia de que se comparó y de cuánto se ahorró.
-function CotizaBox({ item, api, puede, soloGanadora, onAviso }) {
-  const [abierto, setAbierto] = useState(false);
-  const [f, setF] = useState({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
-  const cots = item.cotizaciones || [];
-  const ganadora = cots.find(c => c.ganadora);
-  const cara = cots.length > 1 ? Math.max(...cots.map(c => c.precio)) : null;
-  const ahorro = ganadora && cara ? (cara - ganadora.precio) * Number(item.cant) : null;
-
-  const guardar = async () => {
-    if (!f.prov.trim() || !(Number(f.precio) > 0)) return;
-    if (f.ruc && !/^\d{11}$/.test(f.ruc)) { onAviso('⚠ El RUC debe tener 11 dígitos.'); return; }
-    const r = await api.addCotizacion({
-      itemId: item.id, prov: f.prov, ruc: f.ruc || null, precio: Number(f.precio),
-      plazo: f.plazo === '' ? null : Number(f.plazo), obs: f.obs,
-    });
-    if (r.error) { onAviso('⚠ ' + r.error); return; }
-    setF({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
-  };
-
-  // El comprador solo necesita saber con quién y a qué precio se cerró,
-  // para reclamar en el mostrador si le quieren cobrar otra cosa.
-  if (soloGanadora) {
-    if (!ganadora) return null;
-    return (
-      <div className="text-[9px] text-green-400 leading-tight w-40">
-        Comprar a <b>{ganadora.prov}</b> · S/ {ganadora.precio.toFixed(2)} c/u
-        {ganadora.plazo != null && <span className="text-slate-500"> · entrega {ganadora.plazo}d</span>}
-      </div>
-    );
-  }
-
-  if (!abierto) {
-    return (
-      <button onClick={() => setAbierto(true)}
-        className={`text-[9px] underline underline-offset-2 ${cots.length ? 'text-sky-400 hover:text-sky-300' : 'text-slate-500 hover:text-sky-400'}`}
-        title="Registrar las cotizaciones que pediste y elegir la ganadora">
-        {cots.length ? `${cots.length} cotización(es)${ganadora ? ' · elegida' : ' · sin elegir'}` : '＋ Cotizaciones'}
-      </button>
-    );
-  }
-  return (
-    <div className="w-64 bg-slate-950 border border-slate-700 rounded p-2">
-      <div className="flex items-center gap-1 mb-1">
-        <div className="text-[9px] font-bold uppercase text-sky-400">Cotizaciones pedidas</div>
-        <button onClick={() => setAbierto(false)} className="ml-auto text-slate-500 hover:text-slate-200 text-[10px]">✕</button>
-      </div>
-      {cots.length === 0 ? (
-        <div className="text-[9px] text-slate-500 mb-1">Aún no registras ninguna. Compara al menos 2 o 3.</div>
-      ) : (
-        <table className="w-full text-[10px] mb-1">
-          <tbody>
-            {cots.map(c => (
-              <tr key={c.id} className={`border-b border-slate-800 ${c.ganadora ? 'bg-green-950/40' : ''}`}>
-                <td className="py-1 pr-1 text-slate-200 leading-tight">{c.prov}
-                  {c.plazo != null && <span className="text-slate-500"> · {c.plazo}d</span>}
-                  {c.obs && <div className="text-[9px] text-slate-500">{c.obs}</div>}</td>
-                <td className={`py-1 px-1 font-mono text-right ${c.ganadora ? 'text-green-400 font-bold' : 'text-slate-300'}`}>S/ {c.precio.toFixed(2)}</td>
-                <td className="py-1 pl-1 text-right whitespace-nowrap">
-                  {puede && (c.ganadora
-                    ? <span className="text-[8px] font-bold uppercase text-green-400">ganó</span>
-                    : <button onClick={async () => { const r = await api.elegirCotizacion({ itemId: item.id, id: c.id }); if (r.error) onAviso('⚠ ' + r.error); }}
-                        className="text-[8px] font-bold uppercase text-slate-400 hover:text-green-400 underline">elegir</button>)}
-                  {puede && !c.ganadora && (
-                    <button onClick={async () => { const r = await api.delCotizacion(c.id); if (r.error) onAviso('⚠ ' + r.error); }}
-                      className="ml-1 text-slate-600 hover:text-red-400">✕</button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {ahorro != null && ahorro > 0 && (
-        <div className="text-[9px] text-green-400 mb-1">Ahorro vs. la más cara: S/ {ahorro.toFixed(2)}</div>
-      )}
-      {puede && (
-        <div className="space-y-1">
-          <input value={f.prov} onChange={e => setF({ ...f, prov: e.target.value })} placeholder="Proveedor" className={`w-full ${inputCls}`} />
-          <div className="flex gap-1">
-            <input type="number" step="any" min="0" value={f.precio} onChange={e => setF({ ...f, precio: e.target.value })} placeholder="S/ und" className={`w-20 ${inputCls}`} />
-            <input type="number" min="0" value={f.plazo} onChange={e => setF({ ...f, plazo: e.target.value })} placeholder="días" className={`w-16 ${inputCls}`} />
-            <input value={f.ruc} onChange={e => setF({ ...f, ruc: e.target.value.replace(/\D/g, '').slice(0, 11) })} placeholder="RUC (opc.)" className={`flex-1 ${inputCls}`} />
-          </div>
-          <input value={f.obs} onChange={e => setF({ ...f, obs: e.target.value })} placeholder="Nota (opcional)" className={`w-full ${inputCls}`} />
-          <button onClick={guardar} disabled={!f.prov.trim() || !(Number(f.precio) > 0)}
-            className={`w-full px-2 py-1 rounded text-[9px] font-bold uppercase ${f.prov.trim() && Number(f.precio) > 0 ? 'bg-sky-950 text-sky-400 border border-sky-800 hover:bg-sky-900' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
-            Agregar cotización</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Compras({ user, db, api, modo }) {
-  const { rqs, facturas, proveedores, ultimaCompra } = db;
+  const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {} } = db;
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
   const [rechazo, setRechazo] = useState({});
@@ -1756,7 +1661,11 @@ function Compras({ user, db, api, modo }) {
                 return (
                   <tr key={g.cod} className="border-b border-slate-800 align-top">
                     <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
-                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
+                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div>
+                      {mejorPrecio2m[g.cod] && (
+                        <div className="text-[10px] text-sky-400 mt-1" title="Precio más bajo al que se compró en los últimos 2 meses. Úsalo para negociar.">
+                          ▼ Más barato 2 meses: <b>S/ {mejorPrecio2m[g.cod].precio.toFixed(2)}</b> · {mejorPrecio2m[g.cod].prov}</div>
+                      )}</td>
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {Object.entries(g.porObra).map(([o, c]) => `${o}: ${c}`).join(' · ')}
@@ -1861,7 +1770,13 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{i.residente}
                     {i.tipoRq === 'Cotizacion' && <div className="text-[8px] font-bold uppercase text-amber-400">Cotización · {i.cotizacionRef}</div>}</td>
                   <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
-                    {i.just && <div className="text-yellow-400 text-[10px] mt-1">Motivo: {i.just}</div>}</td>
+                    {i.just && <div className="text-yellow-400 text-[10px] mt-1">Motivo: {i.just}</div>}
+                    {mejorPrecio2m[i.cod] && (
+                      <div className="text-[10px] text-sky-400 mt-1"
+                        title="El precio más bajo al que se compró este material en los últimos 2 meses. Úsalo para negociar.">
+                        ▼ Más barato 2 meses: <b>S/ {mejorPrecio2m[i.cod].precio.toFixed(2)}</b> · {mejorPrecio2m[i.cod].prov} ({fmt(mejorPrecio2m[i.cod].fecha)})
+                      </div>
+                    )}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200">{i.cant}</td>
                   <td className="py-2 px-1.5 text-slate-200">{fmt(i.fecha)}</td>
                   <td className="py-2 px-1.5">
@@ -1899,12 +1814,9 @@ function Compras({ user, db, api, modo }) {
                     {post ? (
                       i.estado === '—' ? (
                         puedeFacturar
-                          ? <div>
-                              <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
-                                className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
-                                title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
-                              <div className="mt-1"><CotizaBox item={i} api={api} puede={!facturarSolo} onAviso={m => { setAviso(m); setTimeout(() => setAviso(''), 6000); }} /></div>
-                            </div>
+                          ? <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
+                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                              title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
                           : <span className="text-slate-500 text-[10px]">Por comprar</span>
                       ) : (
                         <div>
@@ -1915,9 +1827,6 @@ function Compras({ user, db, api, modo }) {
                             <div className="text-[9px] text-red-400 font-bold mt-0.5"
                               title="Comprado hace más de 48 h y todavía sin factura: no ha entrado a Pagos.">
                               ⚠ {dias(HOY_ISO, i.fechaCompra || i.fechaRQ)}d sin factura</div>
-                          )}
-                          {(i.cotizaciones || []).length > 0 && (
-                            <div className="mt-1"><CotizaBox item={i} api={api} puede={!facturarSolo} onAviso={m => { setAviso(m); setTimeout(() => setAviso(''), 6000); }} /></div>
                           )}
                         </div>
                       )
@@ -2682,7 +2591,7 @@ function Almacen({ user, db, api }) {
 // Prioriza urgentes y fechas necesitadas; consolida el mismo material
 // entre obras y le dice cuántas facturas pedir.
 function ComprasDelDia({ db, api }) {
-  const { rqs } = db;
+  const { rqs, mejorPrecio2m = {} } = db;
   const EN_LETRAS = { 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
   const [aviso, setAviso] = useState('');
 
@@ -2726,7 +2635,11 @@ function ComprasDelDia({ db, api }) {
                     <td className="py-2 px-1.5">
                       {g.urgente && <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">URGENTE</span>}</td>
                     <td className="py-2 px-1.5 text-slate-200">{g.desc} <span className="text-slate-500">({g.und})</span>
-                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
+                      <div className="font-mono text-[10px] text-slate-500">{g.cod}</div>
+                      {mejorPrecio2m[g.cod] && (
+                        <div className="text-[10px] text-sky-400 mt-1" title="Precio más bajo al que se compró en los últimos 2 meses. Úsalo para negociar.">
+                          ▼ Más barato 2 meses: <b>S/ {mejorPrecio2m[g.cod].precio.toFixed(2)}</b> · {mejorPrecio2m[g.cod].prov}</div>
+                      )}</td>
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 whitespace-nowrap">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {g.porRQ.map((x, k) => (
@@ -4186,7 +4099,6 @@ export default function App() {
       fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
       fetchAll(() => supabase.from('cajas_chicas').select('*').order('proyecto')),
       fetchAll(() => supabase.from('rendiciones').select('*').order('numero')),
-      fetchAll(() => supabase.from('cotizaciones').select('*').order('creado_en')),
     ];
     // Casi-estático: catálogo + maestros. Se trae una vez (o en refresco completo);
     // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
@@ -4199,7 +4111,7 @@ export default function App() {
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
     ];
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
-    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, cotR] = dinR;
+    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
     let prjR, usrR, matR, provR, famR;
     if (usarCache) {
       ({ prjR, usrR, matR, provR, famR } = estaticosRef.current);
@@ -4207,7 +4119,7 @@ export default function App() {
       [prjR, usrR, matR, provR, famR] = estR;
       estaticosRef.current = { prjR, usrR, matR, provR, famR };
     }
-    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR, cotR].find(r => r.error);
+    const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
     const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
@@ -4270,16 +4182,20 @@ export default function App() {
     // de la compra más reciente a la más antigua
     Object.values(historialPrecios).forEach(l => l.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)));
 
-    // Cotizaciones por ítem (etapa Cotizado, migración 23)
-    const cotPorItem = {};
-    (cotR.data || []).forEach(c => {
-      (cotPorItem[c.rq_item_id] = cotPorItem[c.rq_item_id] || []).push({
-        id: c.id, prov: c.proveedor, ruc: c.ruc || '', precio: Number(c.precio_unitario),
-        plazo: c.plazo_dias == null ? null : Number(c.plazo_dias), obs: c.observacion || '',
-        ganadora: !!c.ganadora,
-      });
+    // Mejor precio de cada material en los ÚLTIMOS 2 MESES: el piso al que
+    // ya se compró, para negociar con el proveedor sin cotizar de nuevo.
+    const hace2meses = (() => {
+      const d = new Date(HOY_ISO + 'T00:00:00Z');
+      d.setUTCMonth(d.getUTCMonth() - 2);
+      return d.toISOString().slice(0, 10);
+    })();
+    const mejorPrecio2m = {};
+    Object.entries(historialPrecios).forEach(([cod, compras]) => {
+      const recientes = compras.filter(c => c.fecha >= hace2meses);
+      if (!recientes.length) return;
+      const min = recientes.reduce((a, b) => (b.precio < a.precio ? b : a));
+      mejorPrecio2m[cod] = { precio: min.precio, prov: min.prov, fecha: min.fecha, n: recientes.length };
     });
-    Object.values(cotPorItem).forEach(l => l.sort((a, b) => a.precio - b.precio));
 
     const factDeItem = {}; const itemsDeFactura = {};
     fitR.data.forEach(fi => {
@@ -4316,7 +4232,7 @@ export default function App() {
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
-        fechaCompra: r.fecha_compra || '', cotizaciones: cotPorItem[r.id] || [],
+        fechaCompra: r.fecha_compra || '',
         creadoEn: r.creado_en || null, decididoEn: r.decidido_en || null,
       };
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
@@ -4422,7 +4338,7 @@ export default function App() {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
-      precioProm, ultimaCompra, historialPrecios,
+      precioProm, ultimaCompra, historialPrecios, mejorPrecio2m,
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
       factorMap,
@@ -4628,20 +4544,6 @@ export default function App() {
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
         await supabase.from('familias').insert({ iu, nombre })),
-      // Cotizaciones por ítem (etapa Cotizado)
-      addCotizacion: ({ itemId, prov, ruc, precio, plazo, obs }) => wrap(async () => {
-        const u = (await supabase.auth.getUser()).data.user;
-        return await supabase.from('cotizaciones').insert({
-          rq_item_id: itemId, proveedor: prov.trim().toUpperCase(), ruc: ruc || null,
-          precio_unitario: precio, plazo_dias: plazo, observacion: obs || null, registrado_por: u.id,
-        });
-      }),
-      delCotizacion: id => wrap(async () => await supabase.from('cotizaciones').delete().eq('id', id)),
-      elegirCotizacion: ({ itemId, id }) => wrap(async () => {
-        const r1 = await supabase.from('cotizaciones').update({ ganadora: false }).eq('rq_item_id', itemId);
-        if (r1.error) return r1;
-        return await supabase.from('cotizaciones').update({ ganadora: true }).eq('id', id);
-      }),
       // Pedido por cotización (enchapes): crea cada material 97xxxx + el pedido aprobado
       crearPedidoCotizacion: ({ proyecto, cotizacionRef, arquitecto, fecha, lineas }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
