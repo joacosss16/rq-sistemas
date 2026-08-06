@@ -1447,7 +1447,7 @@ function HistorialPrecios({ db }) {
 
 // Etapa COTIZADO: las cotizaciones que pidió Compras para un ítem.
 // Deja evidencia de que se comparó y de cuánto se ahorró.
-function CotizaBox({ item, api, puede, onAviso }) {
+function CotizaBox({ item, api, puede, soloGanadora, onAviso }) {
   const [abierto, setAbierto] = useState(false);
   const [f, setF] = useState({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
   const cots = item.cotizaciones || [];
@@ -1465,6 +1465,18 @@ function CotizaBox({ item, api, puede, onAviso }) {
     if (r.error) { onAviso('⚠ ' + r.error); return; }
     setF({ prov: '', ruc: '', precio: '', plazo: '', obs: '' });
   };
+
+  // El comprador solo necesita saber con quién y a qué precio se cerró,
+  // para reclamar en el mostrador si le quieren cobrar otra cosa.
+  if (soloGanadora) {
+    if (!ganadora) return null;
+    return (
+      <div className="text-[9px] text-green-400 leading-tight w-40">
+        Comprar a <b>{ganadora.prov}</b> · S/ {ganadora.precio.toFixed(2)} c/u
+        {ganadora.plazo != null && <span className="text-slate-500"> · entrega {ganadora.plazo}d</span>}
+      </div>
+    );
+  }
 
   if (!abierto) {
     return (
@@ -1696,7 +1708,11 @@ function Compras({ user, db, api, modo }) {
     setTimeout(() => setAviso(''), 6000);
   };
 
-  const factProy = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
+  // El comprador solo ve LAS FACTURAS QUE ÉL REGISTRÓ: la deuda de la empresa
+  // con todos los proveedores no es información que necesite para comprar.
+  const factProy = facturas
+    .filter(f => !facturarSolo || f.registradoPorId === user.id)
+    .filter(f => proy === 'TODOS' || f.proyecto === proy);
   const factPendientes = factProy.filter(f => f.estadoPago !== 'Pagada');
   const factPagadas = factProy.filter(f => f.estadoPago === 'Pagada');
   const factMostradas = verPagadas ? factProy : factPendientes;
@@ -1724,7 +1740,8 @@ function Compras({ user, db, api, modo }) {
   return (
     <div>
     {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
-    {!facturarSolo && <HistorialPrecios db={db} />}
+    {/* el comprador también negocia en el mostrador: necesita el histórico de precios */}
+    <HistorialPrecios db={db} />
     {!facturarSolo && porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
@@ -1769,7 +1786,8 @@ function Compras({ user, db, api, modo }) {
     )}
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
       <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Gestión de compras · aprobación, estado y seguimiento</div>
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+          {facturarSolo ? 'Lo que compraste · registra aquí su factura' : 'Gestión de compras · aprobación, estado y seguimiento'}</div>
         <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
       </div>
       <div className="flex items-center gap-1.5 mb-3 flex-wrap">
@@ -2077,7 +2095,7 @@ function Compras({ user, db, api, modo }) {
     <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
       <div className="flex items-center gap-2 mb-3 flex-wrap">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
-          Facturas {verPagadas ? 'registradas' : 'por pagar'} · {factMostradas.length}</div>
+          {facturarSolo ? 'Facturas que registraste' : `Facturas ${verPagadas ? 'registradas' : 'por pagar'}`} · {factMostradas.length}</div>
         <button onClick={() => setVerPagadas(v => !v)}
           className={`ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase border ${verPagadas ? 'border-yellow-400 text-yellow-400 bg-slate-800' : 'border-slate-700 text-slate-400 bg-slate-800 hover:border-slate-500'}`}>
           {verPagadas ? '✕ Solo pendientes' : `Ver pagadas · ${factPagadas.length}`}</button>
@@ -4323,6 +4341,7 @@ export default function App() {
       ruc: f.proveedor_ruc, fecha: f.fecha, monto: Number(f.monto), forma: f.forma_pago,
       proyecto: nomProy[f.proyecto] || f.proyecto,
       registradoPor: usrMap[f.registrado_por] ? usrMap[f.registrado_por].nombre : '',
+      registradoPorId: f.registrado_por || null,
       estadoPago: f.estado_pago || 'Pendiente', banco: f.banco || '', numOp: f.numero_operacion || '',
       medio: f.medio_pago || '', rendicionId: f.rendicion_id || null,
       conciliada: !!f.conciliada, conciliadaPor: usrMap[f.conciliada_por] ? usrMap[f.conciliada_por].nombre : '',
