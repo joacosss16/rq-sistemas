@@ -1593,9 +1593,25 @@ function Compras({ user, db, api, modo }) {
     const f = fFact[i.id];
     const cubiertos = [i, ...flatBase.filter(x => f.extras.includes(x.id))];
     const suma = cubiertos.reduce((a, x) => a + (Number(f.precios[x.id]) || 0) * x.cant, 0);
-    const ok = (f.compromiso || f.serie.trim()) && f.prov.trim() && /^\d{11}$/.test(f.ruc) && f.fecha && Number(f.monto) > 0
-      && cubiertos.every(x => Number(f.precios[x.id]) > 0) && Math.abs(suma - Number(f.monto)) <= 0.1;
-    if (!ok) return;
+    // Nunca fallar en silencio: si algo falta, decir QUÉ falta.
+    const falta = [];
+    if (!(f.compromiso || f.serie.trim())) falta.push('el N° de factura');
+    if (!f.prov.trim()) falta.push('el proveedor');
+    if (!/^\d{11}$/.test(f.ruc)) falta.push('el RUC (11 dígitos)');
+    if (!f.fecha) falta.push('la fecha');
+    if (!(Number(f.monto) > 0)) falta.push('el monto total');
+    const sinPrecio = cubiertos.filter(x => !(Number(f.precios[x.id]) > 0));
+    if (sinPrecio.length) falta.push(`el precio de ${sinPrecio.length} ítem(s): ${sinPrecio.map(x => x.desc).join(', ')}`);
+    if (falta.length) {
+      setAviso('⚠ Falta ' + falta.join(' · '));
+      setTimeout(() => setAviso(''), 8000);
+      return;
+    }
+    if (Math.abs(suma - Number(f.monto)) > 0.1) {
+      setAviso(`⚠ El desglose no cuadra: sumaste S/ ${suma.toFixed(2)} y la factura dice S/ ${Number(f.monto).toFixed(2)} (diferencia S/ ${Math.abs(suma - Number(f.monto)).toFixed(2)}).`);
+      setTimeout(() => setAviso(''), 8000);
+      return;
+    }
     const serie = f.compromiso ? 'CRED-PEND' : f.serie.trim().toUpperCase();
     if (!f.compromiso && facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
       setAviso(`⚠ La factura ${serie} de ese RUC ya está registrada. Verifica el número.`);
@@ -4449,8 +4465,9 @@ export default function App() {
               : `Caja de ${proyecto} bloqueada: la rendición del ${fmt(t.fecha)} está observada por administración. Corrígela antes de seguir comprando en efectivo.` } };
           }
 
-          let { data: ren } = await supabase.from('rendiciones').select('id,estado')
+          let { data: ren, error: eRen } = await supabase.from('rendiciones').select('id,estado')
             .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle();
+          if (eRen) return { error: { message: `No se pudo leer la rendición de hoy de ${proyecto}: ${eRen.message}` } };
           if (ren && ren.estado !== 'Abierta') return { error: { message: `La rendición de hoy de ${proyecto} ya fue ${ren.estado.toLowerCase()}; coordina con administración.` } };
           if (!ren) {
             const fondo = dbRef.current.cajas[proyecto] || 2000;
@@ -4464,6 +4481,7 @@ export default function App() {
             } else if (ins.error) return { error: ins.error };
             else ren = ins.data;
           }
+          if (!ren) return { error: { message: `No se pudo abrir la rendición de hoy de ${proyecto}. Vuelve a intentar o avisa a administración.` } };
           rendicionId = ren.id;
         }
 
