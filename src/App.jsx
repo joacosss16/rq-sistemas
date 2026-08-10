@@ -1446,7 +1446,10 @@ function HistorialPrecios({ db }) {
 }
 
 function Compras({ user, db, api, modo }) {
-  const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {} } = db;
+  const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {}, rendiciones = [] } = db;
+  // Obras con la caja chica trabada: descuadre o observación sin resolver de días anteriores
+  const cajasTrabadas = rendiciones.filter(r =>
+    (r.estado === 'Con diferencia' || r.estado === 'Observada') && r.fecha < HOY_ISO);
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
   const [rechazo, setRechazo] = useState({});
@@ -1644,6 +1647,21 @@ function Compras({ user, db, api, modo }) {
 
   return (
     <div>
+    {cajasTrabadas.length > 0 && (
+      <div className="bg-red-950 border border-red-800 rounded-md p-4 mb-3">
+        <div className="text-[11px] font-bold tracking-widest text-red-400 uppercase mb-1">
+          ⛔ Caja chica bloqueada · {cajasTrabadas.length} obra(s)</div>
+        {cajasTrabadas.map(r => (
+          <div key={r.id} className="text-[11px] text-slate-200">
+            <b>{r.proyecto}</b> · rendición del {fmt(r.fecha)}: {r.estado === 'Con diferencia'
+              ? <>diferencia sin resolver{r.diferencia != null && <> ({r.diferencia < 0 ? 'faltan' : 'sobran'} S/ {Math.abs(r.diferencia).toFixed(2)})</>} — la levanta gerencia</>
+              : <>observada por administración — hay que corregirla</>}
+          </div>
+        ))}
+        <div className="text-[10px] text-red-300/80 mt-1">
+          No se pueden registrar más compras en efectivo de esa obra hasta que se resuelva. Las compras con factura a crédito o transferencia siguen normales.</div>
+      </div>
+    )}
     {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
     {/* el comprador también negocia en el mostrador: necesita el histórico de precios */}
     <HistorialPrecios db={db} />
@@ -4417,6 +4435,20 @@ export default function App() {
         let rendicionId = null;
         if (efectivo) {
           const proyCod = cod(proyecto);
+          // Un descuadre sin resolver de días anteriores CIERRA la caja de esa obra:
+          // no se puede seguir gastando hasta que gerencia lo levante y Pagos reponga.
+          const { data: trabadas } = await supabase.from('rendiciones')
+            .select('fecha,estado,diferencia')
+            .eq('proyecto', proyCod).lt('fecha', HOY_ISO)
+            .in('estado', ['Con diferencia', 'Observada']).order('fecha');
+          if (trabadas && trabadas.length) {
+            const t = trabadas[0];
+            const cuanto = t.diferencia == null ? '' : ` (${t.diferencia < 0 ? 'faltan' : 'sobran'} S/ ${Math.abs(t.diferencia).toFixed(2)})`;
+            return { error: { message: t.estado === 'Con diferencia'
+              ? `Caja de ${proyecto} bloqueada: la rendición del ${fmt(t.fecha)} tiene una diferencia sin resolver${cuanto}. Gerencia debe levantarla antes de seguir comprando en efectivo.`
+              : `Caja de ${proyecto} bloqueada: la rendición del ${fmt(t.fecha)} está observada por administración. Corrígela antes de seguir comprando en efectivo.` } };
+          }
+
           let { data: ren } = await supabase.from('rendiciones').select('id,estado')
             .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle();
           if (ren && ren.estado !== 'Abierta') return { error: { message: `La rendición de hoy de ${proyecto} ya fue ${ren.estado.toLowerCase()}; coordina con administración.` } };
