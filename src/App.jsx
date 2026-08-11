@@ -4205,6 +4205,7 @@ export default function App() {
   const [tab, setTab] = useState('tab');
   const dbRef = useRef(null);
   const estaticosRef = useRef(null);   // cache de tablas casi-estáticas (catálogo, maestros)
+  const dinamicosRef = useRef(null);   // último crudo de las transaccionales, para refrescar solo lo que cambió
 
   useEffect(() => {
     // Supabase entrega un objeto NUEVO en cada evento (refresco de token,
@@ -4228,7 +4229,7 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
-  const cargarTodo = useCallback(async (soloDinamicos = false) => {
+  const cargarTodo = useCallback(async (soloDinamicos = false, soloTablas = null) => {
     // Supabase devuelve máximo 1,000 filas por consulta: traer por lotes
     // hasta completar (el catálogo tiene 1,740 materiales).
     const LOTE = 1000;
@@ -4241,19 +4242,26 @@ export default function App() {
         if (data.length < LOTE) return { data: filas };
       }
     };
-    // Transaccional: cambia seguido, se refresca en cada ciclo (auto-refresco de 40s)
-    const qDin = [
-      fetchAll(() => supabase.from('rqs').select('*').order('numero')),
-      fetchAll(() => supabase.from('rq_items').select('*').order('creado_en').order('id')),
-      fetchAll(() => supabase.from('facturas').select('*').order('numero')),
-      fetchAll(() => supabase.from('factura_items').select('*').order('factura_id').order('rq_item_id')),
-      fetchAll(() => supabase.from('salidas').select('*').order('numero')),
-      fetchAll(() => supabase.from('prestamos').select('*').order('numero')),
-      fetchAll(() => supabase.from('solicitudes_material').select('*').order('numero')),
-      fetchAll(() => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')),
-      fetchAll(() => supabase.from('cajas_chicas').select('*').order('proyecto')),
-      fetchAll(() => supabase.from('rendiciones').select('*').order('numero')),
+    // Transaccional. Tras una acción solo se vuelven a traer las tablas que
+    // esa acción pudo tocar; el resto sale de la caché. Antes cada clic
+    // rebajaba las 10 tablas enteras (~840 KB) y por eso se sentía lento.
+    const DIN = [
+      ['rqs', () => supabase.from('rqs').select('*').order('numero')],
+      ['rq_items', () => supabase.from('rq_items').select('*').order('creado_en').order('id')],
+      ['facturas', () => supabase.from('facturas').select('*').order('numero')],
+      ['factura_items', () => supabase.from('factura_items').select('*').order('factura_id').order('rq_item_id')],
+      ['salidas', () => supabase.from('salidas').select('*').order('numero')],
+      ['prestamos', () => supabase.from('prestamos').select('*').order('numero')],
+      ['solicitudes_material', () => supabase.from('solicitudes_material').select('*').order('numero')],
+      ['stock_inicial', () => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')],
+      ['cajas_chicas', () => supabase.from('cajas_chicas').select('*').order('proyecto')],
+      ['rendiciones', () => supabase.from('rendiciones').select('*').order('numero')],
     ];
+    const cache = dinamicosRef.current;
+    const qDin = DIN.map(([nombre, q]) =>
+      (soloTablas && cache && !soloTablas.includes(nombre))
+        ? Promise.resolve(cache[nombre])
+        : fetchAll(q));
     // Casi-estático: catálogo + maestros. Se trae una vez (o en refresco completo);
     // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
     const usarCache = soloDinamicos && estaticosRef.current;
@@ -4265,6 +4273,8 @@ export default function App() {
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
     ];
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
+    // guardar el crudo para poder refrescar solo una tabla la próxima vez
+    dinamicosRef.current = Object.fromEntries(DIN.map(([n], k) => [n, dinR[k]]));
     const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
     let prjR, usrR, matR, provR, famR;
     if (usarCache) {
@@ -4536,11 +4546,13 @@ export default function App() {
 
   const api = useMemo(() => {
     const cod = nombre => (dbRef.current ? dbRef.current.codProy[nombre] : null) || nombre;
-    const wrap = async (fn) => {
+    // tablas: qué pudo tocar esta acción. Solo eso se vuelve a traer;
+    // el resto sale de la caché. Sin lista, se refresca todo (por si acaso).
+    const wrap = async (fn, tablas = null) => {
       try {
         const r = await fn();
         if (r && r.error) return { error: r.error.message || String(r.error) };
-        await cargarTodo();
+        await cargarTodo(true, tablas);
         return r || {};
       } catch (e) { return { error: e.message || String(e) }; }
     };
@@ -4559,8 +4571,8 @@ export default function App() {
         const { error: e2 } = await supabase.from('rq_items').insert(rows);
         if (e2) return { error: e2 };
         return { numero: rq.numero };
-      }),
-      updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
+      }, ['rqs', 'rq_items']),
+      updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id), ['rq_items']),
       // Una sola transacción en la base (migraciones 28/30): proveedor +
       // rendición + factura + líneas. Si algo falla no queda nada a medias.
       registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto,
@@ -4580,7 +4592,7 @@ export default function App() {
           return { error: { message: m.replace(/^.*?:\s*/, '') } };
         }
         return {};
-      }),
+      }, ['facturas', 'factura_items', 'rendiciones']),
       // Llega el documento físico: administración digita la serie real
       completarSerie: (id, serieReal) => wrap(async () => {
         const r = await supabase.from('facturas')
@@ -4589,9 +4601,9 @@ export default function App() {
           return { error: { message: `La factura ${serieReal} de ese RUC ya está registrada. Verifica la serie.` } };
         }
         return r;
-      }),
+      }, ['facturas']),
       anularFactura: (id, motivo) => wrap(async () =>
-        await supabase.rpc('anular_factura', { p_id: id, p_motivo: motivo })),
+        await supabase.rpc('anular_factura', { p_id: id, p_motivo: motivo }), ['facturas', 'factura_items']),
       pagarFactura: (id, { medio, banco, op, fecha, serieReal }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         const r = await supabase.from('facturas').update({
@@ -4600,15 +4612,15 @@ export default function App() {
           // compromiso → factura real: la serie llega con el comprobante al pagar
           ...(serieReal ? { serie: serieReal.trim().toUpperCase(), tipo_doc: 'Factura' } : {}),
         }).eq('id', id);
-        if (r.error && r.error.code === '23505') return { error: { message: `La factura ${serieReal} de ese RUC ya está registrada. Verifica la serie.` } };
+        if (r.error && r.error.code === '23505') return { error: { message: `La factura  de ese RUC ya está registrada. Verifica la serie.` } };
         return r;
-      }),
+      }, ['facturas']),
       resolverRendicion: (id, { estado, observacion }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('rendiciones').update({
           estado, observacion: observacion || null, aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
         }).eq('id', id);
-      }),
+      }, ["rendiciones"]),
       // Arqueo: cierra la rendición con el efectivo contado. Si la diferencia
       // supera la tolerancia de la obra, queda "Con diferencia" para gerencia.
       cerrarConArqueo: (id, { contado, diferencia, excede, motivo, nombre }) => wrap(async () => {
@@ -4620,7 +4632,7 @@ export default function App() {
         };
         if (!excede) { patch.aprobado_por = u.id; patch.fecha_aprobacion = HOY_ISO; }
         return await supabase.from('rendiciones').update(patch).eq('id', id);
-      }),
+      }, ["rendiciones"]),
       // Gerencia resuelve la diferencia: recién ahí Pagos puede reponer
       resolverDiferencia: (id, { decision, nota, nombre }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
@@ -4628,7 +4640,7 @@ export default function App() {
           estado: 'Aprobada', aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
           dif_resolucion: { decision, nota: nota || null, por: nombre, fecha: HOY_ISO },
         }).eq('id', id);
-      }),
+      }, ["rendiciones"]),
       // Administración corrige una rendición observada: queda aprobada con rastro
       corregirRendicion: (id, { detalle, nombre }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
@@ -4636,13 +4648,13 @@ export default function App() {
           estado: 'Aprobada', aprobado_por: u.id, fecha_aprobacion: HOY_ISO,
           correccion: { detalle, por: nombre, fecha: HOY_ISO },
         }).eq('id', id);
-      }),
+      }, ['rendiciones']),
       reponerRendicion: (id, { op, fecha }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('rendiciones').update({
           reposicion_operacion: op, reposicion_fecha: fecha, repuesto_por: u.id,
         }).eq('id', id);
-      }),
+      }, ['rendiciones']),
       recibir: (item, rec, obs, cad) => wrap(async () => {
         const total = Number(item.cantRecibida || 0) + rec;
         const esSaldo = item.estado === 'Incompleto';
@@ -4655,21 +4667,21 @@ export default function App() {
         // perecedero: se conserva la caducidad más próxima entre recepciones
         if (cad) patch.fecha_caducidad = (item.fechaCaducidad && item.fechaCaducidad < cad) ? item.fechaCaducidad : cad;
         return await supabase.from('rq_items').update(patch).eq('id', item.id);
-      }),
+      }, ['rq_items']),
       darSalida: ({ proyecto, cod: codigo, cant, hoja, zona }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('salidas').insert({
           proyecto: cod(proyecto), codigo, cant, hoja_trabajo: hoja, zona, registrado_por: u.id,
         });
-      }),
-      updSalida: (id, patch) => wrap(async () => await supabase.from('salidas').update(patch).eq('id', id)),
+      }, ['salidas']),
+      updSalida: (id, patch) => wrap(async () => await supabase.from('salidas').update(patch).eq('id', id), ['salidas']),
       prestar: ({ origen, destino, cod: codigo, cant }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('prestamos').insert({
           origen: cod(origen), destino: cod(destino), codigo, cant, registrado_por: u.id,
         });
       }),
-      updPrestamo: (id, patch) => wrap(async () => await supabase.from('prestamos').update(patch).eq('id', id)),
+      updPrestamo: (id, patch) => wrap(async () => await supabase.from('prestamos').update(patch).eq('id', id), ['prestamos']),
       crearSolicitud: ({ desc, und, famIu, perecedero, proyecto }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('solicitudes_material').insert({
