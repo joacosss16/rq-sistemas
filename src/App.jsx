@@ -1796,7 +1796,10 @@ function Compras({ user, db, api, modo }) {
               const cuadra = enFact && Number(ff.monto) > 0 && Math.abs(sumaDesglose - Number(ff.monto)) <= 0.1;
               const factOk = ff && (ff.compromiso || ff.serie.trim()) && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
                 && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
-              const candidatosExtra = enFact ? flatBase.filter(x => x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && x.pago !== 'Pagado') : [];
+              // Solo ítems SIN factura: uno que ya tiene la suya haría fallar
+              // toda la transacción (un ítem pertenece a una sola factura).
+              const candidatosExtra = enFact ? flatBase.filter(x =>
+                x.id !== i.id && x.proyecto === i.proyecto && x.decision === 'Aprobado' && !x.factura) : [];
               const rqDe = rqMap[i.rq];
               const pdfListo = rqDe.items.length > 0 && rqDe.items.every(x => x.decision !== 'Pendiente') && rqDe.items.some(x => x.decision === 'Aprobado');
               const esPrimerArch = i._arch && (idx === 0 || !flat[idx - 1]._arch);
