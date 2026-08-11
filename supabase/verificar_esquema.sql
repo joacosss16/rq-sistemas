@@ -18,7 +18,7 @@
 
 with esperado (migracion, tipo, objeto, detalle) as (values
   -- ── columnas que agregó cada migración
-  ('04 piso',              'columna', 'rqs.piso',                        null),
+  ('04 piso',              'columna', 'rqs.piso',                        null::text),
   ('05 precios',           'columna', 'factura_items.precio_unitario',   null),
   ('05 unidades',          'columna', 'materiales.und_base',             null),
   ('06 pagos',             'columna', 'facturas.estado_pago',            null),
