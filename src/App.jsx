@@ -1486,6 +1486,11 @@ function Compras({ user, db, api, modo }) {
     facturar: i => i.decision === 'Aprobado' && !i.factura,
     // Comprado hace más de 48 h y todavía sin factura: no entra a Pagos
     sinFactura48: i => i.estado === 'Comprado' && !i.factura && dias(HOY_ISO, i.fechaCompra || i.fechaRQ) >= 2,
+    // Ya pagado, esperando que el proveedor entregue el documento
+    porLlegar: i => {
+      const f = facturas.find(x => x.serie === i.factura);
+      return !!f && f.tipoDoc === 'Pendiente';
+    },
     comprado: i => i.estado === 'Comprado',
     incompleto: i => i.estado === 'Incompleto',
   };
@@ -1495,6 +1500,7 @@ function Compras({ user, db, api, modo }) {
     !facturarSolo && ['anulPend', 'Anulación en gerencia', 'text-red-400'],
     ['facturar', 'Por facturar', 'text-sky-400'],
     ['sinFactura48', '+48h sin factura', 'text-red-400'],
+    ['porLlegar', 'Factura por llegar', 'text-sky-400'],
     ['comprado', 'Comprado', 'text-green-400'],
     ['incompleto', 'Incompletos', 'text-red-400'],
   ].filter(Boolean);
@@ -1570,9 +1576,17 @@ function Compras({ user, db, api, modo }) {
 
   const abrirFactura = i => {
     if (!puedeFacturar) { setAviso('⚠ Solo Compras registra facturas.'); setTimeout(() => setAviso(''), 5000); return; }
-    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {}, efectivo: false, compromiso: false } });
+    setFFact({ ...fFact, [i.id]: fFact[i.id] || { serie: '', prov: '', ruc: '', fecha: HOY_ISO, monto: '', forma: FORMAS_PAGO[0], extras: [], precios: {}, efectivo: false, compromiso: false, pendiente: false, medio: 'Transferencia', banco: '', numOp: '' } });
   };
   const cerrarFactura = id => { const f2 = { ...fFact }; delete f2[id]; setFFact(f2); };
+
+  // Anular una factura mal registrada: la confirma gerencia y libera los ítems
+  const anularFact = async (f, motivo) => {
+    const r = await api.anularFactura(f.id, motivo);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 8000); return; }
+    setAviso(`Factura ${f.serie} anulada. Sus ${f.items.length} ítem(s) quedaron libres para volver a facturarse.`);
+    setTimeout(() => setAviso(''), 6000);
+  };
 
   const setFF = (id, k, v) => {
     const f = { ...fFact[id], [k]: v };
@@ -1595,7 +1609,9 @@ function Compras({ user, db, api, modo }) {
     const suma = cubiertos.reduce((a, x) => a + (Number(f.precios[x.id]) || 0) * x.cant, 0);
     // Nunca fallar en silencio: si algo falta, decir QUÉ falta.
     const falta = [];
-    if (!(f.compromiso || f.serie.trim())) falta.push('el N° de factura');
+    if (!(f.compromiso || f.pendiente || f.serie.trim())) falta.push('el N° de factura');
+    if (f.pendiente && !f.efectivo && !(f.banco || '').trim()) falta.push('el banco del pago');
+    if (f.pendiente && !f.efectivo && !(f.numOp || '').trim()) falta.push('el N° de operación');
     if (!f.prov.trim()) falta.push('el proveedor');
     if (!/^\d{11}$/.test(f.ruc)) falta.push('el RUC (11 dígitos)');
     if (!f.fecha) falta.push('la fecha');
@@ -1612,8 +1628,10 @@ function Compras({ user, db, api, modo }) {
       setTimeout(() => setAviso(''), 8000);
       return;
     }
-    const serie = f.compromiso ? 'CRED-PEND' : f.serie.trim().toUpperCase();
-    if (!f.compromiso && facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
+    // Compromiso y pendiente reciben serie interna de la base (CRED-#### / PEND-####)
+    const interna = f.compromiso || f.pendiente;
+    const serie = interna ? 'X' : f.serie.trim().toUpperCase();
+    if (!interna && facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
       setAviso(`⚠ La factura ${serie} de ese RUC ya está registrada. Verifica el número.`);
       setTimeout(() => setAviso(''), 6000);
       return;
@@ -1621,14 +1639,19 @@ function Compras({ user, db, api, modo }) {
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
       monto: Number(f.monto), forma: f.compromiso ? 'Crédito' : f.efectivo ? 'Contado' : f.forma, proyecto: i.proyecto,
-      efectivo: !!f.efectivo, compromiso: !!f.compromiso,
+      efectivo: !!f.efectivo, compromiso: !!f.compromiso, pendiente: !!f.pendiente,
+      medio: f.pendiente && !f.efectivo ? f.medio : null,
+      banco: f.pendiente && !f.efectivo ? f.banco.trim() : null,
+      numOp: f.pendiente && !f.efectivo ? f.numOp.trim() : null,
       lineas: cubiertos.map(x => ({ id: x.id, precio: Number(f.precios[x.id]) })),
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fFact }; delete f2[i.id]; setFFact(f2);
     setAviso(f.compromiso
       ? `Compromiso de crédito registrado cubriendo ${cubiertos.length} ítem(s): la deuda ya es visible en Pagos; la serie real se digita al pagar.`
-      : `Factura ${serie} registrada cubriendo ${cubiertos.length} ítem(s).`);
+      : f.pendiente
+        ? `Compra registrada como PAGADA cubriendo ${cubiertos.length} ítem(s). Queda pendiente la factura: administración digitará la serie cuando llegue.`
+        : `Factura ${serie} registrada cubriendo ${cubiertos.length} ítem(s).`);
     setTimeout(() => setAviso(''), 6000);
   };
 
@@ -1885,16 +1908,25 @@ function Compras({ user, db, api, modo }) {
                               <span><b>SIN factura aún</b>: el proveedor da crédito y emite la factura recién al pagar (compromiso)</span>
                             </label>
                           )}
+                          {!ff.compromiso && (
+                            <label className="flex items-start gap-1.5 mb-1.5 cursor-pointer text-[10px] text-slate-300">
+                              <input type="checkbox" checked={!!ff.pendiente} onChange={e => setFF(i.id, 'pendiente', e.target.checked)} className="mt-0.5" />
+                              <span><b>YA PAGUÉ, aún no me dan la factura</b>: la entregan mañana o pasado. No es crédito — el dinero ya salió.</span>
+                            </label>
+                          )}
                           {ff.compromiso ? (
                             <div className="mb-1 px-2 py-1.5 rounded border border-yellow-700 bg-yellow-950 text-[9px] text-yellow-400">
                               Serie interna CRED-… asignada por el sistema. La serie real la digita Pagos al pagar, con la factura en mano.</div>
+                          ) : ff.pendiente ? (
+                            <div className="mb-1 px-2 py-1.5 rounded border border-sky-700 bg-sky-950 text-[9px] text-sky-300">
+                              Serie interna PEND-… asignada por el sistema. La compra queda PAGADA y el material entra igual; administración digita la serie real cuando llegue el documento.</div>
                           ) : (
                             <input value={ff.serie} onChange={e => setFF(i.id, 'serie', e.target.value)} onKeyDown={enterSiguiente}
                               placeholder="N° factura: F001-000123" className={`w-full mb-1 ${pendCls(!!ff.serie.trim())} font-mono`} />
                           )}
                           <input list={`fprov-${i.id}`} value={ff.prov} onChange={e => setFF(i.id, 'prov', e.target.value)} onKeyDown={enterSiguiente}
-                            disabled={!ff.compromiso && !ff.serie.trim()} placeholder="Proveedor (razón social)"
-                            className={`w-full mb-1 ${pendCls(!!ff.prov.trim())} ${!ff.compromiso && !ff.serie.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
+                            disabled={!ff.compromiso && !ff.pendiente && !ff.serie.trim()} placeholder="Proveedor (razón social)"
+                            className={`w-full mb-1 ${pendCls(!!ff.prov.trim())} ${!ff.compromiso && !ff.pendiente && !ff.serie.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           <datalist id={`fprov-${i.id}`}>{proveedores.map(p => <option key={p[0]} value={p[1]} />)}</datalist>
                           <input value={ff.ruc} onChange={e => setFF(i.id, 'ruc', e.target.value)} onKeyDown={enterSiguiente}
                             disabled={!ff.prov.trim()} placeholder="RUC (11 dígitos)" maxLength={11}
@@ -1916,6 +1948,20 @@ function Compras({ user, db, api, modo }) {
                             <input type="checkbox" checked={!!ff.efectivo} onChange={e => setFF(i.id, 'efectivo', e.target.checked)} className="mt-0.5" />
                             <span>Ya pagada en <b>EFECTIVO</b> (caja chica de hoy) — queda Pagada y entra a la rendición del día</span>
                           </label>
+                          )}
+                          {ff.pendiente && !ff.efectivo && (
+                            <div className="mb-1.5 px-2 py-1.5 rounded border border-slate-700 bg-slate-950">
+                              <div className="text-[9px] font-bold uppercase text-slate-400 mb-1">¿Cómo pagaste?</div>
+                              <div className="flex gap-1 flex-wrap">
+                                <select value={ff.medio} onChange={e => setFF(i.id, 'medio', e.target.value)} className={`${inputCls} w-28`}>
+                                  {['Transferencia', 'Cheque', 'Tarjeta'].map(m => <option key={m}>{m}</option>)}
+                                </select>
+                                <input value={ff.banco} onChange={e => setFF(i.id, 'banco', e.target.value)}
+                                  placeholder="Banco" className={`${pendCls(!!(ff.banco || '').trim())} w-24`} />
+                                <input value={ff.numOp} onChange={e => setFF(i.id, 'numOp', e.target.value)}
+                                  placeholder="N° operación" className={`${pendCls(!!(ff.numOp || '').trim())} font-mono flex-1`} style={{ minWidth: '110px' }} />
+                              </div>
+                            </div>
                           )}
                           {candidatosExtra.length > 0 && (
                             <div className="mb-1.5 border-t border-slate-700 pt-1.5">
@@ -2048,12 +2094,14 @@ function Compras({ user, db, api, modo }) {
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
-            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+            <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Ítems que cubre', 'Monto S/', 'Forma de pago', 'Pago', 'Registró', ...(esGerente ? ['Anular'] : [])].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
               {factMostradas.map(f => (
-                <tr key={f.n} className="border-b border-slate-800 align-top">
+                <tr key={f.n} className={`border-b border-slate-800 align-top ${f.anulMotivo ? 'opacity-60 line-through' : ''}`}>
                   <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
-                    {f.tipoDoc === 'Compromiso' && <div className="text-[8px] font-bold uppercase text-yellow-400">Sin factura · la emite al pagar</div>}</td>
+                    {f.tipoDoc === 'Compromiso' && <div className="text-[8px] font-bold uppercase text-yellow-400">Sin factura · la emite al pagar</div>}
+                    {f.tipoDoc === 'Pendiente' && <div className="text-[8px] font-bold uppercase text-sky-400">Pagada · factura por llegar</div>}
+                    {f.anulMotivo && <div className="text-[8px] text-red-400 no-underline">Anulada: {f.anulMotivo} ({f.anulPor})</div>}</td>
                   <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
                   <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
@@ -2066,6 +2114,13 @@ function Compras({ user, db, api, modo }) {
                     {f.estadoPago === 'Pagada' && <div className="text-[9px] text-slate-500 mt-1">{f.banco} · op. {f.numOp} · {fmt(f.fechaPago)}</div>}
                   </td>
                   <td className="py-2 px-1.5 text-slate-500 text-[10px]">{f.registradoPor}</td>
+                  {esGerente && (
+                    <td className="py-2 px-1.5 no-underline">
+                      {f.anulMotivo
+                        ? <span className="text-[9px] text-slate-600">anulada</span>
+                        : <AnularBox label="Anular factura" onConfirm={m => anularFact(f, m)} />}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -2711,12 +2766,29 @@ function Pagos({ user, db, api }) {
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
   const [fRep, setFRep] = useState({});
+  const [fSerie, setFSerie] = useState({});   // serie real de las facturas por llegar
   const [aviso, setAviso] = useState('');
+  // Quien compró no cierra su propio documento: lo digita administración
+  const puedeSerie = user.rol === 'administracion' || user.rol === 'pagos' || user.rol === 'gerente';
 
   const fs = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
   const pend = fs.filter(f => f.estadoPago !== 'Pagada');
   const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
   // reposiciones de caja chica: rendiciones aprobadas aún sin reponer
+  // Compras ya pagadas cuyo documento aún no llega (migración 29)
+  const porLlegar = fs.filter(f => f.tipoDoc === 'Pendiente' && !f.anulMotivo)
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+
+  const completarSerie = async f => {
+    const serie = (fSerie[f.id] || '').trim();
+    if (!serie) return;
+    const r = await api.completarSerie(f.id, serie);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    const s2 = { ...fSerie }; delete s2[f.id]; setFSerie(s2);
+    setAviso(`Factura ${serie.toUpperCase()} registrada: ${f.serie} queda cerrada con su documento.`);
+    setTimeout(() => setAviso(''), 5000);
+  };
+
   const porReponer = rendiciones
     .filter(r => r.estado === 'Aprobada' && !r.repOp)
     .filter(r => proy === 'TODOS' || r.proyecto === proy)
@@ -2816,6 +2888,46 @@ function Pagos({ user, db, api }) {
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Cada obra paga desde su propia cuenta: filtra por proyecto para trabajar banco por banco. Una factura pagada queda congelada (no se puede editar ni volver a pagar).</div>
       </div>
+
+      {porLlegar.length > 0 && (
+        <div className="bg-slate-900 border border-sky-800 rounded-md p-4 mb-3">
+          <div className="text-[11px] font-bold tracking-widest text-sky-400 uppercase">
+            Facturas por llegar · {porLlegar.length}</div>
+          <div className="text-[10px] text-slate-500 mb-3">
+            Compras ya pagadas cuyo documento todavía no llega. Cuando lo tengas en la mano, digita su serie real.</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Interna', 'Pagada el', 'Proveedor', 'RUC', 'Obra', 'Monto S/', 'Cómo se pagó', 'Espera', 'Serie real de la factura', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {porLlegar.map(f => {
+                  const d = dias(HOY_ISO, f.fecha);
+                  const col = d >= 7 ? 'text-red-400 font-bold' : d >= 3 ? 'text-yellow-400' : 'text-slate-400';
+                  const v = (fSerie[f.id] || '').trim();
+                  return (
+                    <tr key={f.id} className="border-b border-slate-800">
+                      <td className="py-2 px-1.5 font-mono text-sky-400">{f.serie}</td>
+                      <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
+                      <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
+                      <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
+                      <td className="py-2 px-1.5 text-slate-400 text-[10px]">{f.medio || f.forma}{f.numOp ? ` · op. ${f.numOp}` : ''}</td>
+                      <td className={`py-2 px-1.5 font-mono ${col}`}>{d}d</td>
+                      <td className="py-2 px-1.5">
+                        <input value={fSerie[f.id] || ''} onChange={e => setFSerie({ ...fSerie, [f.id]: e.target.value })}
+                          disabled={!puedeSerie} placeholder="F001-000123" className={`w-32 ${inputCls} font-mono`} /></td>
+                      <td className="py-2 px-1.5">
+                        <button onClick={() => completarSerie(f)} disabled={!puedeSerie || !v} className={btnOk(!!(puedeSerie && v))}>Registrar</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-2 text-slate-500 text-[10px]">
+            Ámbar a los 3 días, rojo a los 7. Si el proveedor no entrega, coordina con Compras: ellos tienen la relación comercial.</div>
+        </div>
+      )}
 
       {porReponer.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
@@ -4287,6 +4399,8 @@ export default function App() {
 
     const facturas = factR.data.map(f => ({
       id: f.id, n: f.numero, serie: f.serie, tipoDoc: f.tipo_doc || 'Factura',
+      anulMotivo: f.anulacion ? f.anulacion.motivo : '', anulPor: f.anulacion ? f.anulacion.por : '',
+      anulFecha: f.anulacion ? f.anulacion.fecha : '',
       prov: provMap[f.proveedor_ruc] ? provMap[f.proveedor_ruc].razon_social : f.proveedor_ruc,
       ruc: f.proveedor_ruc, fecha: f.fecha, monto: Number(f.monto), forma: f.forma_pago,
       proyecto: nomProy[f.proyecto] || f.proyecto,
@@ -4439,67 +4553,37 @@ export default function App() {
         return { numero: rq.numero };
       }),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id)),
-      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto, efectivo, compromiso, lineas }) => wrap(async () => {
-        const existe = dbRef.current.proveedores.some(p => p[0] === ruc);
-        if (!existe) {
-          const { error: eP } = await supabase.from('proveedores').insert({ ruc, razon_social: prov });
-          if (eP && eP.code !== '23505') return { error: eP };
-        }
-        const u = (await supabase.auth.getUser()).data.user;
-
-        // Efectivo: la factura nace Pagada contra la rendición del día de la obra
-        let rendicionId = null;
-        if (efectivo) {
-          const proyCod = cod(proyecto);
-          // Un descuadre sin resolver de días anteriores CIERRA la caja de esa obra:
-          // no se puede seguir gastando hasta que gerencia lo levante y Pagos reponga.
-          const { data: trabadas } = await supabase.from('rendiciones')
-            .select('fecha,estado,diferencia')
-            .eq('proyecto', proyCod).lt('fecha', HOY_ISO)
-            .in('estado', ['Con diferencia', 'Observada']).order('fecha');
-          if (trabadas && trabadas.length) {
-            const t = trabadas[0];
-            const cuanto = t.diferencia == null ? '' : ` (${t.diferencia < 0 ? 'faltan' : 'sobran'} S/ ${Math.abs(t.diferencia).toFixed(2)})`;
-            return { error: { message: t.estado === 'Con diferencia'
-              ? `Caja de ${proyecto} bloqueada: la rendición del ${fmt(t.fecha)} tiene una diferencia sin resolver${cuanto}. Gerencia debe levantarla antes de seguir comprando en efectivo.`
-              : `Caja de ${proyecto} bloqueada: la rendición del ${fmt(t.fecha)} está observada por administración. Corrígela antes de seguir comprando en efectivo.` } };
+      // Una sola transacción en la base (migraciones 28/30): proveedor +
+      // rendición + factura + líneas. Si algo falla no queda nada a medias.
+      registrarFactura: ({ serie, prov, ruc, fecha, monto, forma, proyecto,
+                           efectivo, compromiso, pendiente, medio, banco, numOp, lineas }) => wrap(async () => {
+        const { error } = await supabase.rpc('registrar_factura', {
+          p_serie: serie, p_ruc: ruc, p_prov: prov, p_fecha: fecha, p_monto: monto,
+          p_forma: forma, p_proyecto: cod(proyecto),
+          p_compromiso: !!compromiso, p_efectivo: !!efectivo, p_pendiente: !!pendiente,
+          p_medio: medio || null, p_banco: banco || null, p_num_op: numOp || null,
+          p_lineas: lineas.map(l => ({ item: l.id, precio: l.precio })),
+        });
+        if (error) {
+          const m = error.message || '';
+          if (m.includes('uq_factura') || error.code === '23505') {
+            return { error: { message: `La factura ${serie} de ese RUC ya está registrada.` } };
           }
-
-          let { data: ren, error: eRen } = await supabase.from('rendiciones').select('id,estado')
-            .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle();
-          if (eRen) return { error: { message: `No se pudo leer la rendición de hoy de ${proyecto}: ${eRen.message}` } };
-          if (ren && ren.estado !== 'Abierta') return { error: { message: `La rendición de hoy de ${proyecto} ya fue ${ren.estado.toLowerCase()}; coordina con administración.` } };
-          if (!ren) {
-            const fondo = dbRef.current.cajas[proyecto] || 2000;
-            const ins = await supabase.from('rendiciones').insert({
-              proyecto: proyCod, fecha: HOY_ISO, responsable_id: u.id, monto_fondo: fondo,
-            }).select().single();
-            if (ins.error && ins.error.code === '23505') {
-              // otro registro la creó en paralelo: reintentar lectura
-              ({ data: ren } = await supabase.from('rendiciones').select('id,estado')
-                .eq('proyecto', proyCod).eq('fecha', HOY_ISO).maybeSingle());
-            } else if (ins.error) return { error: ins.error };
-            else ren = ins.data;
-          }
-          if (!ren) return { error: { message: `No se pudo abrir la rendición de hoy de ${proyecto}. Vuelve a intentar o avisa a administración.` } };
-          rendicionId = ren.id;
+          return { error: { message: m.replace(/^.*?:\s*/, '') } };
         }
-
-        const { data: fact, error } = await supabase.from('facturas').insert({
-          serie, proveedor_ruc: ruc, fecha, monto, forma_pago: forma,
-          // solo se envía en compromisos: así las facturas normales no dependen de la migración 14
-          ...(compromiso ? { tipo_doc: 'Compromiso' } : {}),
-          proyecto: cod(proyecto), registrado_por: u.id,
-          ...(efectivo ? {
-            estado_pago: 'Pagada', medio_pago: 'Efectivo', fecha_pago: HOY_ISO,
-            pagado_por: u.id, rendicion_id: rendicionId,
-          } : {}),
-        }).select().single();
-        if (error) return { error: error.code === '23505' ? { message: `La factura ${serie} de ese RUC ya está registrada.` } : error };
-        const { error: e2 } = await supabase.from('factura_items').insert(lineas.map(l => ({ factura_id: fact.id, rq_item_id: l.id, precio_unitario: l.precio })));
-        if (e2) return { error: e2 };
         return {};
       }),
+      // Llega el documento físico: administración digita la serie real
+      completarSerie: (id, serieReal) => wrap(async () => {
+        const r = await supabase.from('facturas')
+          .update({ serie: serieReal.trim().toUpperCase(), tipo_doc: 'Factura' }).eq('id', id);
+        if (r.error && r.error.code === '23505') {
+          return { error: { message: `La factura ${serieReal} de ese RUC ya está registrada. Verifica la serie.` } };
+        }
+        return r;
+      }),
+      anularFactura: (id, motivo) => wrap(async () =>
+        await supabase.rpc('anular_factura', { p_id: id, p_motivo: motivo })),
       pagarFactura: (id, { medio, banco, op, fecha, serieReal }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         const r = await supabase.from('facturas').update({
