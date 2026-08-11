@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase, ENTORNO, ES_PRODUCCION } from './supabaseClient';
 
 const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 const HOY_ISO = `${HOY.getFullYear()}-${String(HOY.getMonth() + 1).padStart(2, '0')}-${String(HOY.getDate()).padStart(2, '0')}`;
@@ -418,6 +418,10 @@ function Login() {
         <div className="text-center mb-5">
           <div className="font-extrabold text-lg tracking-widest text-yellow-400">COPACABANA <span className="text-slate-600 font-medium">/ RQ</span></div>
           <div className="text-slate-500 text-[11px] mt-1">Sistema de requerimientos de materiales</div>
+          {!ES_PRODUCCION && (
+            <div className="mt-2 px-2 py-1 rounded bg-fuchsia-700 text-white text-[10px] font-bold uppercase tracking-wider">
+              Entorno de {ENTORNO}</div>
+          )}
         </div>
         <label className={lblCls}>Correo</label>
         <input type="email" value={email} onChange={e => { setEmail(e.target.value); setErr(''); }}
@@ -4778,6 +4782,11 @@ export default function App() {
 
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>
+      {!ES_PRODUCCION && (
+        <div className="bg-fuchsia-700 text-white text-center text-[11px] font-bold uppercase tracking-widest py-1">
+          Entorno de {ENTORNO} · estos NO son los datos reales de la empresa
+        </div>
+      )}
       <div className="bg-black border-b-2 border-yellow-400 px-4 py-3 flex items-center gap-3 flex-wrap">
         <div className="font-extrabold text-sm tracking-widest text-yellow-400">
           COPACABANA <span className="text-slate-600 font-medium">/ RQ</span></div>
