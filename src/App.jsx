@@ -1472,10 +1472,14 @@ function Compras({ user, db, api, modo }) {
 
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
   const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso, tipoRq: r.tipo, cotizacionRef: r.cotizacionRef })));
+  // Cerrado para Compras: aprobado, comprado y pagado. Lo que falte recibir
+  // lo sigue viendo el almacén y el Tablero, pero aquí ya no estorba.
+  const cerradoParaCompras = i => i.pago === 'Pagado'
+    && i.decision === 'Aprobado' && (i.estado === 'Comprado' || i.estado === 'Entregado');
   // primero lo que se necesita antes (fecha necesitada ascendente)
   const flatAbierto = flatBase
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado')
-    .filter(i => !(i.estado === 'Entregado' && i.pago === 'Pagado'))
+    .filter(i => !cerradoParaCompras(i))
     .filter(i => proy === 'TODOS' || i.proyecto === proy)
     // el comprador (Frank) solo factura lo que ÉL marcó Comprado
     .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
@@ -1511,10 +1515,11 @@ function Compras({ user, db, api, modo }) {
     return q.split(/\s+/).every(p => texto.includes(p));
   };
   const ordenar = arr => [...arr].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.rq - b.rq));
-  // Archivados: ítems ya cerrados (Entregado + Pagado). Salen de la vista activa
-  // igual que en el residente; se ven bajo demanda con el botón.
+  // Archivados: para Compras el trabajo termina cuando el ítem está decidido,
+  // comprado y pagado. La recepción es tarea del almacén, así que ya no tiene
+  // por qué seguir ocupando la bandeja de Lucía ni la de Frank.
   const flatArchivado = flatBase
-    .filter(i => i.estado === 'Entregado' && i.pago === 'Pagado')
+    .filter(cerradoParaCompras)
     .filter(i => proy === 'TODOS' || i.proyecto === proy)
     .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
   const flatActivos = ordenar(flatAbierto.filter(i => !triage || esTriage[triage](i)).filter(matchBusca));
