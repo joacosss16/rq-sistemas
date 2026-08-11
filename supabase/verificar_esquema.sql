@@ -58,8 +58,9 @@ with esperado (migracion, tipo, objeto, detalle) as (values
 
   -- ── triggers de defensa (si falta uno, esa regla NO se cumple)
   ('11 defensa',           'trigger', 'facturas_rendicion',              'facturas'),
-  ('15 comprado',          'trigger', 'comprador_solo_estado',           'rq_items'),
-  ('18 aprobacion',        'trigger', 'salida_aprobacion',               'salidas'),
+  ('15 comprado',          'trigger', 'rq_items_comprador_guard',        'rq_items'),
+  ('18 aprobacion salida', 'trigger', 'salidas_aprobacion_guard',        'salidas'),
+  ('18 aprobacion prest.', 'trigger', 'prestamos_aprobacion_guard',      'prestamos'),
   ('22 anulacion gerencia','trigger', 'anulacion_solo_gerencia',         'rq_items'),
   ('23 fecha compra',      'trigger', 'sella_fecha_compra',              'rq_items'),
   ('24 no anular recibido','trigger', 'no_anular_recibido',              'rq_items'),
