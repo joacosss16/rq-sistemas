@@ -4204,8 +4204,13 @@ export default function App() {
   const estaticosRef = useRef(null);   // cache de tablas casi-estáticas (catálogo, maestros)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_ev, s) => setSession(s));
+    // Supabase entrega un objeto NUEVO en cada evento (refresco de token,
+    // foco de ventana…). Si lo guardamos tal cual, el efecto de arranque
+    // se vuelve a ejecutar y le resetea la pestaña al usuario en plena
+    // faena. Solo cambiamos de sesión cuando cambia la persona.
+    const mismo = (a, b) => (a && a.user && a.user.id) === (b && b.user && b.user.id);
+    supabase.auth.getSession().then(({ data }) => setSession(s => (mismo(s, data.session) ? s : data.session)));
+    const { data: sub } = supabase.auth.onAuthStateChange((_ev, s) => setSession(p => (mismo(p, s) ? p : s)));
     return () => sub.subscription.unsubscribe();
   }, []);
 
