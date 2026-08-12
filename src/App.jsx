@@ -2857,8 +2857,15 @@ function ComprasDelDia({ db, api }) {
 }
 
 function Pagos({ user, db, api }) {
-  const { facturas, rendiciones, bancoDe } = db;
+  const { facturas, rendiciones, bancoDe, entregas = [] } = db;
   const puede = user.rol === 'pagos';
+  // Entregas de efectivo del día (migración 38)
+  const [fEnt, setFEnt] = useState({
+    proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '',
+  });
+  const entregasHoy = entregas.filter(e => e.fecha === HOY_ISO).sort((a, b) => b.n - a.n);
+  const entregaOk = puede && Number(fEnt.monto) > 0
+    && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0);
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
   const [fRep, setFRep] = useState({});
@@ -2923,6 +2930,22 @@ function Pagos({ user, db, api }) {
     setTimeout(() => setAviso(''), 5000);
   };
 
+  const entregar = async () => {
+    if (!entregaOk) return;
+    const r = await api.registrarEntrega(fEnt);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    setAviso(`Entrega de S/ ${Number(fEnt.monto).toFixed(2)} a ${fEnt.proyecto} registrada.`);
+    setFEnt({ ...fEnt, monto: '', numOp: '' });
+    setTimeout(() => setAviso(''), 5000);
+  };
+
+  const anularEnt = async (e, motivo) => {
+    const r = await api.anularEntrega(e.id, motivo);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 8000); return; }
+    setAviso(`Entrega de S/ ${e.monto.toFixed(2)} anulada.`);
+    setTimeout(() => setAviso(''), 5000);
+  };
+
   const reponer = async r => {
     const p = fRep[r.id] || {};
     if (!(p.op || '').trim() || !(p.fecha || HOY_ISO)) return;
@@ -2935,6 +2958,57 @@ function Pagos({ user, db, api }) {
 
   return (
     <div>
+      {/* Entregas de efectivo del día (migración 38). La caja chica no es un
+          fondo fijo: al comprador se le entrega dinero una o varias veces al
+          día, y lo que reciba es contra lo que se cuadra el cierre. */}
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">
+          Entregas de efectivo al comprador · hoy</div>
+        <div className="text-[11px] text-slate-500 mb-3">
+          Cada vez que le entregas dinero, regístralo aquí. Al cerrar el día, administración cuenta lo que devuelve y lo compara contra estas entregas menos lo gastado.</div>
+        {puede && (
+          <div className="flex items-end gap-2 flex-wrap mb-3">
+            <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Obra</div>
+              <FiltroProyecto value={fEnt.proyecto} onChange={v => setFEnt({ ...fEnt, proyecto: v })} /></div>
+            <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Monto S/</div>
+              <input type="number" step="any" min="0" value={fEnt.monto}
+                onChange={e => setFEnt({ ...fEnt, monto: e.target.value })} className={`w-28 ${inputCls} font-mono`} /></div>
+            <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Medio</div>
+              <select value={fEnt.medio} onChange={e => setFEnt({ ...fEnt, medio: e.target.value })} className={inputCls}>
+                {['Transferencia', 'Efectivo', 'Cheque'].map(m => <option key={m}>{m}</option>)}</select></div>
+            <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">
+              {fEnt.medio === 'Efectivo' ? 'N° operación (no aplica)' : 'N° de operación *'}</div>
+              <input value={fEnt.numOp} disabled={fEnt.medio === 'Efectivo'}
+                onChange={e => setFEnt({ ...fEnt, numOp: e.target.value })}
+                placeholder={fEnt.medio === 'Efectivo' ? '—' : 'del banco'} className={`w-32 ${inputCls} font-mono`} /></div>
+            <button onClick={entregar} disabled={!entregaOk} className={btnOk(entregaOk)}>Registrar entrega</button>
+          </div>
+        )}
+        {entregasHoy.length === 0 ? (
+          <div className="text-center py-4 text-slate-500 text-sm">Todavía no se registró ninguna entrega hoy.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['Obra', 'Monto S/', 'Medio', 'N° operación', 'Entregó', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {entregasHoy.map(e => (
+                  <tr key={e.id} className={`border-b border-slate-800 ${e.anulMotivo ? 'opacity-60 line-through' : ''}`}>
+                    <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{e.proyecto}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{e.monto.toFixed(2)}</td>
+                    <td className="py-2 px-1.5 text-slate-400">{e.medio}</td>
+                    <td className="py-2 px-1.5 font-mono text-slate-400">{e.numOp || '—'}</td>
+                    <td className="py-2 px-1.5 text-slate-400 text-[10px]">{e.entregadoPor}
+                      {e.anulMotivo && <div className="text-[9px] text-red-400 no-underline">Anulada: {e.anulMotivo} ({e.anulPor})</div>}</td>
+                    <td className="py-2 px-1.5 no-underline">
+                      {!e.anulMotivo && puede && <AnularBox label="Anular" onConfirm={m => anularEnt(e, m)} />}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
@@ -3118,7 +3192,7 @@ function Pagos({ user, db, api }) {
 }
 
 function Rendiciones({ user, db, api }) {
-  const { rendiciones, facturas, cajas, tolerancias = {}, bancoDe } = db;
+  const { rendiciones, facturas, cajas, tolerancias = {}, bancoDe, entregas = [] } = db;
   // Solo administración cierra la caja del día. Antes el rol `pagos` también
   // podía, porque Mónica llevaba los dos frentes; eso ponía a la misma persona
   // en las dos puntas del circuito del efectivo (aprobar el gasto y reponer el
@@ -3143,7 +3217,13 @@ function Rendiciones({ user, db, api }) {
       // excede cualquier tolerancia y escalaba a gerencia sin motivo.
       const fs = facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo);
       const total = fs.reduce((a, f) => a + f.monto, 0);
-      return { ...r, facturas: fs, total, sobrante: r.montoFondo - total };
+      // La caja chica NO es un fondo fijo (migración 38): el disponible del día
+      // es lo que Pagos le entregó esa jornada, una o varias veces. Al cerrar,
+      // el comprador devuelve el vuelto y administración lo cuenta al recibirlo.
+      const ents = entregas.filter(e => e.proyecto === r.proyecto && e.fecha === r.fecha && !e.anulMotivo)
+        .sort((a, b) => a.n - b.n);
+      const recibido = ents.reduce((a, e) => a + e.monto, 0);
+      return { ...r, facturas: fs, total, entregas: ents, recibido, sobrante: recibido - total };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
 
@@ -3220,8 +3300,24 @@ function Rendiciones({ user, db, api }) {
               <span className="text-slate-500 text-[11px]">{fmt(r.fecha)} · rinde: {r.responsable}</span>
               <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${r.estado === 'Aprobada' ? 'bg-green-950 text-green-400' : r.estado === 'Observada' ? 'bg-red-950 text-red-400' : 'bg-yellow-950 text-yellow-400'}`}>{r.estado}</span>
               <span className="ml-auto text-[11px] font-mono text-slate-300">
-                Fondo S/ {r.montoFondo.toFixed(2)} · Rendido <b className="text-yellow-400">S/ {r.total.toFixed(2)}</b> · Sobrante teórico S/ {r.sobrante.toFixed(2)}</span>
+                Recibido S/ {r.recibido.toFixed(2)} · Gastado <b className="text-yellow-400">S/ {r.total.toFixed(2)}</b> · Debe devolver S/ {r.sobrante.toFixed(2)}</span>
             </div>
+            {/* De dónde sale el "recibido": las entregas de efectivo del día */}
+            {r.entregas.length === 0 ? (
+              <div className="text-[10px] text-orange-400 mb-2">
+                ⚠ No hay ninguna entrega de efectivo registrada para este día. Pagos debe registrarla, o el arqueo saldrá con toda la plata como faltante.</div>
+            ) : (
+              <div className="text-[10px] text-slate-400 mb-2">
+                Entregas del día:{' '}
+                {r.entregas.map((e, k) => (
+                  <span key={e.id}>{k > 0 ? ' · ' : ''}
+                    <span className="font-mono text-slate-300">S/ {e.monto.toFixed(2)}</span>
+                    {' '}{e.medio.toLowerCase()}{e.numOp ? ` op. ${e.numOp}` : ''}
+                    <span className="text-slate-600"> ({e.entregadoPor})</span>
+                  </span>
+                ))}
+              </div>
+            )}
             {r.facturas.length > 0 && (
               <table className="w-full text-xs mb-2">
                 <thead><tr>{['Factura', 'Proveedor', 'Ítems', 'Monto S/'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
@@ -3249,7 +3345,7 @@ function Rendiciones({ user, db, api }) {
                 <div className="text-[9px] font-bold uppercase text-slate-400 mb-1">
                   Cierre del día · arqueo de caja (tolerancia de {r.proyecto}: S/ {tol.toFixed(2)})</div>
                 <div className="flex gap-2 items-center flex-wrap">
-                  <label className="text-[10px] text-slate-400">Efectivo contado S/</label>
+                  <label className="text-[10px] text-slate-400" title="El efectivo que el comprador devuelve al cerrar el día. Contarlo aquí es el registro de que lo recibiste.">Efectivo devuelto y contado S/</label>
                   <input type="number" step="any" min="0" value={cont ?? ''}
                     onChange={e => setArqueo({ ...arqueo, [r.id]: e.target.value })}
                     placeholder={r.sobrante.toFixed(2)} className={`w-28 ${inputCls} font-mono`} />
@@ -4384,6 +4480,7 @@ export default function App() {
       ['stock_inicial', () => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')],
       ['cajas_chicas', () => supabase.from('cajas_chicas').select('*').order('proyecto')],
       ['rendiciones', () => supabase.from('rendiciones').select('*').order('numero')],
+      ['entregas_caja', () => supabase.from('entregas_caja').select('*').order('numero')],
     ];
     const cache = dinamicosRef.current;
     const qDin = DIN.map(([nombre, q]) =>
@@ -4408,7 +4505,7 @@ export default function App() {
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
     // guardar el crudo para poder refrescar solo una tabla la próxima vez
     dinamicosRef.current = Object.fromEntries(DIN.map(([n], k) => [n, dinR[k]]));
-    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
+    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, entR] = dinR;
     let prjR, usrR, matR, provR, famR, pbR;
     if (usarCache) {
       ({ prjR, usrR, matR, provR, famR, pbR } = estaticosRef.current);
@@ -4605,6 +4702,20 @@ export default function App() {
       difFecha: r.dif_resolucion ? r.dif_resolucion.fecha : '',
     }));
 
+    // Entregas de efectivo del día (migración 38). La caja chica no es un fondo
+    // fijo: el disponible de cada jornada es la suma de estas entregas.
+    // Queda fuera del control de errores a propósito: si la migración no
+    // estuviera corrida, la caja se ve vacía en vez de tumbar toda la app.
+    const entregas = (((entR || {}).data) || []).map(e => ({
+      id: e.id, n: e.numero, proyecto: nomProy[e.proyecto] || e.proyecto,
+      fecha: e.fecha, monto: Number(e.monto), medio: e.medio,
+      numOp: e.num_operacion || '',
+      entregadoPor: usrMap[e.entregado_por] ? usrMap[e.entregado_por].nombre : '',
+      anulMotivo: e.anulacion ? e.anulacion.motivo : '',
+      anulPor: e.anulacion ? e.anulacion.por : '',
+      anulFecha: e.anulacion ? e.anulacion.fecha : '',
+    }));
+
     const salidas = salR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, proyecto: nomProy[s.proyecto] || s.proyecto,
       cod: s.codigo, desc: matMap[s.codigo] ? matMap[s.codigo].descripcion : s.codigo,
@@ -4648,7 +4759,7 @@ export default function App() {
     }));
 
     const nuevo = {
-      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe,
+      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe, entregas,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
       precioProm, ultimaCompra, historialPrecios, mejorPrecio2m,
@@ -4810,6 +4921,19 @@ export default function App() {
           correccion: { detalle, por: nombre, fecha: HOY_ISO },
         }).eq('id', id);
       }, ['rendiciones']),
+      // Entregas de efectivo al comprador (migración 38). Quién entregó lo
+      // estampa la base; aquí solo va lo que se digita.
+      registrarEntrega: ({ proyecto, monto, medio, numOp, fecha }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('entregas_caja').insert({
+          proyecto: cod(proyecto), monto: Number(monto), medio,
+          num_operacion: medio === 'Efectivo' ? null : numOp.trim(),
+          fecha: fecha || HOY_ISO, entregado_por: u.id,
+        });
+      }, ['entregas_caja']),
+      anularEntrega: (id, motivo) => wrap(async () =>
+        await supabase.from('entregas_caja').update({ anulacion: { motivo } }).eq('id', id),
+        ['entregas_caja']),
       reponerRendicion: (id, { op, fecha }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('rendiciones').update({
