@@ -523,15 +523,16 @@ function Residente({ user, db, api }) {
   const [verArchivados, setVerArchivados] = useState(false);
   const rqCerrado = r => r.items.length > 0 &&
     r.items.every(i => i.decision === 'Rechazado' || i.decision === 'Anulado' || i.estado === 'Entregado');
-  // Orden a elección del residente: N° de RQ o fecha necesitada (lo más próximo primero)
+  // Orden a elección del residente: N° de RQ (el más reciente arriba, que es
+  // lo que uno acaba de mandar) o fecha necesitada (lo más próximo primero).
   const [ordenRqs, setOrdenRqs] = useState('num');
   const fechaNecDe = r => r.items.reduce((m, i) => (i.fecha && (!m || i.fecha < m) ? i.fecha : m), '');
   const ordenar = arr => ordenRqs === 'fecha'
     ? [...arr].sort((a, b) => {
         const fa = fechaNecDe(a) || '9999', fb = fechaNecDe(b) || '9999';
-        return fa < fb ? -1 : fa > fb ? 1 : a.n - b.n;
+        return fa < fb ? -1 : fa > fb ? 1 : b.n - a.n;
       })
-    : arr;
+    : [...arr].sort((a, b) => b.n - a.n);
   const rqsActivos = ordenar(misRqs.filter(r => !rqCerrado(r)));
   const rqsArchivados = ordenar(misRqs.filter(rqCerrado));
   const mostrados = [...rqsActivos, ...(verArchivados ? rqsArchivados : [])];
