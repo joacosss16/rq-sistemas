@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import { supabase, ENTORNO, ES_PRODUCCION } from './supabaseClient';
+import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from './caja';
 
 const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 const HOY_ISO = `${HOY.getFullYear()}-${String(HOY.getMonth() + 1).padStart(2, '0')}-${String(HOY.getDate()).padStart(2, '0')}`;
@@ -2868,7 +2869,6 @@ function Pagos({ user, db, api }) {
     && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0);
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
-  const [fRep, setFRep] = useState({});
   const [fSerie, setFSerie] = useState({});   // serie real de las facturas por llegar
   const [aviso, setAviso] = useState('');
   // Quien compró no cierra su propio documento: lo digita administración
@@ -2900,13 +2900,6 @@ function Pagos({ user, db, api }) {
     setAviso(`Factura ${serie.toUpperCase()} registrada: ${f.serie} queda cerrada con su documento.`);
     setTimeout(() => setAviso(''), 5000);
   };
-
-  const porReponer = rendiciones
-    .filter(r => r.estado === 'Aprobada' && !r.repOp)
-    .filter(r => proy === 'TODOS' || r.proyecto === proy)
-    // Sin las anuladas: es el monto que sale del banco para reponer el fondo.
-    // Contando una anulada se repondría de más, y esa plata no se gastó.
-    .map(r => ({ ...r, monto: facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo).reduce((a, f) => a + f.monto, 0) }));
 
   const vencimiento = vencimientoDe;
 
@@ -2946,15 +2939,6 @@ function Pagos({ user, db, api }) {
     setTimeout(() => setAviso(''), 5000);
   };
 
-  const reponer = async r => {
-    const p = fRep[r.id] || {};
-    if (!(p.op || '').trim() || !(p.fecha || HOY_ISO)) return;
-    const res = await api.reponerRendicion(r.id, { op: p.op.trim(), fecha: p.fecha || HOY_ISO });
-    if (res.error) { setAviso('⚠ ' + res.error); setTimeout(() => setAviso(''), 7000); return; }
-    const f2 = { ...fRep }; delete f2[r.id]; setFRep(f2);
-    setAviso(`Reposición de caja chica de ${r.proyecto} registrada (S/ ${r.monto.toFixed(2)}).`);
-    setTimeout(() => setAviso(''), 5000);
-  };
 
   return (
     <div>
@@ -3124,39 +3108,10 @@ function Pagos({ user, db, api }) {
         </div>
       )}
 
-      {porReponer.length > 0 && (
-        <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-            Reposiciones de caja chica · {porReponer.length} · rendiciones aprobadas por administración</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead><tr>{['Obra', 'Fecha rendición', 'Responsable', 'Monto a reponer S/', 'Banco (según obra)', 'N° operación del retiro', 'F. reposición', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
-              <tbody>
-                {porReponer.map(r => {
-                  const p = fRep[r.id] || { op: '', fecha: HOY_ISO };
-                  const setR = (k, v) => setFRep({ ...fRep, [r.id]: { ...p, [k]: v } });
-                  const bancoObra = (bancoDe[r.proyecto] || {}).banco || '—';
-                  const listo = puede && (p.op || '').trim();
-                  return (
-                    <tr key={r.id} className="border-b border-slate-800 align-top">
-                      <td className="py-2 px-1.5 text-slate-200 whitespace-nowrap">{r.proyecto}</td>
-                      <td className="py-2 px-1.5 text-slate-400">{fmt(r.fecha)}</td>
-                      <td className="py-2 px-1.5 text-slate-400">{r.responsable}</td>
-                      <td className="py-2 px-1.5 font-mono font-bold text-yellow-400 text-right">{r.monto.toFixed(2)}</td>
-                      <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{bancoObra}
-                        {(bancoDe[r.proyecto] || {}).cuenta && <div className="text-[9px] font-mono text-slate-500">{bancoDe[r.proyecto].cuenta}</div>}</td>
-                      <td className="py-2 px-1.5"><input value={p.op} onChange={e => setR('op', e.target.value)} disabled={!puede} placeholder="N° operación" className={`w-24 ${inputCls} font-mono`} /></td>
-                      <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setR('fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
-                      <td className="py-2 px-1.5"><button onClick={() => reponer(r)} disabled={!listo} className={btnOk(!!listo)}>Registrar reposición</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-3 text-slate-500 text-[11px]">La reposición completa el fondo fijo para que la caja arranque llena a la mañana siguiente. Sale de la cuenta de la obra.</div>
-        </div>
-      )}
+      {/* El bloque de "Reposiciones de caja chica" se eliminó con la migración 38:
+          reponer un fondo fijo no existe en este modelo. El dinero entra por las
+          entregas del día (arriba) y sale por el vuelto que el comprador devuelve
+          al cerrar, que administración cuenta al recibirlo. */}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
@@ -3215,15 +3170,11 @@ function Rendiciones({ user, db, api }) {
       // compra se registra de nuevo bien y entonces sí cuenta. Contándola,
       // el arqueo mostraba un sobrante fantasma igual al monto anulado, que
       // excede cualquier tolerancia y escalaba a gerencia sin motivo.
-      const fs = facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo);
-      const total = fs.reduce((a, f) => a + f.monto, 0);
-      // La caja chica NO es un fondo fijo (migración 38): el disponible del día
-      // es lo que Pagos le entregó esa jornada, una o varias veces. Al cerrar,
-      // el comprador devuelve el vuelto y administración lo cuenta al recibirlo.
-      const ents = entregas.filter(e => e.proyecto === r.proyecto && e.fecha === r.fecha && !e.anulMotivo)
-        .sort((a, b) => a.n - b.n);
-      const recibido = ents.reduce((a, e) => a + e.monto, 0);
-      return { ...r, facturas: fs, total, entregas: ents, recibido, sobrante: recibido - total };
+      // La aritmética vive en src/caja.js para poder probarla aparte: de ella
+      // sale si una obra tiene un faltante de efectivo o no.
+      const c = cuadreCaja(r, facturas, entregas);
+      return { ...r, facturas: c.facturas, total: c.gastado, entregas: c.entregas,
+               recibido: c.recibido, sobrante: c.debeDevolver };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
 
@@ -3337,8 +3288,8 @@ function Rendiciones({ user, db, api }) {
               const tol = tolerancias[r.proyecto] ?? 20;
               const cont = arqueo[r.id];
               const hayArqueo = cont !== undefined && cont !== '' && !isNaN(Number(cont));
-              const dif = hayArqueo ? Number(cont) - r.sobrante : null;
-              const excede = dif != null && Math.abs(dif) > tol;
+              const dif = hayArqueo ? diferenciaArqueo(cont, r.sobrante) : null;
+              const excede = dif != null && excedeTolerancia(dif, tol);
               const motivo = (difMot[r.id] || '').trim();
               return (
               <div className="bg-slate-950 border border-slate-700 rounded p-2 mb-2">
@@ -4934,12 +4885,6 @@ export default function App() {
       anularEntrega: (id, motivo) => wrap(async () =>
         await supabase.from('entregas_caja').update({ anulacion: { motivo } }).eq('id', id),
         ['entregas_caja']),
-      reponerRendicion: (id, { op, fecha }) => wrap(async () => {
-        const u = (await supabase.auth.getUser()).data.user;
-        return await supabase.from('rendiciones').update({
-          reposicion_operacion: op, reposicion_fecha: fecha, repuesto_por: u.id,
-        }).eq('id', id);
-      }, ['rendiciones']),
       recibir: (item, rec, obs, cad) => wrap(async () => {
         const total = Number(item.cantRecibida || 0) + rec;
         const esSaldo = item.estado === 'Incompleto';
