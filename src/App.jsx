@@ -2897,7 +2897,9 @@ function Pagos({ user, db, api }) {
   const porReponer = rendiciones
     .filter(r => r.estado === 'Aprobada' && !r.repOp)
     .filter(r => proy === 'TODOS' || r.proyecto === proy)
-    .map(r => ({ ...r, monto: facturas.filter(f => f.rendicionId === r.id).reduce((a, f) => a + f.monto, 0) }));
+    // Sin las anuladas: es el monto que sale del banco para reponer el fondo.
+    // Contando una anulada se repondría de más, y esa plata no se gastó.
+    .map(r => ({ ...r, monto: facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo).reduce((a, f) => a + f.monto, 0) }));
 
   const vencimiento = vencimientoDe;
 
@@ -3131,7 +3133,11 @@ function Rendiciones({ user, db, api }) {
   const lista = rendiciones
     .filter(r => proy === 'TODOS' || r.proyecto === proy)
     .map(r => {
-      const fs = facturas.filter(f => f.rendicionId === r.id);
+      // Una factura anulada NO es gasto: o el dinero volvió a la caja, o la
+      // compra se registra de nuevo bien y entonces sí cuenta. Contándola,
+      // el arqueo mostraba un sobrante fantasma igual al monto anulado, que
+      // excede cualquier tolerancia y escalaba a gerencia sin motivo.
+      const fs = facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo);
       const total = fs.reduce((a, f) => a + f.monto, 0);
       return { ...r, facturas: fs, total, sobrante: r.montoFondo - total };
     })
@@ -3681,7 +3687,9 @@ function ReporteMensual({ db }) {
 
   // ── DIFERENCIAS DE CAJA CHICA (la goterita diaria es lo que importa)
   const renM = rendiciones.filter(r => delMes(r.fecha, mes)).map(r => {
-    const rendido = facturas.filter(f => f.rendicionId === r.id).reduce((a, f) => a + f.monto, 0);
+    // Sin las anuladas, igual que en la vista de Rendiciones: una factura
+    // anulada no es gasto y contarla inventaba un sobrante en el arqueo.
+    const rendido = facturas.filter(f => f.rendicionId === r.id && !f.anulMotivo).reduce((a, f) => a + f.monto, 0);
     return { ...r, rendido, teorico: r.montoFondo - rendido };
   });
   const difCaja = useMemo(() => {
