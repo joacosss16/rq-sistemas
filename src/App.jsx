@@ -3243,7 +3243,7 @@ function Rendiciones({ user, db, api }) {
                 )}
                 Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)} ·
                 {r.repOp
-                  ? ` repuesta: ${(bancoDe[r.proyecto] || {}).banco || ''} op. ${r.repOp} (${fmt(r.repFecha)}, ${r.repuestoPor})`
+                  ? ` repuesta: ${[(bancoDe[r.proyecto] || {}).banco, `op. ${r.repOp}`].filter(Boolean).join(' ')} (${fmt(r.repFecha)}, ${r.repuestoPor})`
                   : ' reposición pendiente en la cola del área de Pagos'}
               </div>
             )}
@@ -4294,30 +4294,45 @@ export default function App() {
     // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
     const usarCache = soloDinamicos && estaticosRef.current;
     const qEst = usarCache ? [] : [
-      fetchAll(() => supabase.from('proyectos').select('*').order('codigo')),
-      fetchAll(() => supabase.from('usuarios').select('*').order('id')),
+      // Columnas explícitas, no select('*'): así una columna nueva y sensible
+      // no viaja sola al navegador de los 7 roles sin que nadie se entere.
+      fetchAll(() => supabase.from('proyectos').select('codigo,nombre,activo').order('codigo')),
+      fetchAll(() => supabase.from('usuarios').select('id,nombre,rol,proyecto_asignado,activo').order('id')),
       fetchAll(() => supabase.from('materiales').select('*').eq('activo', true).order('codigo')),
       fetchAll(() => supabase.from('proveedores').select('*').order('razon_social').order('ruc')),
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
+      // Cuentas bancarias por obra (migración 32). La tabla está cerrada a
+      // gerencia y pagos: a los demás roles les devuelve 0 filas, sin error.
+      fetchAll(() => supabase.from('proyectos_banco').select('codigo,banco,nro_cuenta')),
     ];
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
     // guardar el crudo para poder refrescar solo una tabla la próxima vez
     dinamicosRef.current = Object.fromEntries(DIN.map(([n], k) => [n, dinR[k]]));
     const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR] = dinR;
-    let prjR, usrR, matR, provR, famR;
+    let prjR, usrR, matR, provR, famR, pbR;
     if (usarCache) {
-      ({ prjR, usrR, matR, provR, famR } = estaticosRef.current);
+      ({ prjR, usrR, matR, provR, famR, pbR } = estaticosRef.current);
     } else {
-      [prjR, usrR, matR, provR, famR] = estR;
-      estaticosRef.current = { prjR, usrR, matR, provR, famR };
+      [prjR, usrR, matR, provR, famR, pbR] = estR;
+      estaticosRef.current = { prjR, usrR, matR, provR, famR, pbR };
     }
+    // pbR queda FUERA de conError a propósito: si la migración 32 no estuviera
+    // corrida, o Supabase aún no hubiera recargado su esquema, lo peor que pasa
+    // es que Pagos vea el banco vacío — no que los 7 roles vean pantalla de error.
     const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
     const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
     const famMap = {}; fams.forEach(f => { famMap[f.iu] = f.nombre; });
     const nomProy = {}, codProy = {}, bancoDe = {};
-    prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; bancoDe[p.nombre] = { banco: p.banco || '', cuenta: p.nro_cuenta || '' }; });
+    prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; });
+    // bancoDe se indexa por NOMBRE de obra, que es como lo consultan Pagos,
+    // Rendiciones y Auditoría. Para los roles que no pueden leer la tabla
+    // queda vacío, y todos los accesos ya usan (bancoDe[x] || {}).
+    ((pbR || {}).data || []).forEach(b => {
+      const n = nomProy[b.codigo];
+      if (n) bancoDe[n] = { banco: b.banco || '', cuenta: b.nro_cuenta || '' };
+    });
     PROYECTOS = prj.filter(p => p.activo).map(p => [p.codigo, p.nombre]);
     ALMACENEROS = {};
     usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { ALMACENEROS[nomProy[u.proyecto_asignado]] = u.nombre; });
