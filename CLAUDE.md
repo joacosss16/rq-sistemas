@@ -13,6 +13,8 @@ Sistema digital de requerimientos de materiales (RQ) para Grupo Copacabana: grup
 | 2504 | LUZ | — | Brayan Huamán |
 | 2601 | TORRE COPACABANA | — | — |
 
+**Toda obra tiene SIEMPRE un residente y un almacenero** (regla del negocio, confirmada por el dueño el 12 ago 2026). Las guardas de aprobación se apoyan en eso: quien aprueba una salida o su lado de un préstamo es el residente de esa obra. Una obra sin residente dado de alta deja sus salidas y préstamos sin poder aprobarse — hay que crear los usuarios que faltan antes de arrancar.
+
 Personas clave: Lucía Arana (logística/compras centralizada, dueña del catálogo), Mónica Del Castillo (administración), Yheyson Ccoiccosi (contabilidad), Rodrigo Curo (BIM).
 
 ## Problema que resuelve

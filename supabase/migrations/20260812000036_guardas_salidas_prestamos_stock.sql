@@ -333,11 +333,29 @@ notify pgrst, 'reload schema';
 -- ============================================================
 -- ANTES DE CORRER ESTA MIGRACIÓN
 --
--- Hoy solo 2502 y 2503 tienen residente. Un préstamo que toque una
--- obra SIN residente no lo podrá aprobar nadie: LUZ (2504) tiene
--- almacenero pero no residente. Crear esos usuarios es el arreglo de
--- verdad; si hace falta destrabar uno a mano, gerencia puede hacerlo
--- desde el editor SQL identificándose:
+-- REGLA DEL NEGOCIO: toda obra tiene SIEMPRE un residente y un
+-- almacenero. Estas guardas se apoyan en eso — quien aprueba una
+-- salida o su lado de un préstamo es el residente de esa obra.
+--
+-- Hoy faltan usuarios por crear, y es un hueco de datos, no del
+-- diseño: mientras una obra no tenga su residente dado de alta,
+-- nadie podrá aprobar sus salidas ni sus préstamos. Comprobarlo
+-- antes de arrancar, debe salir vacío:
+--
+--   select p.codigo, p.nombre,
+--          count(*) filter (where u.rol = 'residente') as residentes,
+--          count(*) filter (where u.rol = 'almacen')   as almaceneros
+--     from public.proyectos p
+--     left join public.usuarios u
+--            on u.proyecto_asignado = p.codigo and u.activo
+--    where p.activo
+--    group by p.codigo, p.nombre
+--   having count(*) filter (where u.rol = 'residente') = 0
+--       or count(*) filter (where u.rol = 'almacen')   = 0
+--    order by p.codigo;
+--
+-- Si hiciera falta destrabar un préstamo a mano, gerencia puede
+-- hacerlo desde el editor SQL identificándose:
 --   begin;
 --     set local role authenticated;
 --     set local request.jwt.claims to '{"sub":"<uuid de gerencia>"}';
