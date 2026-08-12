@@ -21,11 +21,67 @@
 -- EL PRINCIPIO, el mismo de la 34 y la 36: cada rol solo toca sus
 -- columnas, y LAS FIRMAS NO VIAJAN DESDE EL NAVEGADOR.
 --
--- NO cambia nada de lo que hoy hace nadie en pantalla.
+-- ---- EL ALTA TAMBIÉN, que es por donde se robaba ----
+-- La primera versión de esta migración volvió a poner la guarda solo
+-- sobre la modificación, el mismo error que la 36 documentó una
+-- migración antes. Y aquí el alta era el camino más caro de todos:
+-- crear la rendición del día es de los roles que manejan el efectivo,
+-- y `monto_fondo` es la base contra la que se compara el arqueo.
+-- Creándola a mano con S/ 1.500 donde el fondo real es S/ 2.000, se
+-- puede guardar S/ 500 y el arqueo del cierre dice "cuadra exacto".
+-- Sin rastro, todos los días. Ahora la rendición nace SIEMPRE
+-- abierta, sin firmas y con el fondo que dice la base.
+--
+-- ATENCIÓN: esto SÍ cambia una pantalla. Hoy el rol `pagos` puede
+-- cerrar la caja (App.jsx: `puede = administracion || pagos`, porque
+-- Mónica llevaba los dos frentes). Con este trigger esos botones
+-- fallan. El código que los quita va en el MISMO despliegue, y el rol
+-- de Mónica debe ser `administracion` ANTES de correr esto.
+--
 -- Se corre en el editor SQL de Supabase. Se puede repetir sin daño.
 -- ============================================================
 
 begin;
+
+-- ------------------------------------------------------------
+-- 0) CÓMO NACE UNA RENDICIÓN
+-- Abierta, sin arqueo, sin firmas, sin reposición, y con el fondo que
+-- dice la tabla de cajas chicas — nunca el que mande el navegador.
+-- Solo aplica a quien entra por la aplicación; las cargas de datos
+-- desde el editor SQL no se tocan.
+-- ------------------------------------------------------------
+create or replace function public.trg_rendicion_nace_abierta()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_fondo numeric;
+begin
+  if auth.uid() is null then return new; end if;   -- mantenimiento, no app
+  new.estado               := 'Abierta';
+  new.observacion          := null;
+  new.correccion           := null;
+  new.aprobado_por         := null;
+  new.fecha_aprobacion     := null;
+  new.efectivo_contado     := null;
+  new.diferencia           := null;
+  new.dif_motivo           := null;
+  new.dif_resolucion       := null;
+  new.reposicion_operacion := null;
+  new.reposicion_fecha     := null;
+  new.repuesto_por         := null;
+  -- El fondo lo dice la base. Era la puerta del robo.
+  select monto_fondo into v_fondo from public.cajas_chicas where proyecto = new.proyecto;
+  new.monto_fondo := coalesce(v_fondo, 0);
+  return new;
+end;
+$$;
+
+drop trigger if exists rendiciones_nace_abierta on public.rendiciones;
+create trigger rendiciones_nace_abierta
+  before insert on public.rendiciones
+  for each row execute function public.trg_rendicion_nace_abierta();
 
 create or replace function public.trg_rendicion_guarda()
 returns trigger

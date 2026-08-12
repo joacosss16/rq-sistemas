@@ -3119,8 +3119,12 @@ function Pagos({ user, db, api }) {
 
 function Rendiciones({ user, db, api }) {
   const { rendiciones, facturas, cajas, tolerancias = {}, bancoDe } = db;
-  // administración aprueba; el rol pagos también (Mónica lleva ambos frentes)
-  const puede = user.rol === 'administracion' || user.rol === 'pagos';
+  // Solo administración cierra la caja del día. Antes el rol `pagos` también
+  // podía, porque Mónica llevaba los dos frentes; eso ponía a la misma persona
+  // en las dos puntas del circuito del efectivo (aprobar el gasto y reponer el
+  // fondo). Pagos conserva la pestaña en modo consulta: necesita ver qué
+  // rendiciones están aprobadas para saber qué reponer.
+  const puede = user.rol === 'administracion';
   const [proy, setProy] = useState('TODOS');
   const [obs, setObs] = useState({});
   const [corr, setCorr] = useState({});   // texto de la corrección de una rendición observada
