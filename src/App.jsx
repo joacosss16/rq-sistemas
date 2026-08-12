@@ -2787,6 +2787,12 @@ function Pagos({ user, db, api }) {
   const fs = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
   const pend = fs.filter(f => f.estadoPago !== 'Pagada');
   const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
+  // Se paga obra por obra: cada una tiene su cuenta, así que quien paga entra a
+  // un banco, liquida lo de esa obra y recién cambia de cuenta. La lista va
+  // agrupada por obra con su banco y su subtotal, no mezclada.
+  const porObra = Object.entries(
+    pend.reduce((acc, f) => { (acc[f.proyecto] = acc[f.proyecto] || []).push(f); return acc; }, {})
+  ).sort((a, b) => a[0].localeCompare(b[0], 'es'));
   // reposiciones de caja chica: rendiciones aprobadas aún sin reponer
   // Compras ya pagadas cuyo documento aún no llega (migración 29)
   const porLlegar = fs.filter(f => f.tipoDoc === 'Pendiente' && !f.anulMotivo)
@@ -2854,14 +2860,28 @@ function Pagos({ user, db, api }) {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Proyecto', 'Rellenó', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Medio', 'Banco (según obra)', 'N°', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['N° Factura', 'Fecha', 'Proveedor', 'RUC', 'Rellenó', 'Ítems', 'Monto S/', 'Forma', 'Vence', 'Medio', 'N°', 'F. pago', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {pend.map(f => {
+                {porObra.map(([obra, lista]) => (
+                  <Fragment key={obra}>
+                    <tr className="bg-slate-800/60 border-y border-slate-700">
+                      <td colSpan={13} className="py-1.5 px-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">{obra}</span>
+                          {(bancoDe[obra] || {}).banco
+                            ? <span className="text-[10px] text-slate-400">{bancoDe[obra].banco}
+                                {bancoDe[obra].cuenta && <span className="font-mono"> · {bancoDe[obra].cuenta}</span>}</span>
+                            : <span className="text-[10px] font-bold text-red-400">⚠ esta obra no tiene cuenta configurada · no se puede pagar</span>}
+                          <span className="ml-auto text-[10px] text-slate-400">{lista.length} por pagar ·{' '}
+                            <span className="font-mono text-slate-200">S/ {lista.reduce((a, f) => a + f.monto, 0).toFixed(2)}</span></span>
+                        </div>
+                      </td>
+                    </tr>
+                    {lista.map(f => {
                   const p = getP(f.id);
                   const venc = vencimiento(f);
                   const atrasada = diasHoy(venc) < 0;
                   const bancoObra = (bancoDe[f.proyecto] || {}).banco || '—';
-                  const cuentaObra = (bancoDe[f.proyecto] || {}).cuenta || '';
                   const esComp = f.tipoDoc === 'Compromiso';
                   const listo = puede && p.medio && p.op.trim() && p.fecha && bancoObra !== '—' && (!esComp || (p.serieReal || '').trim());
                   return (
@@ -2877,7 +2897,6 @@ function Pagos({ user, db, api }) {
                       <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
                       <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>
-                      <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.proyecto}</td>
                       <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap text-[10px]">{f.registradoPor || '—'}</td>
                       <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
@@ -2886,20 +2905,19 @@ function Pagos({ user, db, api }) {
                       <td className="py-2 px-1.5">
                         <select value={p.medio} onChange={e => setP(f.id, 'medio', e.target.value)} disabled={!puede} className={inputCls}>
                           {MEDIOS_PAGO.map(b => <option key={b}>{b}</option>)}</select></td>
-                      <td className="py-2 px-1.5 whitespace-nowrap">
-                        <span className="text-slate-300">{bancoObra}</span>
-                        {cuentaObra && <div className="text-[9px] font-mono text-slate-500">{cuentaObra}</div>}</td>
                       <td className="py-2 px-1.5"><input value={p.op} onChange={e => setP(f.id, 'op', e.target.value)} disabled={!puede} placeholder={ETIQUETA_NRO[p.medio] || 'N°'} className={`w-24 ${inputCls} font-mono`} /></td>
                       <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setP(f.id, 'fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5"><button onClick={() => pagar(f)} disabled={!listo} className={btnOk(!!listo)}>Registrar pago</button></td>
                     </tr>
                   );
-                })}
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Cada obra paga desde su propia cuenta: filtra por proyecto para trabajar banco por banco. Una factura pagada queda congelada (no se puede editar ni volver a pagar).</div>
+        <div className="mt-3 text-slate-500 text-[11px]">Cada obra paga desde su propia cuenta y por eso la lista va separada por obra, con su banco y su subtotal. Una factura pagada queda congelada (no se puede editar ni volver a pagar).</div>
       </div>
 
       {porLlegar.length > 0 && (
