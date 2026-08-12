@@ -70,6 +70,7 @@ with esperado (migracion, tipo, objeto, detalle) as (values
   ('24 no anular recibido','trigger', 'no_anular_recibido',              'rq_items'),
   ('25 tiempo respuesta',  'trigger', 'sella_decision',                  'rq_items'),
   ('29 no anular facturado','trigger','no_anular_facturado',             'rq_items'),
+  ('34 almacen recepcion', 'trigger', 'rq_items_almacen_guard',          'rq_items'),
 
   -- ── valores permitidos que agregaron migraciones nuevas
   ('21 canal anticipado',  'valor',   'rqs_canal_check',                 'ANTICIPADO'),
