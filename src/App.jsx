@@ -3449,7 +3449,7 @@ function Rendiciones({ user, db, api }) {
 }
 
 function Auditoria({ user, db, api }) {
-  const { facturas, rendiciones, bancoDe, precioProm, salidas, prestamos } = db;
+  const { facturas, rendiciones, bancoDe, precioProm, salidas, prestamos, levantadas = {} } = db;
   const puede = user.rol === 'gerente';
   const [obraCierre, setObraCierre] = useState('');
 
@@ -3507,7 +3507,7 @@ function Auditoria({ user, db, api }) {
       (vistos[k] = vistos[k] || []).push(f);
     });
     Object.values(vistos).filter(v => v.length > 1).forEach(v => {
-      alertas.push({ tipo: 'N° de operación repetido', detalle: `${v[0].banco} op. ${v[0].numOp} usado en ${v.length} pagos: ${v.map(f => `${f.serie} (S/ ${f.monto.toFixed(2)})`).join(' · ')}` });
+      alertas.push({ clave: `op-repetida:${v[0].banco}|${v[0].numOp}:${v.length}`, tipo: 'N° de operación repetido', detalle: `${v[0].banco} op. ${v[0].numOp} usado en ${v.length} pagos: ${v.map(f => `${f.serie} (S/ ${f.monto.toFixed(2)})`).join(' · ')}` });
     });
   }
   {
@@ -3525,23 +3525,47 @@ function Auditoria({ user, db, api }) {
       if (g.ejemplos.length < 3) g.ejemplos.push(f.serie);
     });
     Object.values(porObra).forEach(g => alertas.push({
+      // La clave lleva cuántas facturas son: si aparece una más, la alerta vuelve
+      clave: `banco-distinto:${g.obra}:${[...g.bancos].sort().join('/')}:${g.n}`,
       tipo: 'Banco distinto al de la obra',
       detalle: `${g.obra}: ${g.n} factura(s) por S/ ${g.monto.toFixed(2)} pagadas desde ${[...g.bancos].join(' / ')}; la obra opera con ${bancoDe[g.obra].banco}. Ej.: ${g.ejemplos.join(', ')}${g.n > 3 ? '…' : ''}`,
     }));
   }
   pagadas.filter(f => f.fechaPago && f.fechaPago < f.fecha)
-    .forEach(f => alertas.push({ tipo: 'Pago anterior a la factura', detalle: `${f.serie}: factura del ${fmt(f.fecha)} pagada el ${fmt(f.fechaPago)}` }));
+    .forEach(f => alertas.push({ clave: `pago-anterior:${f.serie}:${f.fechaPago}`, tipo: 'Pago anterior a la factura', detalle: `${f.serie}: factura del ${fmt(f.fecha)} pagada el ${fmt(f.fechaPago)}` }));
   {
     const vencidas = facturas.filter(f => f.estadoPago !== 'Pagada' && diasHoy(vencimientoDe(f)) < 0);
     if (vencidas.length) {
       const monto = vencidas.reduce((a, f) => a + f.monto, 0);
-      alertas.push({ tipo: 'Facturas vencidas sin pagar', detalle: `${vencidas.length} factura(s) por S/ ${monto.toFixed(2)}; la más antigua: ${vencidas.sort((a, b) => (vencimientoDe(a) < vencimientoDe(b) ? -1 : 1))[0].serie} (venció ${fmt(vencimientoDe(vencidas[0]))})` });
+      alertas.push({ clave: `vencidas:${vencidas.length}:${monto.toFixed(2)}`, tipo: 'Facturas vencidas sin pagar', detalle: `${vencidas.length} factura(s) por S/ ${monto.toFixed(2)}; la más antigua: ${vencidas.sort((a, b) => (vencimientoDe(a) < vencimientoDe(b) ? -1 : 1))[0].serie} (venció ${fmt(vencimientoDe(vencidas[0]))})` });
     }
   }
   pagadas.filter(f => f.monto > UMBRAL_MONTO_INUSUAL)
-    .forEach(f => alertas.push({ tipo: 'Monto inusual', detalle: `${f.serie} (${f.proyecto}): S/ ${f.monto.toFixed(2)} — revisar con lupa (umbral S/ ${UMBRAL_MONTO_INUSUAL})` }));
+    .forEach(f => alertas.push({ clave: `monto-inusual:${f.serie}`, tipo: 'Monto inusual', detalle: `${f.serie} (${f.proyecto}): S/ ${f.monto.toFixed(2)} — revisar con lupa (umbral S/ ${UMBRAL_MONTO_INUSUAL})` }));
   pagadas.filter(f => !f.conciliada && f.fechaPago && diasHoy(f.fechaPago) <= -14)
-    .forEach(f => alertas.push({ tipo: 'Sin conciliar hace 14+ días', detalle: `${f.serie} (${f.proyecto}) pagada el ${fmt(f.fechaPago)} sigue sin conciliar contra el banco` }));
+    .forEach(f => alertas.push({ clave: `sin-conciliar:${f.serie}`, tipo: 'Sin conciliar hace 14+ días', detalle: `${f.serie} (${f.proyecto}) pagada el ${fmt(f.fechaPago)} sigue sin conciliar contra el banco` }));
+
+  // Las alertas levantadas salen de la lista activa pero NO se borran: quedan
+  // abajo con su nota, para que nadie descubra que una alerta existió solo
+  // porque desapareció de su pantalla.
+  const activas = alertas.filter(a => !levantadas[a.clave]);
+  const yaLevantadas = alertas.filter(a => levantadas[a.clave]).map(a => ({ ...a, lev: levantadas[a.clave] }));
+  const [levantando, setLevantando] = useState('');
+  const [notaLev, setNotaLev] = useState('');
+
+  const levantar = async a => {
+    if (!notaLev.trim()) return;
+    const r = await api.levantarAlerta({ clave: a.clave, tipo: a.tipo, detalle: a.detalle, nota: notaLev });
+    if (r.error) { setAviso('⚠ ' + r.error); return; }
+    setLevantando(''); setNotaLev('');
+    setAviso(`Alerta "${a.tipo}" levantada. Si la situación vuelve a cambiar, reaparecerá.`);
+  };
+
+  const reabrir = async a => {
+    const r = await api.reabrirAlerta(a.clave);
+    if (r.error) { setAviso('⚠ ' + r.error); return; }
+    setAviso(`Alerta "${a.tipo}" reabierta.`);
+  };
 
   const conciliar = async (f, valor) => {
     const r = await api.conciliarFactura(f.id, valor);
@@ -3580,15 +3604,54 @@ function Auditoria({ user, db, api }) {
         </div>
       </div>
 
-      <div className={`border rounded-md p-4 mb-3 ${alertas.length === 0 ? 'bg-green-950 border-green-800' : 'bg-slate-900 border-red-800'}`}>
-        <div className={`text-[11px] font-bold tracking-widest uppercase mb-2 ${alertas.length === 0 ? 'text-green-400' : 'text-red-400'}`}>
-          {alertas.length === 0 ? '✓ 0 alertas — sin hallazgos automáticos' : `⚠ ${alertas.length} alerta(s) detectada(s) automáticamente`}</div>
-        {alertas.map((a, i) => (
-          <div key={i} className="mb-1.5 text-xs">
-            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400 mr-2">{a.tipo}</span>
-            <span className="text-slate-300">{a.detalle}</span>
+      <div className={`border rounded-md p-4 mb-3 ${activas.length === 0 ? 'bg-green-950 border-green-800' : 'bg-slate-900 border-red-800'}`}>
+        <div className={`text-[11px] font-bold tracking-widest uppercase mb-2 ${activas.length === 0 ? 'text-green-400' : 'text-red-400'}`}>
+          {activas.length === 0 ? '✓ 0 alertas — sin hallazgos pendientes' : `⚠ ${activas.length} alerta(s) por revisar`}</div>
+        <Aviso msg={aviso} />
+        {activas.map(a => (
+          <div key={a.clave} className="mb-2 text-xs flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400 mr-2">{a.tipo}</span>
+              <span className="text-slate-300">{a.detalle}</span>
+            </div>
+            {puede && (levantando === a.clave ? (
+              <div className="w-64 shrink-0">
+                <input autoFocus value={notaLev} onChange={e => setNotaLev(e.target.value)}
+                  placeholder="¿Por qué queda resuelta?" className={`w-full ${inputCls} mb-1`} />
+                <div className="flex gap-1">
+                  <button onClick={() => levantar(a)} disabled={!notaLev.trim()}
+                    className={`flex-1 px-2 py-1 rounded text-[9px] font-bold uppercase ${notaLev.trim() ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>Confirmar</button>
+                  <button onClick={() => { setLevantando(''); setNotaLev(''); }}
+                    className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400">Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => { setLevantando(a.clave); setNotaLev(''); }}
+                className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap shrink-0">Levantar</button>
+            ))}
           </div>
         ))}
+        {yaLevantadas.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-800">
+            <div className="text-[10px] font-bold uppercase text-slate-500 mb-1.5">
+              Levantadas · {yaLevantadas.length} · revisadas y dadas por resueltas</div>
+            {yaLevantadas.map(a => (
+              <div key={a.clave} className="mb-1.5 text-[11px] flex items-start gap-2">
+                <div className="flex-1 min-w-0 text-slate-500">
+                  <span className="text-slate-400">{a.tipo}</span> · {a.detalle}
+                  <div className="text-[10px] text-green-500/80">
+                    Levantada: {a.lev.nota} — {a.lev.por}, {fmt(a.lev.fecha)}</div>
+                </div>
+                {puede && (
+                  <button onClick={() => reabrir(a)}
+                    className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 hover:bg-slate-700 whitespace-nowrap shrink-0">Volver a abrir</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 text-[10px] text-slate-500">
+          Levantar una alerta la da por resuelta y queda registrado quién y por qué. No silencia el futuro: si la situación cambia —una factura más, otro banco— la alerta vuelve a aparecer sola.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
@@ -4495,6 +4558,7 @@ export default function App() {
       ['cajas_chicas', () => supabase.from('cajas_chicas').select('*').order('proyecto')],
       ['rendiciones', () => supabase.from('rendiciones').select('*').order('numero')],
       ['entregas_caja', () => supabase.from('entregas_caja').select('*').order('numero')],
+      ['alertas_levantadas', () => supabase.from('alertas_levantadas').select('*')],
     ];
     const cache = dinamicosRef.current;
     const qDin = DIN.map(([nombre, q]) =>
@@ -4519,7 +4583,7 @@ export default function App() {
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
     // guardar el crudo para poder refrescar solo una tabla la próxima vez
     dinamicosRef.current = Object.fromEntries(DIN.map(([n], k) => [n, dinR[k]]));
-    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, entR] = dinR;
+    const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, entR, alvR] = dinR;
     let prjR, usrR, matR, provR, famR, pbR;
     if (usarCache) {
       ({ prjR, usrR, matR, provR, famR, pbR } = estaticosRef.current);
@@ -4730,6 +4794,14 @@ export default function App() {
       anulFecha: e.anulacion ? e.anulacion.fecha : '',
     }));
 
+    // Alertas de Auditoría que gerencia dio por resueltas (migración 39).
+    // Fuera del control de errores, como las entregas: si la migración no
+    // estuviera corrida, las alertas se ven todas en vez de romper la app.
+    const levantadas = Object.fromEntries((((alvR || {}).data) || []).map(a => [a.clave, {
+      nota: a.nota, fecha: a.fecha,
+      por: usrMap[a.levantada_por] ? usrMap[a.levantada_por].nombre : '',
+    }]));
+
     const salidas = salR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, proyecto: nomProy[s.proyecto] || s.proyecto,
       cod: s.codigo, desc: matMap[s.codigo] ? matMap[s.codigo].descripcion : s.codigo,
@@ -4773,7 +4845,7 @@ export default function App() {
     }));
 
     const nuevo = {
-      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe, entregas,
+      rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe, entregas, levantadas,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
       pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
       precioProm, ultimaCompra, historialPrecios, mejorPrecio2m,
@@ -4937,6 +5009,17 @@ export default function App() {
       }, ['rendiciones']),
       // Entregas de efectivo al comprador (migración 38). Quién entregó lo
       // estampa la base; aquí solo va lo que se digita.
+      // Levantar una alerta de Auditoría: gerencia la da por resuelta, con nota.
+      // Quién y cuándo los pone la base.
+      levantarAlerta: ({ clave, tipo, detalle, nota }) => wrap(async () => {
+        const u = (await supabase.auth.getUser()).data.user;
+        return await supabase.from('alertas_levantadas').insert({
+          clave, tipo, detalle, nota: nota.trim(), levantada_por: u.id,
+        });
+      }, ['alertas_levantadas']),
+      reabrirAlerta: clave => wrap(async () =>
+        await supabase.from('alertas_levantadas').delete().eq('clave', clave),
+        ['alertas_levantadas']),
       registrarEntrega: ({ proyecto, monto, medio, numOp, fecha }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('entregas_caja').insert({
