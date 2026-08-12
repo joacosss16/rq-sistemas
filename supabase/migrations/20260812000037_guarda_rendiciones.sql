@@ -123,19 +123,23 @@ commit;
 notify pgrst, 'reload schema';
 
 -- ============================================================
--- LO QUE ESTA MIGRACIÓN **NO** ARREGLA (decisión pendiente)
+-- LO QUE ESTA MIGRACIÓN **NO** ARREGLA TODAVÍA
 --
 -- La migración 27 dice que la diferencia de caja "nadie la digita:
 -- se calcula". Hoy no es así: el navegador la manda ya calculada
--- (efectivo contado − sobrante teórico) y la base la acepta tal cual.
--- Lo correcto sería que la calculara la base, y no se hace aquí por
--- una razón concreta: la app suma las facturas de la rendición SIN
--- excluir las anuladas (App.jsx:3134), así que si la base la
--- recalculara excluyéndolas, los dos números dejarían de coincidir.
+-- (efectivo contado − sobrante teórico) y la base la acepta tal cual,
+-- así que el arqueo se puede maquillar mandando otro número.
 --
--- Antes de cerrarlo hay que decidir: ¿una factura en efectivo anulada
--- sigue contando como gasto del día? Debería no contar. Cuando esté
--- decidido, se calcula en la base y el arqueo deja de poder maquillarse.
+-- La duda que lo bloqueaba —si una factura anulada cuenta como gasto—
+-- ya está resuelta: NO cuenta, y la app se corrigió (contarla producía
+-- una diferencia de caja falsa igual al monto anulado). Con eso, la
+-- base ya puede calcularla ella misma con la misma fórmula:
+--
+--   diferencia = efectivo_contado − (monto_fondo − Σ facturas de esa
+--                rendición que NO estén anuladas)
+--
+-- Queda para la migración siguiente, junto con el rastro de las
+-- correcciones de `stock_inicial`, que también quedó pendiente.
 --
 -- CÓMO COMPROBAR
 --
