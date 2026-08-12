@@ -4565,10 +4565,15 @@ export default function App() {
     const cod = nombre => (dbRef.current ? dbRef.current.codProy[nombre] : null) || nombre;
     // tablas: qué pudo tocar esta acción. Solo eso se vuelve a traer;
     // el resto sale de la caché. Sin lista, se refresca todo (por si acaso).
-    const wrap = async (fn, tablas = null) => {
+    // maestros: catálogo, proveedores, familias… Se cachean para no bajar los
+    // 1,740 materiales en cada refresco, así que hay que invalidar la caché
+    // a mano en las pocas acciones que los cambian; si no, quien aprueba un
+    // material no lo ve hasta recargar la página.
+    const wrap = async (fn, tablas = null, refrescarMaestros = false) => {
       try {
         const r = await fn();
         if (r && r.error) return { error: r.error.message || String(r.error) };
+        if (refrescarMaestros) estaticosRef.current = null;
         await cargarTodo(true, tablas);
         return r || {};
       } catch (e) { return { error: e.message || String(e) }; }
@@ -4609,7 +4614,9 @@ export default function App() {
           return { error: { message: m.replace(/^.*?:\s*/, '') } };
         }
         return {};
-      }, ['facturas', 'factura_items', 'rendiciones']),
+        // refrescarMaestros: el RPC da de alta al proveedor si es nuevo,
+        // y si no se invalida la caché no aparece en la lista hasta recargar.
+      }, ['facturas', 'factura_items', 'rendiciones'], true),
       // Llega el documento físico: administración digita la serie real
       completarSerie: (id, serieReal) => wrap(async () => {
         const r = await supabase.from('facturas')
@@ -4710,11 +4717,11 @@ export default function App() {
         await supabase.rpc('aprobar_material', {
           p_solicitud: s.id, p_codigo: codigo, p_descripcion: desc,
           p_und: und, p_familia_iu: famIu, p_perecedero: perecedero,
-        })),
+        }), ['solicitudes_material'], true),
       rechazarSolicitud: (s, motivo) => wrap(async () =>
         await supabase.from('solicitudes_material').update({ estado: 'Rechazado', motivo }).eq('id', s.id)),
       crearFamilia: ({ iu, nombre }) => wrap(async () =>
-        await supabase.from('familias').insert({ iu, nombre })),
+        await supabase.from('familias').insert({ iu, nombre }), [], true),
       // Pedido por cotización (enchapes): crea cada material 97xxxx + el pedido aprobado
       crearPedidoCotizacion: ({ proyecto, cotizacionRef, arquitecto, fecha, lineas }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
@@ -4739,9 +4746,10 @@ export default function App() {
         const { error: e2 } = await supabase.from('rq_items').insert(rows);
         if (e2) return { error: e2 };
         return { numero: rq.numero };
-      }),
+        // crea materiales 97xxxx nuevos -> hay que refrescar el catálogo
+      }, ['rqs', 'rq_items'], true),
       setPerecedero: (codigo, valor) => wrap(async () =>
-        await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo)),
+        await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo), [], true),
       conciliarFactura: (id, valor) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('facturas').update(valor
