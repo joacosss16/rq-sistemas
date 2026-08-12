@@ -347,6 +347,44 @@ function imprimirConteo({ obra, corte, filas }) {
   abrirPDF(`Conteo ${obra} ${corte}`, cuerpo);
 }
 
+// Aviso persistente que la persona puede dar por leído.
+//
+// No desaparece del todo: se colapsa a una línea que se puede volver a abrir,
+// porque la situación que lo provoca sigue ahí. Un aviso que se borra del todo
+// deja a alguien sin saber por qué el sistema no le deja hacer algo.
+//
+// La clave incluye el CONTENIDO: si mañana aparece un caso nuevo (otro ítem
+// anulado, otra obra bloqueada), el aviso se vuelve a abrir solo. Dar por
+// leído significa "ya vi esto", no "no me avises nunca más".
+function AlertaCerrable({ id, tono = 'rojo', resumen, children }) {
+  const clave = 'rq:aviso:' + id;
+  const leido = () => { try { return localStorage.getItem(clave) === '1'; } catch { return false; } };
+  const [cerrada, setCerrada] = useState(leido);
+  useEffect(() => { setCerrada(leido()); }, [clave]);   // clave nueva = situación nueva
+  const cls = tono === 'naranja'
+    ? 'bg-orange-950 border-orange-800 text-orange-400'
+    : 'bg-red-950 border-red-800 text-red-400';
+
+  if (cerrada) return (
+    <button onClick={() => { try { localStorage.removeItem(clave); } catch { /* sin almacenamiento */ } setCerrada(false); }}
+      className={`w-full text-left px-3 py-1.5 rounded border mb-3 text-[10px] font-bold uppercase opacity-60 hover:opacity-100 ${cls}`}>
+      {resumen} · ver de nuevo
+    </button>
+  );
+
+  return (
+    <div className={`rounded-md border p-4 mb-3 ${cls}`}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">{children}</div>
+        <button onClick={() => { try { localStorage.setItem(clave, '1'); } catch { /* sin almacenamiento */ } setCerrada(true); }}
+          className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap shrink-0">
+          Enterado
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function FiltroProyecto({ value, onChange, todos, excluir }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)} className={inputCls}>
@@ -546,7 +584,9 @@ function Residente({ user, db, api }) {
     <div>
       <Aviso msg={aviso} />
       {esRes && anuladosRecientes.length > 0 && (
-        <div className="bg-red-950 border border-red-800 rounded-md p-4 mb-3">
+        <AlertaCerrable
+          id={'anulados:' + anuladosRecientes.map(i => i.id).join(',')}
+          resumen={`⚠ Te anularon ${anuladosRecientes.length} ítem(s)`}>
           <div className="text-[11px] font-bold tracking-widest text-red-400 uppercase mb-2">
             ⚠ Te anularon {anuladosRecientes.length} ítem(s) · últimos 15 días</div>
           <table className="w-full text-xs">
@@ -566,7 +606,7 @@ function Residente({ user, db, api }) {
           </table>
           <div className="text-[10px] text-red-300/70 mt-2">
             Si necesitas igual el material, vuelve a pedirlo en un RQ nuevo o conversa con Compras.</div>
-        </div>
+        </AlertaCerrable>
       )}
       {!esRes ? (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3 text-slate-400 text-xs">
@@ -1702,7 +1742,9 @@ function Compras({ user, db, api, modo }) {
   return (
     <div>
     {cajasTrabadas.length > 0 && (
-      <div className="bg-red-950 border border-red-800 rounded-md p-4 mb-3">
+      <AlertaCerrable
+        id={'caja-trabada:' + cajasTrabadas.map(r => r.id).join(',')}
+        resumen={`⛔ Caja chica bloqueada · ${cajasTrabadas.map(r => r.proyecto).join(', ')}`}>
         <div className="text-[11px] font-bold tracking-widest text-red-400 uppercase mb-1">
           ⛔ Caja chica bloqueada · {cajasTrabadas.length} obra(s)</div>
         {cajasTrabadas.map(r => (
@@ -1714,7 +1756,7 @@ function Compras({ user, db, api, modo }) {
         ))}
         <div className="text-[10px] text-red-300/80 mt-1">
           No se pueden registrar más compras en efectivo de esa obra hasta que se resuelva. Las compras con factura a crédito o transferencia siguen normales.</div>
-      </div>
+      </AlertaCerrable>
     )}
     {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
     {/* el comprador también negocia en el mostrador: necesita el histórico de precios */}
