@@ -124,5 +124,37 @@ prueba('tres entregas y dos facturas con céntimos', () => {
   igual(c.debeDevolver, 0.50, 'debe devolver');
 });
 
+console.log('\nEL HISTÓRICO (rendiciones del modelo de fondo fijo)\n');
+
+const VIEJA = { id: 'v1', proyecto: 'MAIA', fecha: '2026-08-09', montoFondo: 2000 };
+
+prueba('una rendición anterior al cambio se lee con su fondo fijo', () => {
+  const c = cuadreCaja(VIEJA, [fac(80, { rendicionId: 'v1' })], []);
+  igual(c.recibido, 2000, 'recibido');
+  igual(c.debeDevolver, 1920, 'sobrante');
+  if (!c.historica) throw new Error('debería marcarse como histórica');
+  if (c.faltaEntrega) throw new Error('en el histórico no falta ninguna entrega: nunca las hubo');
+});
+
+prueba('el faltante histórico de S/ 120 se sigue leyendo igual', () => {
+  // Es el caso real que quedó en producción: fondo 2000, gastó 80,
+  // contó 1800 → faltan 120. Debe dar lo mismo que antes del cambio.
+  const c = cuadreCaja(VIEJA, [fac(80, { rendicionId: 'v1' })], []);
+  igual(diferenciaArqueo(1800, c.debeDevolver), -120, 'faltan 120');
+});
+
+prueba('si una rendición vieja SÍ tiene entregas, mandan las entregas', () => {
+  const c = cuadreCaja(VIEJA, [fac(80, { rendicionId: 'v1' })],
+    [{ n: 1, monto: 300, proyecto: 'MAIA', fecha: '2026-08-09' }]);
+  igual(c.recibido, 300, 'recibido');
+  if (c.historica) throw new Error('con entregas registradas ya no es histórica');
+});
+
+prueba('un día del modelo nuevo sin entregas SÍ levanta la alarma', () => {
+  const c = cuadreCaja({ ...REND, montoFondo: 2000 }, [fac(500)], []);
+  igual(c.recibido, 0, 'no hereda el fondo fijo');
+  if (!c.faltaEntrega) throw new Error('debería avisar que falta registrar la entrega');
+});
+
 console.log(`\n${ok} pruebas OK, ${fallos} fallas\n`);
 process.exit(fallos ? 1 : 0);

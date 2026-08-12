@@ -3174,7 +3174,8 @@ function Rendiciones({ user, db, api }) {
       // sale si una obra tiene un faltante de efectivo o no.
       const c = cuadreCaja(r, facturas, entregas);
       return { ...r, facturas: c.facturas, total: c.gastado, entregas: c.entregas,
-               recibido: c.recibido, sobrante: c.debeDevolver };
+               recibido: c.recibido, sobrante: c.debeDevolver,
+               historica: c.historica, faltaEntrega: c.faltaEntrega };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
 
@@ -3221,7 +3222,7 @@ function Rendiciones({ user, db, api }) {
     <div>
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Rendiciones de caja chica · fondo fijo diario por obra</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Rendiciones de caja chica · cierre del día por obra</div>
           <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
         </div>
         {!puede && (
@@ -3251,10 +3252,15 @@ function Rendiciones({ user, db, api }) {
               <span className="text-slate-500 text-[11px]">{fmt(r.fecha)} · rinde: {r.responsable}</span>
               <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${r.estado === 'Aprobada' ? 'bg-green-950 text-green-400' : r.estado === 'Observada' ? 'bg-red-950 text-red-400' : 'bg-yellow-950 text-yellow-400'}`}>{r.estado}</span>
               <span className="ml-auto text-[11px] font-mono text-slate-300">
-                Recibido S/ {r.recibido.toFixed(2)} · Gastado <b className="text-yellow-400">S/ {r.total.toFixed(2)}</b> · Debe devolver S/ {r.sobrante.toFixed(2)}</span>
+                {r.historica ? 'Fondo' : 'Recibido'} S/ {r.recibido.toFixed(2)} · Gastado <b className="text-yellow-400">S/ {r.total.toFixed(2)}</b> · {r.historica ? 'Sobrante' : 'Debe devolver'} S/ {r.sobrante.toFixed(2)}</span>
             </div>
-            {/* De dónde sale el "recibido": las entregas de efectivo del día */}
-            {r.entregas.length === 0 ? (
+            {/* De dónde sale el "recibido": las entregas de efectivo del día.
+                Las rendiciones anteriores al cambio de modelo se leen con su
+                fondo fijo, que es como se cerraron y como las firmaron. */}
+            {r.historica ? (
+              <div className="text-[10px] text-slate-500 mb-2">
+                Rendición del modelo anterior (fondo fijo de la obra). Desde el 12 de agosto el disponible del día son las entregas que registra Pagos.</div>
+            ) : r.faltaEntrega ? (
               <div className="text-[10px] text-orange-400 mb-2">
                 ⚠ No hay ninguna entrega de efectivo registrada para este día. Pagos debe registrarla, o el arqueo saldrá con toda la plata como faltante.</div>
             ) : (
@@ -3394,7 +3400,7 @@ function Rendiciones({ user, db, api }) {
             )}
           </div>
         ))}
-        <div className="mt-3 text-slate-500 text-[11px]">Fondo fijo: cada obra arranca el día con su monto completo (config en tabla cajas_chicas{Object.keys(cajas).length ? ` · ${Object.entries(cajas).map(([o, m]) => `${o}: S/ ${m}`).join(' · ')}` : ''}). Las facturas en efectivo del día se rinden aquí; administración aprueba y Pagos repone.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">El comprador arranca el día en cero: Pagos le entrega dinero una o varias veces y esas entregas son el disponible de la jornada. Al cerrar devuelve el vuelto, administración lo cuenta al recibirlo y esa cuenta es el arqueo: <span className="font-mono">devuelto − (entregas − gastado)</span>. Si la diferencia supera la tolerancia de la obra, la resuelve gerencia.</div>
       </div>
     </div>
   );
