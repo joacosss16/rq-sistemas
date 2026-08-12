@@ -172,13 +172,17 @@ function AnularBox({ label = 'Anular', onConfirm }) {
 }
 
 function descargarCSV(items, nombre) {
-  const cab = ['Canal', 'RQ', 'Partida', 'Nivel', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
+  const cab = ['Canal', 'RQ', 'Partida', 'Nivel', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Correcciones_Recepcion', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
   const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   const filas = items.map(i => {
     const llego = i.fechaEntrega ? dias(i.fechaEntrega, i.fechaRQ) : '';
     const holg = i.fechaEntrega && i.fecha ? dias(i.fecha, i.fechaEntrega) : '';
     const saldo = i.fechaEntregaSaldo && i.fechaEntrega ? dias(i.fechaEntregaSaldo, i.fechaEntrega) : '';
-    return [i.canal, 'RQ-' + String(i.rq).padStart(3, '0'), i.partida, i.piso || '', i.proyecto, i.residente || '', i.cod, i.desc, i.destino, i.und, i.cant, i.fechaRQ, i.fecha, i.decision, i.estado, i.motivoRechazo || '', i.motivoAnulacion || '', i.anuladoPor || '', i.pago, i.factura || '', i.fechaEntrega || '', i.cantRecibida ?? '', i.obsAlmacen || '', llego, holg, saldo].map(esc).join(',');
+    // Las correcciones de cantidad van en una sola celda, legible: es el
+    // rastro que se audita después (quién cambió qué, por qué y cuándo).
+    const corr = (i.correcciones || [])
+      .map(x => `${x.de}→${x.a}: ${x.motivo} (${x.por}, ${x.fecha})`).join(' | ');
+    return [i.canal, 'RQ-' + String(i.rq).padStart(3, '0'), i.partida, i.piso || '', i.proyecto, i.residente || '', i.cod, i.desc, i.destino, i.und, i.cant, i.fechaRQ, i.fecha, i.decision, i.estado, i.motivoRechazo || '', i.motivoAnulacion || '', i.anuladoPor || '', i.pago, i.factura || '', i.fechaEntrega || '', i.cantRecibida ?? '', i.obsAlmacen || '', corr, llego, holg, saldo].map(esc).join(',');
   });
   const csv = '﻿' + cab.join(',') + '\n' + filas.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
@@ -2057,9 +2061,16 @@ function Compras({ user, db, api, modo }) {
                   <td className="py-2 px-1.5">
                     {!facturarSolo && !i._arch && (
                       Number(i.cantRecibida) > 0 ? (
-                        <span className="text-[9px] text-slate-500 leading-tight block w-44"
-                          title="El material ya está en la obra: anularlo descuadraría el stock. Si hay que devolverlo, es una devolución al proveedor.">
-                          Ya recibido ({i.cantRecibida} {i.und}) — no se anula</span>
+                        <div className="w-44">
+                          <span className="text-[9px] text-slate-500 leading-tight block"
+                            title="El material ya está en la obra: anularlo descuadraría el stock. Si hay que devolverlo, es una devolución al proveedor.">
+                            Ya recibido ({i.cantRecibida} {i.und}) — no se anula</span>
+                          {/* Rastro de las correcciones de cantidad del almacén (migración 35) */}
+                          {(i.correcciones || []).map((x, k) => (
+                            <div key={k} className="text-[9px] text-yellow-500 leading-tight mt-1">
+                              Corregido de {x.de} a {x.a}: {x.motivo} ({x.por}, {fmt(x.fecha)})</div>
+                          ))}
+                        </div>
                       ) : i.anulSolMotivo ? (
                         <div className="w-44">
                           <div className="text-[9px] font-bold uppercase text-orange-400">Anulación en gerencia</div>
@@ -2298,6 +2309,32 @@ function Almacen({ user, db, api }) {
   const getF = id => form[id] || { cant: '', obs: '' };
   const setF = (id, k, v) => setForm({ ...form, [id]: { ...getF(id), [k]: v } });
 
+  // Corrección de una cantidad mal digitada (migración 35). Se listan aparte
+  // porque incluye lo ya ENTREGADO, que `porRecibir` deja fuera: es justo el
+  // caso en que el error completó el pedido y el ítem desapareció de arriba.
+  const DIAS_CORREGIR = 7;
+  const fechaRec = i => i.fechaEntregaSaldo || i.fechaEntrega;
+  const recibidasRecientes = rqs.flatMap(r => r.items
+    .filter(i => i.decision === 'Aprobado' && Number(i.cantRecibida) > 0)
+    .map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
+    .filter(i => i.proyecto === proy)
+    .filter(i => fechaRec(i) && -diasHoy(fechaRec(i)) <= DIAS_CORREGIR)
+    .sort((a, b) => (fechaRec(a) < fechaRec(b) ? 1 : -1));
+  const [corr, setCorr] = useState({});
+  const getC = id => corr[id] || { cant: '', motivo: '' };
+  const setC = (id, k, v) => setCorr({ ...corr, [id]: { ...getC(id), [k]: v } });
+
+  const corregir = async i => {
+    const c = getC(i.id);
+    const nueva = Number(c.cant);
+    const motivo = c.motivo.trim();
+    if (!motivo || c.cant === '' || !(nueva >= 0) || nueva > Number(i.cant) || nueva === Number(i.cantRecibida)) return;
+    const r = await api.corregirRecepcion(i, nueva, motivo);
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    const c2 = { ...corr }; delete c2[i.id]; setCorr(c2);
+    avisar(`Recepción corregida: "${i.desc}" pasa de ${i.cantRecibida} a ${nueva}. Queda registrado con tu nombre, la fecha y el motivo.`, 6000);
+  };
+
   const recibir = async i => {
     const f = getF(i.id);
     const fc = factorMap[i.cod];
@@ -2468,6 +2505,52 @@ function Almacen({ user, db, api }) {
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Si la cantidad recibida es menor a la pedida, el ítem pasa a Incompleto automáticamente (visible en Compras y Almacén); al llegar el saldo se registra otra recepción y pasa a Entregado.</div>
       </div>
+
+      {/* Corregir una cantidad mal digitada. Va en su propio bloque porque
+          alcanza también a lo ya Entregado, que sale de la tabla de arriba:
+          justo el caso de digitar 40 donde iba 4 y completar el pedido. */}
+      {recibidasRecientes.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">Recepciones de los últimos {DIAS_CORREGIR} días · corregir</div>
+          <div className="text-[11px] text-slate-500 mb-3">Si te equivocaste al digitar una cantidad, corrígela aquí. Se te pedirá el motivo y queda registrado con tu nombre y la fecha: no se borra nada.</div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead><tr>{['RQ', 'Descripción', 'Pedido', 'Recibido', 'Estado', 'Cantidad correcta', 'Motivo de la corrección', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {recibidasRecientes.map(i => {
+                  const c = getC(i.id);
+                  const nueva = Number(c.cant);
+                  const valida = esAlm && c.cant !== '' && nueva >= 0 && nueva <= Number(i.cant)
+                    && nueva !== Number(i.cantRecibida) && c.motivo.trim().length > 0;
+                  return (
+                    <tr key={i.id} className="border-b border-slate-800 align-top">
+                      <td className="py-2 px-1.5 font-mono text-[11px] text-slate-200">RQ-{String(i.rq).padStart(3, '0')}</td>
+                      <td className="py-2 px-1.5 text-slate-200">{i.desc} <span className="text-slate-500">({i.und})</span>
+                        {(i.correcciones || []).map((x, k) => (
+                          <div key={k} className="text-[9px] text-yellow-500 mt-1">
+                            Corregido de {x.de} a {x.a} · {x.motivo} · {x.por}, {fmt(x.fecha)}
+                          </div>
+                        ))}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-200">{i.cant}</td>
+                      <td className="py-2 px-1.5 font-mono text-slate-300">{i.cantRecibida}</td>
+                      <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}>{i.estado}</span></td>
+                      <td className="py-2 px-1.5">
+                        <input type="number" min="0" step="any" value={c.cant} disabled={!esAlm}
+                          onChange={e => setC(i.id, 'cant', e.target.value)} placeholder={String(i.cantRecibida)} className={`w-20 ${inputCls}`} />
+                        {c.cant !== '' && nueva > Number(i.cant) && <div className="text-[9px] text-red-400 mt-1">Más de lo pedido</div>}</td>
+                      <td className="py-2 px-1.5">
+                        <input value={c.motivo} disabled={!esAlm} onChange={e => setC(i.id, 'motivo', e.target.value)}
+                          placeholder="Ej.: digité 40 en vez de 4" className={`w-56 ${inputCls}`} /></td>
+                      <td className="py-2 px-1.5">
+                        <button onClick={() => corregir(i)} disabled={!valida} className={btnOk(!!valida)}>Corregir</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Stock del almacén · {proy}</div>
@@ -4445,6 +4528,7 @@ export default function App() {
         fechaEntrega: r.fecha_entrega || '', fechaRecojoSaldo: r.fecha_recojo_saldo || '', fechaEntregaSaldo: r.fecha_entrega_saldo || '',
         comunicoResidente: r.comunico_residente === true ? 'Sí' : r.comunico_residente === false ? 'No' : '—',
         destinoSaldo: r.destino_saldo || '', cantRecibida: Number(r.cant_recibida || 0), obsAlmacen: r.obs_almacen || '',
+        correcciones: Array.isArray(r.correcciones) ? r.correcciones : [],
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
         fechaCompra: r.fecha_compra || '',
@@ -4733,6 +4817,14 @@ export default function App() {
         if (cad) patch.fecha_caducidad = (item.fechaCaducidad && item.fechaCaducidad < cad) ? item.fechaCaducidad : cad;
         return await supabase.from('rq_items').update(patch).eq('id', item.id);
       }, ['rq_items']),
+      // Corregir una cantidad mal digitada (migración 35). Solo se manda el
+      // motivo: quién y cuándo los estampa la base, para que el rastro no se
+      // pueda falsear. El historial no se pisa, se le agrega una entrada.
+      corregirRecepcion: (item, nuevaCant, motivo) => wrap(async () =>
+        await supabase.from('rq_items').update({
+          cant_recibida: nuevaCant,
+          correcciones: [...(item.correcciones || []), { motivo }],
+        }).eq('id', item.id), ['rq_items']),
       darSalida: ({ proyecto, cod: codigo, cant, hoja, zona }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('salidas').insert({
