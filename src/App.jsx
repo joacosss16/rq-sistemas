@@ -4534,6 +4534,13 @@ export default function App() {
         setPerfilError('Tu cuenta no tiene perfil asignado en el sistema. Pide a administración que registre tu usuario.');
         return;
       }
+      // Desactivado = fuera. mi_rol() y mi_proyecto() filtran por `activo`,
+      // así que sin esto la persona entraba, veía TODOS los datos de su obra
+      // y solo descubría que no podía guardar al pulsar el botón.
+      if (!perfil.activo) {
+        setPerfilError('Tu cuenta está desactivada: puedes iniciar sesión pero no registrar ni consultar nada. Pide a administración que la reactive.');
+        return;
+      }
       const datos = await cargarTodo();
       const nomProy = datos ? datos.nomProy : {};
       setUser({
