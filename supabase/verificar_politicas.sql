@@ -33,6 +33,7 @@ with esperado (tabla, cmd) as (values
   ('materiales','SELECT'),
   ('proveedores','SELECT'),
   ('proyectos','SELECT'),
+  ('proyectos_banco','SELECT'),
   ('usuarios','SELECT'),
   ('rendiciones','SELECT'), ('rendiciones','INSERT'), ('rendiciones','UPDATE'),
   ('cajas_chicas','SELECT'),

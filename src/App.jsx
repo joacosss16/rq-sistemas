@@ -2793,6 +2793,9 @@ function Pagos({ user, db, api }) {
   const porObra = Object.entries(
     pend.reduce((acc, f) => { (acc[f.proyecto] = acc[f.proyecto] || []).push(f); return acc; }, {})
   ).sort((a, b) => a[0].localeCompare(b[0], 'es'));
+  // Ninguna cuenta cargada = no se pudo leer la tabla, no es que falte
+  // configurar una obra. Son dos problemas distintos y se avisan distinto.
+  const sinCuentas = Object.keys(bancoDe).length === 0;
   // reposiciones de caja chica: rendiciones aprobadas aún sin reponer
   // Compras ya pagadas cuyo documento aún no llega (migración 29)
   const porLlegar = fs.filter(f => f.tipoDoc === 'Pendiente' && !f.anulMotivo)
@@ -2871,7 +2874,9 @@ function Pagos({ user, db, api }) {
                           {(bancoDe[obra] || {}).banco
                             ? <span className="text-[10px] text-slate-400">{bancoDe[obra].banco}
                                 {bancoDe[obra].cuenta && <span className="font-mono"> · {bancoDe[obra].cuenta}</span>}</span>
-                            : <span className="text-[10px] font-bold text-red-400">⚠ esta obra no tiene cuenta configurada · no se puede pagar</span>}
+                            : <span className="text-[10px] font-bold text-red-400">{sinCuentas
+                                ? '⚠ no se pudieron leer las cuentas · recarga la página antes de pagar'
+                                : '⚠ esta obra no tiene cuenta configurada · no se puede pagar'}</span>}
                           <span className="ml-auto text-[10px] text-slate-400">{lista.length} por pagar ·{' '}
                             <span className="font-mono text-slate-200">S/ {lista.reduce((a, f) => a + f.monto, 0).toFixed(2)}</span></span>
                         </div>
@@ -4314,7 +4319,10 @@ export default function App() {
       ({ prjR, usrR, matR, provR, famR, pbR } = estaticosRef.current);
     } else {
       [prjR, usrR, matR, provR, famR, pbR] = estR;
-      estaticosRef.current = { prjR, usrR, matR, provR, famR, pbR };
+      // Si la consulta de bancos falló, NO se cachea nada: un error guardado
+      // aquí se queda pegado para siempre y Pagos no podría pagar hasta
+      // recargar la página entera. Sin caché, el siguiente ciclo reintenta.
+      if (!(pbR && pbR.error)) estaticosRef.current = { prjR, usrR, matR, provR, famR, pbR };
     }
     // pbR queda FUERA de conError a propósito: si la migración 32 no estuviera
     // corrida, o Supabase aún no hubiera recargado su esquema, lo peor que pasa

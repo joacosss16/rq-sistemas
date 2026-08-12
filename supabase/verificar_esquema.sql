@@ -27,7 +27,11 @@ with esperado (migracion, tipo, objeto, detalle) as (values
   ('07 caducidad',         'columna', 'rq_items.fecha_caducidad',        null),
   ('10 caja chica',        'columna', 'facturas.medio_pago',             null),
   ('10 caja chica',        'columna', 'facturas.rendicion_id',           null),
-  ('10 caja chica',        'columna', 'proyectos.banco',                 null),
+  -- Migración 32: el banco salió de `proyectos` (que leen los 7 roles) a su
+  -- propia tabla cerrada. Comprobar la columna nueva verifica de paso que la
+  -- tabla exista. La vieja NO se comprueba: se borra en la migración 33.
+  ('32 banco aparte',      'columna', 'proyectos_banco.banco',           null),
+  ('32 banco aparte',      'columna', 'proyectos_banco.nro_cuenta',      null),
   ('12 auditoria',         'columna', 'facturas.conciliada',             null),
   ('14 compromiso',        'columna', 'facturas.tipo_doc',               null),
   ('16 comprado por',      'columna', 'rq_items.comprado_por',           null),

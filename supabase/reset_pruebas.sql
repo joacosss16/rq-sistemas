@@ -31,8 +31,19 @@ delete from public.proveedores where ruc = '20138651917';
 -- ============================================================
 -- PASOS MANUALES QUE ESTE SCRIPT NO HACE (datos de prueba que se
 -- REEMPLAZAN por reales, no se borran):
--- a) proyectos.banco / nro_cuenta  -> poner los bancos REALES:
---    update public.proyectos set banco='<real>', nro_cuenta='<real>' where codigo='2503'; (etc.)
+-- a) BANCOS REALES por obra. OJO: desde la migración 32 los datos
+--    bancarios YA NO viven en `proyectos` sino en `proyectos_banco`
+--    (tabla cerrada a gerencia y pagos). Escribir en la tabla vieja
+--    NO tiene ningún efecto: Pagos seguiría usando los datos falsos
+--    de prueba y los grabaría dentro de cada factura al pagarla,
+--    donde quedan congelados. Usar SIEMPRE esta forma:
+--    insert into public.proyectos_banco (codigo, banco, nro_cuenta)
+--    values ('2503', '<banco real>', '<cuenta real>')
+--    on conflict (codigo) do update
+--       set banco = excluded.banco, nro_cuenta = excluded.nro_cuenta;
+--    (una línea por obra: 2501, 2502, 2503, 2504, 2601)
+--    Comprobar después que no quede ninguna cuenta de prueba:
+--    select * from public.proyectos_banco order by codigo;
 -- b) cajas_chicas.monto_fondo      -> poner los fondos REALES por obra:
 --    update public.cajas_chicas set monto_fondo=<real> where proyecto='2503'; (etc.)
 -- c) Cuentas *@rq-test.com (contraseña compartida de prueba):

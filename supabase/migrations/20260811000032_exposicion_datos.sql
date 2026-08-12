@@ -56,15 +56,16 @@ comment on table public.proyectos_banco is
 --       Ojo: se COPIAN, no se mueven. Las columnas viejas se quedan
 --       donde están para que la app actual no se caiga. Se borran en
 --       la migración siguiente, ya con el código nuevo arriba.
---       Si esta migración se corre dos veces, la segunda vez
---       simplemente vuelve a poner el mismo valor (`do update`).
+--       `do nothing` y no `do update`: esta copia es de UNA sola vez y
+--       en UNA sola dirección. Si mañana se cargan los bancos REALES en
+--       la tabla nueva y alguien vuelve a correr esta migración, un
+--       `do update` los machacaría con los valores viejos de prueba.
+--       Con `do nothing`, repetirla no puede hacer daño.
 insert into public.proyectos_banco (codigo, banco, nro_cuenta)
 select codigo, banco, nro_cuenta
   from public.proyectos
  where banco is not null or nro_cuenta is not null
-on conflict (codigo) do update
-   set banco = excluded.banco,
-       nro_cuenta = excluded.nro_cuenta;
+on conflict (codigo) do nothing;
 
 -- 1.3 · Cerrar la tabla nueva.
 --       `enable row level security` = "esta tabla no se lee salvo que
@@ -150,15 +151,18 @@ create policy proveedores_select on public.proveedores
 -- que un ítem se marca Comprado), que sí está viva y alimenta la
 -- alerta de "comprado hace más de 48 h y sigue sin factura".
 --
--- Por seguridad, el bloque revisa primero que la tabla esté vacía. Si
--- alguien le hubiera cargado algo a mano, no borra nada y avisa.
+-- Por seguridad, el bloque revisa primero que la tabla esté vacía.
+-- Si tuviera datos, ABORTA la migración entera con un error visible.
+-- Antes esto era un simple aviso, y los avisos del editor de Supabase
+-- pasan desapercibidos: la migración habría dicho "listo" dejando la
+-- tabla con datos y la fuga abierta. Un error obliga a mirarlo.
 -- ------------------------------------------------------------
 do $$
 begin
   if to_regclass('public.cotizaciones') is null then
     raise notice 'cotizaciones: ya no existe, no hay nada que hacer.';
   elsif exists (select 1 from public.cotizaciones limit 1) then
-    raise notice 'cotizaciones: TIENE datos. No se borra. Avisar antes de continuar.';
+    raise exception 'cotizaciones TIENE datos: alguien empezó a usarla. No se borra nada y la migración se cancela entera. Hay que revisarlo antes de continuar.';
   else
     execute 'drop table public.cotizaciones cascade';
     raise notice 'cotizaciones: estaba vacía y sin uso. Borrada.';
