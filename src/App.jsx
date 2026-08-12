@@ -3510,12 +3510,27 @@ function Auditoria({ user, db, api }) {
       alertas.push({ tipo: 'N° de operación repetido', detalle: `${v[0].banco} op. ${v[0].numOp} usado en ${v.length} pagos: ${v.map(f => `${f.serie} (S/ ${f.monto.toFixed(2)})`).join(' · ')}` });
     });
   }
-  pagadas.filter(f => f.medio !== 'Efectivo' && f.banco && (bancoDe[f.proyecto] || {}).banco && f.banco !== bancoDe[f.proyecto].banco)
-    .forEach(f => alertas.push({ tipo: 'Banco distinto al de la obra', detalle: `${f.serie} (${f.proyecto}) pagada desde ${f.banco}; la obra opera con ${bancoDe[f.proyecto].banco}` }));
+  {
+    // Agrupado por obra, no una alerta por factura: lo que gerencia necesita
+    // saber es "en esta obra estan pagando desde otra cuenta", no una lista de
+    // cuarenta lineas. Una alerta que salta cuarenta veces deja de leerse, y
+    // entonces tampoco se ve la que si importa.
+    const distintos = pagadas.filter(f => f.medio !== 'Efectivo' && f.banco
+      && (bancoDe[f.proyecto] || {}).banco && f.banco !== bancoDe[f.proyecto].banco);
+    const porObra = {};
+    distintos.forEach(f => {
+      const g = (porObra[f.proyecto] = porObra[f.proyecto]
+        || { obra: f.proyecto, bancos: new Set(), n: 0, monto: 0, ejemplos: [] });
+      g.bancos.add(f.banco); g.n += 1; g.monto += f.monto;
+      if (g.ejemplos.length < 3) g.ejemplos.push(f.serie);
+    });
+    Object.values(porObra).forEach(g => alertas.push({
+      tipo: 'Banco distinto al de la obra',
+      detalle: `${g.obra}: ${g.n} factura(s) por S/ ${g.monto.toFixed(2)} pagadas desde ${[...g.bancos].join(' / ')}; la obra opera con ${bancoDe[g.obra].banco}. Ej.: ${g.ejemplos.join(', ')}${g.n > 3 ? '…' : ''}`,
+    }));
+  }
   pagadas.filter(f => f.fechaPago && f.fechaPago < f.fecha)
     .forEach(f => alertas.push({ tipo: 'Pago anterior a la factura', detalle: `${f.serie}: factura del ${fmt(f.fecha)} pagada el ${fmt(f.fechaPago)}` }));
-  rendiciones.filter(r => r.estado === 'Aprobada' && !r.repOp && r.fechaAprobacion && diasHoy(r.fechaAprobacion) <= -2)
-    .forEach(r => alertas.push({ tipo: 'Rendición sin reposición', detalle: `${r.proyecto} (${fmt(r.fecha)}): aprobada hace ${-diasHoy(r.fechaAprobacion)} días y la caja sigue incompleta` }));
   {
     const vencidas = facturas.filter(f => f.estadoPago !== 'Pagada' && diasHoy(vencimientoDe(f)) < 0);
     if (vencidas.length) {
