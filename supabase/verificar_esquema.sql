@@ -71,6 +71,9 @@ with esperado (migracion, tipo, objeto, detalle) as (values
   ('25 tiempo respuesta',  'trigger', 'sella_decision',                  'rq_items'),
   ('29 no anular facturado','trigger','no_anular_facturado',             'rq_items'),
   ('34 almacen recepcion', 'trigger', 'rq_items_almacen_guard',          'rq_items'),
+  ('35 correccion recep.', 'columna', 'rq_items.correcciones',           null),
+  ('36 salida nace pend.', 'trigger', 'salidas_nace_pendiente',          'salidas'),
+  ('36 prestamo nace sol.','trigger', 'prestamos_nace_solicitado',       'prestamos'),
 
   -- ── valores permitidos que agregaron migraciones nuevas
   ('21 canal anticipado',  'valor',   'rqs_canal_check',                 'ANTICIPADO'),
