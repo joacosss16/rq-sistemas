@@ -103,13 +103,18 @@ function stockDetalleObra(db, proy) {
     }
   }));
   db.salidas.filter(s => s.proyecto === proy && !s.anulada).forEach(s => {
-    if (!stockMap[s.cod]) return;
-    if (s.aprobacion === 'Aprobada') stockMap[s.cod].salido += (Number(s.cant) - Number(s.reingresada || 0));
-    else if (s.aprobacion === 'Pendiente') stockMap[s.cod].reservado += Number(s.cant);   // reservado hasta que el residente apruebe
+    // La fila se crea también desde la salida, no solo desde lo recibido. Si una
+    // recepción se corrige a cero, el material tiene que SEGUIR A LA VISTA con su
+    // stock en negativo: antes desaparecía de la tabla mientras la base seguía
+    // contando esas salidas, así que el descuadre quedaba invisible hasta que el
+    // siguiente intento de salida lo rebotaba con un error incomprensible.
+    const e = entrada(s.cod, s.desc, s.und);
+    if (s.aprobacion === 'Aprobada') e.salido += (Number(s.cant) - Number(s.reingresada || 0));
+    else if (s.aprobacion === 'Pendiente') e.reservado += Number(s.cant);   // reservado hasta que el residente apruebe
   });
   db.prestamos.forEach(p => {
     if (!['Prestado', 'Transferido'].includes(p.estado)) return;
-    if (p.origen === proy && stockMap[p.cod]) stockMap[p.cod].prestNeto -= Number(p.cant);
+    if (p.origen === proy) entrada(p.cod, p.desc, p.und).prestNeto -= Number(p.cant);
     if (p.destino === proy) entrada(p.cod, p.desc, p.und).prestNeto += Number(p.cant);
   });
   // stock = físico disponible; disponible = lo que aún se puede pedir (descuenta lo reservado por pendientes)
