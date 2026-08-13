@@ -16,7 +16,7 @@ const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso i
 const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
 
 const TABS_POR_ROL = {
-  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
+  gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['apr', 'Aprobaciones'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
   compras: [['com', 'Compras'], ['cat', 'Catálogo'], ['tab', 'Tablero']],
   residente: [['res', 'Mis requerimientos'], ['apr', 'Aprobaciones'], ['sto', 'Mi almacén'], ['his', 'Historial']],
   almacen: [['alm', 'Mi almacén']],
@@ -2230,10 +2230,17 @@ function AprobacionesResidente({ user, db, api }) {
   const [rech, setRech] = useState({});
   const avisar = (m, ms = 5000) => { setAviso(m); setTimeout(() => setAviso(''), ms); };
 
-  const salPend = salidas.filter(s => s.proyecto === user.proyecto && !s.anulada && s.aprobacion === 'Pendiente');
-  // préstamos donde falta MI lado
+  // Gerencia entra aquí sin obra propia: es la red de seguridad para el día en
+  // que el residente de una obra esté de viaje, enfermo o todavía sin dar de
+  // alta. Sin esto, esa obra no puede entregar material y la única salida es
+  // el editor SQL en plena jornada.
+  const todas = !user.proyecto;
+  const miObra = p => todas || p === user.proyecto;
+
+  const salPend = salidas.filter(s => miObra(s.proyecto) && !s.anulada && s.aprobacion === 'Pendiente');
+  // préstamos donde falta una aprobación (la mía, o cualquiera si es gerencia)
   const presPend = prestamos.filter(p => p.estado === 'Solicitado' &&
-    ((p.origen === user.proyecto && !p.aprobOrigen) || (p.destino === user.proyecto && !p.aprobDestino)));
+    ((miObra(p.origen) && !p.aprobOrigen) || (miObra(p.destino) && !p.aprobDestino)));
 
   const aprobarSal = async sa => {
     const r = await api.updSalida(sa.id, { aprobacion: 'Aprobada' });
@@ -2249,10 +2256,15 @@ function AprobacionesResidente({ user, db, api }) {
     avisar(`Salida #${sa.n} rechazada. El stock no se tocó. El almacenero verá el motivo.`);
   };
   const aprobarPres = async p => {
-    const lado = p.origen === user.proyecto ? 'aprob_origen' : 'aprob_destino';
+    // Gerencia no tiene obra propia: aprueba el lado que falte. Sin esto
+    // siempre habría firmado el de destino, aunque el pendiente fuera el otro.
+    const lado = todas
+      ? (!p.aprobOrigen ? 'aprob_origen' : 'aprob_destino')
+      : (p.origen === user.proyecto ? 'aprob_origen' : 'aprob_destino');
     const r = await api.updPrestamo(p.id, { [lado]: { por: user.nombre, fecha: HOY_ISO } });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
-    avisar(`Préstamo #${p.n}: tu lado (${p.origen === user.proyecto ? 'origen' : 'destino'}) aprobado. Se activa cuando ambos den el OK.`);
+    const cual = lado === 'aprob_origen' ? `origen (${p.origen})` : `destino (${p.destino})`;
+    avisar(`Préstamo #${p.n}: lado ${cual} aprobado. Se activa cuando ambos den el OK.`);
   };
   const rechazarPres = async p => {
     const m = (rech['p' + p.n] || '').trim();
@@ -2928,9 +2940,15 @@ function Pagos({ user, db, api }) {
   const puede = user.rol === 'pagos';
   // Entregas de efectivo del día (migración 38)
   const [fEnt, setFEnt] = useState({
-    proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '',
+    proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '', fecha: HOY_ISO,
   });
-  const entregasHoy = entregas.filter(e => e.fecha === HOY_ISO).sort((a, b) => b.n - a.n);
+  // Últimos días, no solo hoy: si nadie registró la entrega de ayer, tiene que
+  // haber forma de ponerla. Si no, la rendición de ese día queda con recibido
+  // en cero y el arqueo saca todo el efectivo como faltante, para siempre.
+  const DIAS_ENTREGAS = 7;
+  const entregasRecientes = entregas
+    .filter(e => -diasHoy(e.fecha) <= DIAS_ENTREGAS)
+    .sort((a, b) => (a.fecha === b.fecha ? b.n - a.n : (a.fecha < b.fecha ? 1 : -1)));
   const entregaOk = puede && Number(fEnt.monto) > 0
     && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0);
   const [proy, setProy] = useState('TODOS');
@@ -2993,7 +3011,7 @@ function Pagos({ user, db, api }) {
     if (!entregaOk) return;
     const r = await api.registrarEntrega(fEnt);
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
-    setAviso(`Entrega de S/ ${Number(fEnt.monto).toFixed(2)} a ${fEnt.proyecto} registrada.`);
+    setAviso(`Entrega de S/ ${Number(fEnt.monto).toFixed(2)} a ${fEnt.proyecto} registrada${fEnt.fecha !== HOY_ISO ? ` con fecha ${fmt(fEnt.fecha)}` : ''}.`);
     setFEnt({ ...fEnt, monto: '', numOp: '' });
     setTimeout(() => setAviso(''), 5000);
   };
@@ -3013,13 +3031,15 @@ function Pagos({ user, db, api }) {
           día, y lo que reciba es contra lo que se cuadra el cierre. */}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">
-          Entregas de efectivo al comprador · hoy</div>
+          Entregas de efectivo al comprador · últimos {DIAS_ENTREGAS} días</div>
         <div className="text-[11px] text-slate-500 mb-3">
           Cada vez que le entregas dinero, regístralo aquí. Al cerrar el día, administración cuenta lo que devuelve y lo compara contra estas entregas menos lo gastado.</div>
         {puede && (
           <div className="flex items-end gap-2 flex-wrap mb-3">
             <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Obra</div>
               <FiltroProyecto value={fEnt.proyecto} onChange={v => setFEnt({ ...fEnt, proyecto: v })} /></div>
+            <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Día de la entrega</div>
+              <FechaInput value={fEnt.fecha} onChange={e => setFEnt({ ...fEnt, fecha: e.target.value })} className={`w-32 ${inputCls}`} /></div>
             <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Monto S/</div>
               <input type="number" step="any" min="0" value={fEnt.monto}
                 onChange={e => setFEnt({ ...fEnt, monto: e.target.value })} className={`w-28 ${inputCls} font-mono`} /></div>
@@ -3034,15 +3054,16 @@ function Pagos({ user, db, api }) {
             <button onClick={entregar} disabled={!entregaOk} className={btnOk(entregaOk)}>Registrar entrega</button>
           </div>
         )}
-        {entregasHoy.length === 0 ? (
-          <div className="text-center py-4 text-slate-500 text-sm">Todavía no se registró ninguna entrega hoy.</div>
+        {entregasRecientes.length === 0 ? (
+          <div className="text-center py-4 text-slate-500 text-sm">Sin entregas registradas en los últimos {DIAS_ENTREGAS} días.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Obra', 'Monto S/', 'Medio', 'N° operación', 'Entregó', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{['Día', 'Obra', 'Monto S/', 'Medio', 'N° operación', 'Entregó', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {entregasHoy.map(e => (
+                {entregasRecientes.map(e => (
                   <tr key={e.id} className={`border-b border-slate-800 ${e.anulMotivo ? 'opacity-60 line-through' : ''}`}>
+                    <td className={`py-2 px-1.5 whitespace-nowrap ${e.fecha === HOY_ISO ? 'text-slate-300' : 'text-slate-500'}`}>{fmt(e.fecha)}</td>
                     <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{e.proyecto}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{e.monto.toFixed(2)}</td>
                     <td className="py-2 px-1.5 text-slate-400">{e.medio}</td>
@@ -3356,7 +3377,10 @@ function Rendiciones({ user, db, api }) {
                 </tbody>
               </table>
             )}
-            {r.estado === 'Abierta' && puede && (() => {
+            {/* También en 'Observada': antes, observar dejaba la rendición sin
+                arqueo posible y la caja en efectivo de la obra bloqueada, sin
+                más salida que aprobarla a ciegas sin contar el vuelto. */}
+            {(r.estado === 'Abierta' || r.estado === 'Observada') && puede && (() => {
               const tol = tolerancias[r.proyecto] ?? 20;
               const cont = arqueo[r.id];
               const hayArqueo = cont !== undefined && cont !== '' && !isNaN(Number(cont));
