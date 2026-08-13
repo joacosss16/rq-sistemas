@@ -172,6 +172,14 @@ function AnularBox({ label = 'Anular', onConfirm }) {
   );
 }
 
+// Todo texto que escribio una persona pasa por aqui antes de entrar al HTML de
+// un PDF. Sin esto, un "<" en una partida rompe el documento en silencio, y un
+// texto con etiquetas se ejecutaria al abrirlo: el PDF se arma pegando cadenas
+// dentro de HTML y el navegador no distingue el dato del marcado.
+const escHtml = v => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
 function descargarCSV(items, nombre) {
   const cab = ['Canal', 'RQ', 'Partida', 'Nivel', 'Proyecto', 'Residente', 'Codigo', 'Descripcion', 'Destino', 'Und', 'Cant', 'F_Requerimiento', 'F_Necesitada', 'Decision', 'Estado', 'Motivo_Rechazo', 'Anulacion_Motivo', 'Anulado_Por', 'Pago', 'Factura', 'F_Entrega', 'Cant_Recibida', 'Obs_Almacen', 'Correcciones_Recepcion', 'Llego_dias', 'Holgura_dias', 'Saldo_dias'];
   const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
@@ -202,17 +210,17 @@ function imprimirRQ(r) {
     <tr>
       <td class="c">${idx + 1}</td>
       <td class="c mono">${i.cod}</td>
-      <td>${i.desc}</td>
-      <td class="c">${i.und}</td>
+      <td>${escHtml(i.desc)}</td>
+      <td class="c">${escHtml(i.und)}</td>
       <td class="c">${i.cant}</td>
       <td class="c">${fmt(i.fecha)}</td>
-      <td>${i.destino}</td>
-      <td class="c">${i.color || '—'}</td>
-      <td>${i.obs || '—'}</td>
+      <td>${escHtml(i.destino)}</td>
+      <td class="c">${escHtml(i.color || '—')}</td>
+      <td>${escHtml(i.obs || '—')}</td>
     </tr>`).join('');
   const w = window.open('', '_blank');
   if (!w) { alert('El navegador bloqueó la ventana. Permite ventanas emergentes para descargar el PDF.'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RQ-${String(r.n).padStart(3, '0')} · ${r.proyecto}</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>RQ-${String(r.n).padStart(3, '0')} · ${escHtml(r.proyecto)}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; padding: 24px; }
@@ -241,15 +249,15 @@ function imprimirRQ(r) {
   </style></head><body>
   <div class="head">
     <div class="logo">GRUPO COPACABANA<small>CONSTRUCCIÓN E INMOBILIARIA · CUSCO</small></div>
-    <div class="nrq"><b>RQ-${String(r.n).padStart(3, '0')}</b><br>Fecha: ${fmt(r.fechaRQ)}<br><span class="canal">${r.canal}</span></div>
+    <div class="nrq"><b>RQ-${String(r.n).padStart(3, '0')}</b><br>Fecha: ${fmt(r.fechaRQ)}<br><span class="canal">${escHtml(r.canal)}</span></div>
   </div>
   <h1>REQUERIMIENTO DE MATERIALES</h1>
   <table class="meta">
-    <tr><td class="l">Proyecto</td><td>${r.proyecto}</td><td class="l">Partida</td><td>${r.partida}</td></tr>
-    <tr><td class="l">Residente de obra</td><td>${r.residente}</td><td class="l">Adm. de almacén</td><td>${r.almacen}</td></tr>
-    <tr><td class="l">Nivel</td><td>${r.piso || '—'}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
+    <tr><td class="l">Proyecto</td><td>${escHtml(r.proyecto)}</td><td class="l">Partida</td><td>${escHtml(r.partida)}</td></tr>
+    <tr><td class="l">Residente de obra</td><td>${escHtml(r.residente)}</td><td class="l">Adm. de almacén</td><td>${escHtml(r.almacen)}</td></tr>
+    <tr><td class="l">Nivel</td><td>${escHtml(r.piso || '—')}</td><td class="l">Ítems aprobados</td><td>${aprobados.length} de ${r.items.length}</td></tr>
   </table>
-  ${r.just ? `<div class="just"><b>Motivo (¿por qué no se previó?):</b> ${r.just}</div>` : ''}
+  ${r.just ? `<div class="just"><b>Motivo (¿por qué no se previó?):</b> ${escHtml(r.just)}</div>` : ''}
   <table class="items">
     <thead><tr><th>Ítem</th><th>Código</th><th>Descripción</th><th>Und</th><th>Cant</th><th>Fecha necesitada</th><th>Destino</th><th>Color</th><th>Obs</th></tr></thead>
     <tbody>${filas}</tbody>
@@ -287,7 +295,7 @@ const ESTILO_PDF = `
 function abrirPDF(titulo, cuerpo) {
   const w = window.open('', '_blank');
   if (!w) { alert('El navegador bloqueó la ventana. Permite ventanas emergentes para descargar el PDF.'); return; }
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${titulo}</title><style>${ESTILO_PDF}</style></head><body>${cuerpo}<script>window.onload = () => { window.print(); };<\/script></body></html>`);
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${escHtml(titulo)}</title><style>${ESTILO_PDF}</style></head><body>${cuerpo}<script>window.onload = () => { window.print(); };<\/script></body></html>`);
   w.document.close();
 }
 
@@ -298,7 +306,7 @@ function imprimirCierre({ obra, corte, filas, salidasMes, prestamosActivos }) {
   const cuerpo = `
   <div class="head">
     <div class="logo">GRUPO COPACABANA<small>CONSTRUCCIÓN E INMOBILIARIA · CUSCO</small></div>
-    <div class="meta"><b>CIERRE DE ALMACÉN</b><br>Obra: ${obra}<br>Fecha de corte: ${fmt(corte)}</div>
+    <div class="meta"><b>CIERRE DE ALMACÉN</b><br>Obra: ${escHtml(obra)}<br>Fecha de corte: ${fmt(corte)}</div>
   </div>
   <h1>CIERRE MENSUAL DE ALMACÉN — VALORIZADO</h1>
   ${sinPrecio > 0 ? `<div class="nota"><b>${sinPrecio} material(es) sin precio de compra registrado</b> (aparecen como "sin valorizar"): el total es parcial hasta contar con sus precios.</div>` : ''}
@@ -306,7 +314,7 @@ function imprimirCierre({ obra, corte, filas, salidasMes, prestamosActivos }) {
     <thead><tr><th>Código</th><th>Material</th><th>Und</th><th class="r">Stock</th><th class="r">Precio prom. S/</th><th class="r">Valor S/</th></tr></thead>
     <tbody>
       ${filas.map(f => `<tr>
-        <td class="mono c">${f.cod}</td><td>${f.desc}</td><td class="c">${f.und}</td>
+        <td class="mono c">${escHtml(f.cod)}</td><td>${escHtml(f.desc)}</td><td class="c">${escHtml(f.und)}</td>
         <td class="r mono">${f.cant}</td>
         <td class="r mono">${f.precio != null ? f.precio.toFixed(2) : '—'}</td>
         <td class="r mono">${f.valor != null ? f.valor.toFixed(2) : 'sin valorizar'}</td>
@@ -327,7 +335,7 @@ function imprimirConteo({ obra, corte, filas }) {
   const cuerpo = `
   <div class="head">
     <div class="logo">GRUPO COPACABANA<small>CONSTRUCCIÓN E INMOBILIARIA · CUSCO</small></div>
-    <div class="meta"><b>HOJA DE CONTEO</b><br>Obra: ${obra}<br>Fecha: ${fmt(corte)}</div>
+    <div class="meta"><b>HOJA DE CONTEO</b><br>Obra: ${escHtml(obra)}<br>Fecha: ${fmt(corte)}</div>
   </div>
   <h1>VERIFICACIÓN FÍSICA DE ALMACÉN — CONTEO CIEGO</h1>
   <div class="nota"><b>Instrucciones:</b> cuente físicamente cada material y anote la cantidad encontrada. Este documento NO muestra las cantidades del sistema a propósito: la comparación la hace gerencia al recibir la hoja firmada. No pida las cantidades al almacenero.</div>
@@ -335,7 +343,7 @@ function imprimirConteo({ obra, corte, filas }) {
     <thead><tr><th>#</th><th>Código</th><th>Material</th><th>Und</th><th class="c" style="width:18%">CANTIDAD CONTADA</th><th style="width:20%">Observaciones</th></tr></thead>
     <tbody>
       ${filas.map((f, i) => `<tr>
-        <td class="c">${i + 1}</td><td class="mono c">${f.cod}</td><td>${f.desc}</td><td class="c">${f.und}</td>
+        <td class="c">${i + 1}</td><td class="mono c">${escHtml(f.cod)}</td><td>${escHtml(f.desc)}</td><td class="c">${escHtml(f.und)}</td>
         <td style="height:26px"></td><td></td>
       </tr>`).join('')}
     </tbody>
@@ -1851,7 +1859,15 @@ function Compras({ user, db, api, modo }) {
               const cubiertosFF = enFact ? [i, ...flatBase.filter(x => ff.extras.includes(x.id))] : [];
               const sumaDesglose = cubiertosFF.reduce((a, x) => a + (Number(ff.precios[x.id]) || 0) * x.cant, 0);
               const cuadra = enFact && Number(ff.monto) > 0 && Math.abs(sumaDesglose - Number(ff.monto)) <= 0.1;
-              const factOk = ff && (ff.compromiso || ff.serie.trim()) && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
+              // Las tres formas de no tener número de factura al registrarla:
+              // compromiso de crédito (serie CRED-), ya pagada con la factura
+              // por llegar (serie PEND-), o la serie de verdad. Faltaba
+              // `pendiente`, y como al marcarlo el campo de serie desaparece,
+              // el botón se quedaba gris para siempre y sin explicar por qué.
+              const factOk = ff && (ff.compromiso || ff.pendiente || ff.serie.trim())
+                && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
+                // Ya pagada por banco: el servidor exige banco y N° de operación
+                && (!ff.pendiente || ff.efectivo || ((ff.banco || '').trim() && (ff.numOp || '').trim()))
                 && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
               // Solo ítems SIN factura: uno que ya tiene la suya haría fallar
               // toda la transacción (un ítem pertenece a una sola factura).
@@ -1962,7 +1978,10 @@ function Compras({ user, db, api, modo }) {
                             <div className="text-[9px] font-bold text-yellow-400 uppercase">Datos de factura (obligatorios) · Enter salta al siguiente</div>
                             <button onClick={() => cerrarFactura(i.id)} className="ml-auto text-[10px] text-slate-500 hover:text-slate-200">✕</button>
                           </div>
-                          {!ff.efectivo && (
+                          {/* Excluyentes: o el proveedor da crédito, o ya pagaste.
+                              Marcar las dos hacía que el servidor rechazara la
+                              factura con un mensaje que no explicaba el porqué. */}
+                          {!ff.efectivo && !ff.pendiente && (
                             <label className="flex items-start gap-1.5 mb-1.5 cursor-pointer text-[10px] text-slate-300">
                               <input type="checkbox" checked={!!ff.compromiso} onChange={e => setFF(i.id, 'compromiso', e.target.checked)} className="mt-0.5" />
                               <span><b>SIN factura aún</b>: el proveedor da crédito y emite la factura recién al pagar (compromiso)</span>
@@ -4718,6 +4737,7 @@ export default function App() {
         correcciones: Array.isArray(r.correcciones) ? r.correcciones : [],
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
+        decididoPor: usrMap[r.decidido_por] ? usrMap[r.decidido_por].nombre : '',
         fechaCompra: r.fecha_compra || '',
         creadoEn: r.creado_en || null, decididoEn: r.decidido_en || null,
       };
