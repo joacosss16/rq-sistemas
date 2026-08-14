@@ -4569,6 +4569,9 @@ export default function App() {
   // Hasta qué momento tenemos cada tabla al día (migración 44). Con esto el
   // refresco pide "lo cambiado desde entonces" en vez de bajarlo todo otra vez.
   const sincroRef = useRef({});
+  // Contador de generacion: si dos cargas se solapan (el refresco de 40 s y el
+  // de un clic), la que empezo antes NO puede pisar a la que empezo despues.
+  const epocaRef = useRef(0);
 
   useEffect(() => {
     // Supabase entrega un objeto NUEVO en cada evento (refresco de token,
@@ -4644,8 +4647,13 @@ export default function App() {
       filas.forEach(r => porId.set(r.id, r));
       return { data: [...porId.values()] };
     };
+    const epoca = ++epocaRef.current;
     const cache = dinamicosRef.current;
     const marcas = sincroRef.current;
+    // Las marcas nuevas se acumulan aparte y solo se publican si esta carga
+    // gana. Si se movieran aqui, una carga que acaba descartandose dejaria la
+    // marca adelantada y esas filas no se volverian a pedir NUNCA.
+    const marcasNuevas = {};
     const qDin = DIN.map(([nombre, orden, incremental]) => {
       if (soloTablas && cache && !soloTablas.includes(nombre)) return Promise.resolve(cache[nombre]);
       // Solo se pide "lo cambiado" si ya tenemos la foto completa de antes.
@@ -4656,7 +4664,7 @@ export default function App() {
         // caen en el mismo instante, preferimos repetir una fila (la mezcla la
         // ignora) antes que perderla para siempre.
         const max = r.data.reduce((m, f) => (f.actualizado_en > m ? f.actualizado_en : m), '');
-        if (max) marcas[nombre] = new Date(Date.parse(max) - 2000).toISOString();
+        if (max) marcasNuevas[nombre] = new Date(Date.parse(max) - 2000).toISOString();
         return desde ? mezclar(cache[nombre], r.data) : r;
       });
     });
@@ -4676,8 +4684,12 @@ export default function App() {
       fetchAll(() => supabase.from('proyectos_banco').select('codigo,banco,nro_cuenta')),
     ];
     const [dinR, estR] = await Promise.all([Promise.all(qDin), Promise.all(qEst)]);
+    // Otra carga empezo mientras esta viajaba: la nuestra esta vieja y pisarla
+    // perderia lo que trajo la otra. Se descarta entera, marcas incluidas.
+    if (epoca !== epocaRef.current) return null;
     // guardar el crudo para poder refrescar solo una tabla la próxima vez
     dinamicosRef.current = Object.fromEntries(DIN.map(([n], k) => [n, dinR[k]]));
+    Object.assign(marcas, marcasNuevas);
     const [rqsR, itemR, factR, fitR, salR, preR, solR, siR, cajR, renR, entR, alvR] = dinR;
     let prjR, usrR, matR, provR, famR, pbR;
     if (usarCache) {
@@ -4958,6 +4970,13 @@ export default function App() {
 
   // Cargar perfil + datos al iniciar sesión
   useEffect(() => {
+    // Cambio de persona (o cierre de sesion): se vacia TODA la memoria. Sin
+    // esto, quien entra despues hereda las filas y la marca de agua del
+    // anterior: veria datos que no le tocan y le faltaria casi todo lo suyo,
+    // porque solo se le pediria "lo cambiado desde la ultima vez del otro".
+    dinamicosRef.current = null;
+    sincroRef.current = {};
+    estaticosRef.current = null;
     if (!session) { setUser(null); setDb(null); return; }
     (async () => {
       const { data: perfil, error } = await supabase.from('usuarios').select('*').eq('id', session.user.id).single();

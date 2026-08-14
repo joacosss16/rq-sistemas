@@ -78,6 +78,8 @@ with esperado (migracion, tipo, objeto, detalle) as (values
   ('37 rendicion nace',    'trigger', 'rendiciones_nace_abierta',        'rendiciones'),
   ('38 entregas caja',     'trigger', 'entregas_caja_guarda',            'entregas_caja'),
   ('38 entregas caja',     'columna', 'entregas_caja.monto',             null),
+  ('44 actualizado_en',    'columna', 'rq_items.actualizado_en',         null),
+  ('44 actualizado_en',    'trigger', 'zz_actualizado_en',               'rq_items'),
 
   -- ── valores permitidos que agregaron migraciones nuevas
   ('21 canal anticipado',  'valor',   'rqs_canal_check',                 'ANTICIPADO'),
