@@ -2959,6 +2959,15 @@ function Pagos({ user, db, api }) {
   // haber forma de ponerla. Si no, la rendición de ese día queda con recibido
   // en cero y el arqueo saca todo el efectivo como faltante, para siempre.
   const DIAS_ENTREGAS = 7;
+  // Estado de la jornada de cada entrega. Si la rendicion de ese dia ya se
+  // cerro, la entrega quedo cuadrada: se sigue viendo (Pagos necesita
+  // comprobar que entrego) pero ya no se puede anular -- la base lo rechaza
+  // porque cambiaria un arqueo aprobado, y un boton que no puede cumplir es
+  // peor que no tenerlo.
+  const diaCerrado = (proyecto, fecha) => {
+    const r = rendiciones.find(x => x.proyecto === proyecto && x.fecha === fecha);
+    return r && r.estado !== 'Abierta' ? r.estado : null;
+  };
   const entregasRecientes = entregas
     .filter(e => -diasHoy(e.fecha) <= DIAS_ENTREGAS)
     .sort((a, b) => (a.fecha === b.fecha ? b.n - a.n : (a.fecha < b.fecha ? 1 : -1)));
@@ -3090,9 +3099,12 @@ function Pagos({ user, db, api }) {
             <table className="w-full text-xs">
               <thead><tr>{['Día', 'Obra', 'Monto S/', 'Medio', 'N° operación', 'Entregó', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {entregasRecientes.map(e => (
-                  <tr key={e.id} className={`border-b border-slate-800 ${e.anulMotivo ? 'opacity-60 line-through' : ''}`}>
-                    <td className={`py-2 px-1.5 whitespace-nowrap ${e.fecha === HOY_ISO ? 'text-slate-300' : 'text-slate-500'}`}>{fmt(e.fecha)}</td>
+                {entregasRecientes.map(e => {
+                  const cerrada = diaCerrado(e.proyecto, e.fecha);
+                  return (
+                  <tr key={e.id} className={`border-b border-slate-800 ${e.anulMotivo ? 'opacity-60 line-through' : cerrada ? 'opacity-70' : ''}`}>
+                    <td className={`py-2 px-1.5 whitespace-nowrap ${e.fecha === HOY_ISO ? 'text-slate-300' : 'text-slate-500'}`}>{fmt(e.fecha)}
+                      {cerrada && <div className="text-[9px] text-green-600 no-underline">rendicion {cerrada.toLowerCase()}</div>}</td>
                     <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{e.proyecto}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{e.monto.toFixed(2)}</td>
                     <td className="py-2 px-1.5 text-slate-400">{e.medio}</td>
@@ -3101,9 +3113,13 @@ function Pagos({ user, db, api }) {
                       {e.motivoAtraso && <div className="text-[9px] text-orange-400 no-underline">Registrada después: {e.motivoAtraso}</div>}
                       {e.anulMotivo && <div className="text-[9px] text-red-400 no-underline">Anulada: {e.anulMotivo} ({e.anulPor})</div>}</td>
                     <td className="py-2 px-1.5 no-underline">
-                      {!e.anulMotivo && puede && <AnularBox label="Anular" onConfirm={m => anularEnt(e, m)} />}</td>
+                      {e.anulMotivo ? null
+                        : cerrada ? <span className="text-[9px] text-slate-500 whitespace-nowrap" title="La rendicion de ese dia ya se cerro: anular esta entrega cambiaria un arqueo aprobado.">dia cuadrado</span>
+                        : puede ? <AnularBox label="Anular" onConfirm={m => anularEnt(e, m)} />
+                        : null}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
