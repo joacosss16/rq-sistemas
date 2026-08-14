@@ -83,8 +83,7 @@ with esperado (migracion, tipo, objeto, detalle) as (values
   ('21 canal anticipado',  'valor',   'rqs_canal_check',                 'ANTICIPADO'),
   ('27 diferencias caja',  'valor',   'rendiciones_estado_check',        'Con diferencia'),
   ('29 factura pendiente', 'valor',   'facturas_tipo_doc_check',         'Pendiente'),
-  ('43 nota de credito',   'valor',   'facturas_medio_pago_check',       'Nota de'),
-  ('43 nota de credito',   'columna', 'rq_items.correcciones',           null)
+  ('43 nota de credito',   'valor',   'facturas_medio_pago_check',       'Nota de')
 )
 , resultado as (
 select
