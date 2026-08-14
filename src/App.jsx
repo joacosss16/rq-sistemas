@@ -2944,7 +2944,7 @@ function Pagos({ user, db, api }) {
   const puede = user.rol === 'pagos';
   // Entregas de efectivo del día (migración 38)
   const [fEnt, setFEnt] = useState({
-    proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '', fecha: HOY_ISO,
+    proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '', fecha: HOY_ISO, motivo: '',
   });
   // Últimos días, no solo hoy: si nadie registró la entrega de ayer, tiene que
   // haber forma de ponerla. Si no, la rendición de ese día queda con recibido
@@ -2953,8 +2953,12 @@ function Pagos({ user, db, api }) {
   const entregasRecientes = entregas
     .filter(e => -diasHoy(e.fecha) <= DIAS_ENTREGAS)
     .sort((a, b) => (a.fecha === b.fecha ? b.n - a.n : (a.fecha < b.fecha ? 1 : -1)));
+  // Una entrega con fecha atrasada exige explicar por que no se registro en su
+  // momento. La del dia -- el caso normal, varias veces por jornada -- no.
+  const entregaAtrasada = fEnt.fecha !== HOY_ISO;
   const entregaOk = puede && Number(fEnt.monto) > 0
-    && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0);
+    && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0)
+    && (!entregaAtrasada || fEnt.motivo.trim().length > 0);
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
   const [fSerie, setFSerie] = useState({});   // serie real de las facturas por llegar
@@ -3018,7 +3022,7 @@ function Pagos({ user, db, api }) {
     const r = await api.registrarEntrega(fEnt);
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     setAviso(`Entrega de S/ ${Number(fEnt.monto).toFixed(2)} a ${fEnt.proyecto} registrada${fEnt.fecha !== HOY_ISO ? ` con fecha ${fmt(fEnt.fecha)}` : ''}.`);
-    setFEnt({ ...fEnt, monto: '', numOp: '' });
+    setFEnt({ ...fEnt, monto: '', numOp: '', motivo: '' });
     setTimeout(() => setAviso(''), 5000);
   };
 
@@ -3061,6 +3065,12 @@ function Pagos({ user, db, api }) {
               <input value={fEnt.numOp} disabled={fEnt.medio === 'Efectivo'}
                 onChange={e => setFEnt({ ...fEnt, numOp: e.target.value })}
                 placeholder={fEnt.medio === 'Efectivo' ? '—' : 'del banco'} className={`w-32 ${inputCls} font-mono`} /></div>
+            {entregaAtrasada && (
+              <div><div className="text-[9px] font-bold uppercase text-orange-400 mb-0.5">¿Por qué no se registró ese día? *</div>
+                <input value={fEnt.motivo} onChange={e => setFEnt({ ...fEnt, motivo: e.target.value })}
+                  placeholder="Ej.: se transfirió el viernes y se apuntó el lunes"
+                  className={`w-72 ${inputCls}`} /></div>
+            )}
             <button onClick={entregar} disabled={!entregaOk} className={btnOk(entregaOk)}>Registrar entrega</button>
           </div>
         )}
@@ -3079,6 +3089,7 @@ function Pagos({ user, db, api }) {
                     <td className="py-2 px-1.5 text-slate-400">{e.medio}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-400">{e.numOp || '—'}</td>
                     <td className="py-2 px-1.5 text-slate-400 text-[10px]">{e.entregadoPor}
+                      {e.motivoAtraso && <div className="text-[9px] text-orange-400 no-underline">Registrada después: {e.motivoAtraso}</div>}
                       {e.anulMotivo && <div className="text-[9px] text-red-400 no-underline">Anulada: {e.anulMotivo} ({e.anulPor})</div>}</td>
                     <td className="py-2 px-1.5 no-underline">
                       {!e.anulMotivo && puede && <AnularBox label="Anular" onConfirm={m => anularEnt(e, m)} />}</td>
@@ -3370,6 +3381,7 @@ function Rendiciones({ user, db, api }) {
                     <span className="font-mono text-slate-300">S/ {e.monto.toFixed(2)}</span>
                     {' '}{e.medio.toLowerCase()}{e.numOp ? ` op. ${e.numOp}` : ''}
                     <span className="text-slate-600"> ({e.entregadoPor})</span>
+                    {e.motivoAtraso && <span className="text-orange-400"> · registrada después: {e.motivoAtraso}</span>}
                   </span>
                 ))}
               </div>
@@ -3509,7 +3521,7 @@ function Rendiciones({ user, db, api }) {
 }
 
 function Auditoria({ user, db, api }) {
-  const { facturas, rendiciones, bancoDe, precioProm, salidas, prestamos, levantadas = {} } = db;
+  const { facturas, rendiciones, bancoDe, precioProm, salidas, prestamos, levantadas = {}, entregas = [] } = db;
   const puede = user.rol === 'gerente';
   const [obraCierre, setObraCierre] = useState('');
 
@@ -3598,6 +3610,21 @@ function Auditoria({ user, db, api }) {
     if (vencidas.length) {
       const monto = vencidas.reduce((a, f) => a + f.monto, 0);
       alertas.push({ clave: `vencidas:${vencidas.length}:${monto.toFixed(2)}`, tipo: 'Facturas vencidas sin pagar', detalle: `${vencidas.length} factura(s) por S/ ${monto.toFixed(2)}; la más antigua: ${vencidas.sort((a, b) => (vencimientoDe(a) < vencimientoDe(b) ? -1 : 1))[0].serie} (venció ${fmt(vencimientoDe(vencidas[0]))})` });
+    }
+  }
+  {
+    // Entregas de efectivo apuntadas despues de su dia. Es legitimo, pero es la
+    // excepcion: si se vuelve costumbre -- sobre todo en efectivo, que no lo
+    // respalda ningun extracto -- gerencia tiene que verlo sin buscarlo.
+    const tarde = entregas.filter(e => !e.anulMotivo && e.motivoAtraso);
+    if (tarde.length) {
+      const enEfectivo = tarde.filter(e => e.medio === 'Efectivo').length;
+      const monto = tarde.reduce((a, e) => a + e.monto, 0);
+      alertas.push({
+        clave: `entregas-tarde:${tarde.length}:${monto.toFixed(2)}`,
+        tipo: 'Entregas registradas después de su día',
+        detalle: `${tarde.length} entrega(s) por S/ ${monto.toFixed(2)}${enEfectivo ? `, ${enEfectivo} de ellas EN EFECTIVO (sin respaldo bancario)` : ''}. Ej.: ${tarde.slice(0, 3).map(e => `${e.proyecto} ${fmt(e.fecha)} — ${e.motivoAtraso}`).join(' · ')}`,
+      });
     }
   }
   pagadas.filter(f => f.monto > UMBRAL_MONTO_INUSUAL)
@@ -4901,6 +4928,7 @@ export default function App() {
       fecha: e.fecha, monto: Number(e.monto), medio: e.medio,
       numOp: e.num_operacion || '',
       entregadoPor: usrMap[e.entregado_por] ? usrMap[e.entregado_por].nombre : '',
+      motivoAtraso: e.motivo_atraso || '',
       anulMotivo: e.anulacion ? e.anulacion.motivo : '',
       anulPor: e.anulacion ? e.anulacion.por : '',
       anulFecha: e.anulacion ? e.anulacion.fecha : '',
@@ -5139,12 +5167,14 @@ export default function App() {
       reabrirAlerta: clave => wrap(async () =>
         await supabase.from('alertas_levantadas').delete().eq('clave', clave),
         ['alertas_levantadas']),
-      registrarEntrega: ({ proyecto, monto, medio, numOp, fecha }) => wrap(async () => {
+      registrarEntrega: ({ proyecto, monto, medio, numOp, fecha, motivo }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('entregas_caja').insert({
           proyecto: cod(proyecto), monto: Number(monto), medio,
           num_operacion: medio === 'Efectivo' ? null : numOp.trim(),
           fecha: fecha || HOY_ISO, entregado_por: u.id,
+          // Solo cuando la fecha no es hoy; la base lo exige en ese caso.
+          motivo_atraso: (fecha && fecha !== HOY_ISO) ? (motivo || '').trim() : null,
         });
       }, ['entregas_caja']),
       anularEntrega: (id, motivo) => wrap(async () =>
