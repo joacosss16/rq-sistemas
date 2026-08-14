@@ -2968,9 +2968,15 @@ function Pagos({ user, db, api }) {
     const r = rendiciones.find(x => x.proyecto === proyecto && x.fecha === fecha);
     return r && r.estado !== 'Abierta' ? r.estado : null;
   };
+  // Por defecto solo lo que sigue vivo: una entrega de un dia ya cerrado esta
+  // cuadrada y no le queda nada por hacer a Pagos. Se pueden ver con el enlace.
+  const [verCuadradas, setVerCuadradas] = useState(false);
   const entregasRecientes = entregas
     .filter(e => -diasHoy(e.fecha) <= DIAS_ENTREGAS)
+    .filter(e => verCuadradas || !diaCerrado(e.proyecto, e.fecha))
     .sort((a, b) => (a.fecha === b.fecha ? b.n - a.n : (a.fecha < b.fecha ? 1 : -1)));
+  const nCuadradas = entregas.filter(e => -diasHoy(e.fecha) <= DIAS_ENTREGAS
+    && diaCerrado(e.proyecto, e.fecha)).length;
   // Una entrega con fecha atrasada exige explicar por que no se registro en su
   // momento. La del dia -- el caso normal, varias veces por jornada -- no.
   const entregaAtrasada = fEnt.fecha !== HOY_ISO;
@@ -3059,7 +3065,13 @@ function Pagos({ user, db, api }) {
           día, y lo que reciba es contra lo que se cuadra el cierre. */}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">
-          Entregas de efectivo al comprador · últimos {DIAS_ENTREGAS} días</div>
+          Entregas de efectivo al comprador · días sin cerrar
+          {nCuadradas > 0 && (
+            <button onClick={() => setVerCuadradas(!verCuadradas)}
+              className="ml-2 text-[10px] font-bold uppercase text-sky-400 hover:text-sky-300">
+              {verCuadradas ? '· ocultar las cuadradas' : `· ver ${nCuadradas} ya cuadrada(s)`}
+            </button>
+          )}</div>
         <div className="text-[11px] text-slate-500 mb-3">
           Cada vez que le entregas dinero, regístralo aquí. Al cerrar el día, administración cuenta lo que devuelve y lo compara contra estas entregas menos lo gastado.</div>
         {puede && (
@@ -3093,7 +3105,9 @@ function Pagos({ user, db, api }) {
           </div>
         )}
         {entregasRecientes.length === 0 ? (
-          <div className="text-center py-4 text-slate-500 text-sm">Sin entregas registradas en los últimos {DIAS_ENTREGAS} días.</div>
+          <div className="text-center py-4 text-slate-500 text-sm">
+            {nCuadradas > 0 ? 'Todo cuadrado: no queda ninguna entrega de un día abierto.'
+                            : `Sin entregas registradas en los últimos ${DIAS_ENTREGAS} días.`}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
