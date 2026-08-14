@@ -3341,6 +3341,15 @@ function Rendiciones({ user, db, api }) {
                historica: c.historica, faltaEntrega: c.faltaEntrega };
     })
     .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  // Una rendicion aprobada ya no requiere ninguna accion: se archiva fuera de la
+  // vista de trabajo y se consulta con un clic. Lo que queda arriba es lo que
+  // hay que atender: abierta (falta cerrarla), observada (falta corregirla) o
+  // con diferencia (esperando a gerencia).
+  const cerrada = r => r.estado === 'Aprobada';
+  const pendientes = lista.filter(r => !cerrada(r));
+  const archivadas = lista.filter(cerrada);
+  const [verArchivadas, setVerArchivadas] = useState(false);
+  const mostradas = verArchivadas ? lista : pendientes;
 
   const cerrarArqueo = async (r, contado, diferencia, excede, motivo) => {
     const res = await api.cerrarConArqueo(r.id, { contado, diferencia, excede, motivo, nombre: user.nombre });
@@ -3385,7 +3394,15 @@ function Rendiciones({ user, db, api }) {
     <div>
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Rendiciones de caja chica · cierre del día por obra</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+            Rendiciones de caja chica · {pendientes.length} por atender
+            {archivadas.length > 0 && (
+              <button onClick={() => setVerArchivadas(!verArchivadas)}
+                className="ml-2 text-[10px] font-bold uppercase text-sky-400 hover:text-sky-300">
+                {verArchivadas ? '· ocultar las cerradas' : `· ver ${archivadas.length} ya cerrada(s)`}
+              </button>
+            )}
+          </div>
           <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
         </div>
         {!puede && (
@@ -3406,9 +3423,12 @@ function Rendiciones({ user, db, api }) {
           )
         )}
         <Aviso msg={aviso} />
-        {lista.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Sin rendiciones{proy !== 'TODOS' ? ' en ' + proy : ''}. Se crean solas cuando Compras registra la primera factura en efectivo del día.</div>
-        ) : lista.map(r => (
+        {mostradas.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">
+            {archivadas.length > 0
+              ? 'Todo al día: no queda ninguna rendición por cerrar.'
+              : `Sin rendiciones${proy !== 'TODOS' ? ' en ' + proy : ''}. Se abren solas al registrar una entrega de efectivo o la primera compra en efectivo del día.`}</div>
+        ) : mostradas.map(r => (
           <div key={r.id} className="mb-3 border border-slate-800 rounded p-3">
             <div className="flex items-center gap-2.5 mb-2 flex-wrap">
               <b className="text-sm text-slate-100">{r.proyecto}</b>
