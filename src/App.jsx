@@ -13,7 +13,13 @@ let PROYECTOS = [];
 let ALMACENEROS = {};
 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
-const FORMAS_PAGO = ['Contado', 'Transferencia', 'Crédito 15 días', 'Crédito 30 días'];
+// La FORMA dice CUANDO se paga; el MEDIO (mas abajo) dice CON QUE. Antes esta
+// lista mezclaba los dos ejes -- tenia 'Contado' y 'Transferencia' como si fueran
+// alternativas del mismo tipo -- y ademas las dos hacian lo mismo: vencer hoy.
+// 'Inmediato' las reemplaza porque no se confunde con "en efectivo": pagar en el
+// acto por transferencia tambien es inmediato. Las facturas viejas guardadas como
+// 'Contado' o 'Transferencia' siguen venciendo el mismo dia, igual que antes.
+const FORMAS_PAGO = ['Inmediato', 'Crédito 15 días', 'Crédito 30 días'];
 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['apr', 'Aprobaciones'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
@@ -1710,7 +1716,7 @@ function Compras({ user, db, api, modo }) {
     }
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
-      monto: Number(f.monto), forma: f.compromiso ? 'Crédito' : f.efectivo ? 'Contado' : f.forma, proyecto: i.proyecto,
+      monto: Number(f.monto), forma: f.compromiso ? 'Crédito' : f.efectivo ? 'Inmediato' : f.forma, proyecto: i.proyecto,
       efectivo: !!f.efectivo, compromiso: !!f.compromiso, pendiente: !!f.pendiente,
       medio: f.pendiente && !f.efectivo ? f.medio : null,
       banco: f.pendiente && !f.efectivo ? f.banco.trim() : null,
