@@ -3333,7 +3333,7 @@ function Rendiciones({ user, db, api }) {
     if (res.error) { setAviso('⚠ ' + res.error); return; }
     const o2 = { ...obs }; delete o2[r.id]; setObs(o2);
     setAviso(estado === 'Aprobada'
-      ? `Rendición de ${r.proyecto} (${fmt(r.fecha)}) aprobada. La reposición de S/ ${r.total.toFixed(2)} pasó a la cola del área de Pagos.`
+      ? `Rendición de ${r.proyecto} (${fmt(r.fecha)}) aprobada: se gastaron S/ ${r.total.toFixed(2)} y el vuelto quedó contado.`
       : `Rendición de ${r.proyecto} observada; coordina la corrección con ${r.responsable}.`);
   };
 
@@ -3474,12 +3474,24 @@ function Rendiciones({ user, db, api }) {
                 )}
               </div>
             )}
+            {/* El campo de observación aparece solo al pulsar Observar, no todo el
+                rato: observar es la excepción, y un campo de texto siempre abierto
+                es ruido en la pantalla que se usa todos los días. Sigue estando
+                disponible aunque la caja cuadre — se observa por una factura que
+                falta o un comprobante ilegible, no solo por un descuadre. */}
             {r.estado === 'Abierta' && puede && (
-              <div className="flex gap-2 items-start flex-wrap">
-                <input value={obs[r.id] || ''} onChange={e => setObs({ ...obs, [r.id]: e.target.value })}
-                  placeholder="Motivo de observación (obligatorio para observar)" className={`${inputCls}`} style={{ minWidth: '260px' }} />
-                <button onClick={() => resolver(r, 'Observada')} className={btnRojo}>Observar</button>
-              </div>
+              obs[r.id] === undefined ? (
+                <button onClick={() => setObs({ ...obs, [r.id]: '' })} className={btnRojo}>Observar</button>
+              ) : (
+                <div className="flex gap-2 items-start flex-wrap">
+                  <input autoFocus value={obs[r.id]} onChange={e => setObs({ ...obs, [r.id]: e.target.value })}
+                    placeholder="¿Qué hay que corregir?" className={`${inputCls}`} style={{ minWidth: '260px' }} />
+                  <button onClick={() => resolver(r, 'Observada')} disabled={!obs[r.id].trim()}
+                    className={obs[r.id].trim() ? btnRojo : 'px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-600 cursor-not-allowed'}>Confirmar observación</button>
+                  <button onClick={() => { const o2 = { ...obs }; delete o2[r.id]; setObs(o2); }}
+                    className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400">Cancelar</button>
+                </div>
+              )
             )}
             {r.estado === 'Observada' && (
               <div>
@@ -3515,10 +3527,11 @@ function Rendiciones({ user, db, api }) {
                     {r.observacion && <span className="text-slate-500"> · se observó: {r.observacion}</span>}
                   </div>
                 )}
-                Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)} ·
-                {r.repOp
-                  ? ` repuesta: ${[(bancoDe[r.proyecto] || {}).banco, `op. ${r.repOp}`].filter(Boolean).join(' ')} (${fmt(r.repFecha)}, ${r.repuestoPor})`
-                  : ' reposición pendiente en la cola del área de Pagos'}
+                {/* Ya no se habla de reposición: con el modelo de entregas (mig. 38)
+                    el comprador devuelve el vuelto y no hay fondo que reponer. Las
+                    rendiciones viejas sí conservan su reposición y se siguen viendo. */}
+                Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)}
+                {r.repOp && ` · repuesta (modelo anterior): ${[(bancoDe[r.proyecto] || {}).banco, `op. ${r.repOp}`].filter(Boolean).join(' ')} (${fmt(r.repFecha)}, ${r.repuestoPor})`}
               </div>
             )}
           </div>
