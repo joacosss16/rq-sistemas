@@ -33,8 +33,12 @@ function vencimientoDe(f) {
   d.setDate(d.getDate() + (f.forma === 'Crédito 15 días' ? 15 : f.forma === 'Crédito 30 días' ? 30 : 0));
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta'];
-const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher' };
+// 'Nota de crédito' no mueve dinero del banco: el proveedor cancela la deuda con
+// un documento. Por eso no pide banco (pide la serie de la nota) y queda fuera
+// del CSV de conciliación bancaria, donde solo debe ir lo que movió plata.
+const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta', 'Nota de crédito'];
+const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher', 'Nota de crédito': 'Serie de la nota' };
+const SIN_BANCO = m => m === 'Nota de crédito';
 
 const canalClases = {
   URGENTE: 'bg-red-950 text-red-400 border-red-800',
@@ -2994,16 +2998,18 @@ function Pagos({ user, db, api }) {
     const p = getP(f.id);
     const banco = (bancoDe[f.proyecto] || {}).banco || '';
     const esComp = f.tipoDoc === 'Compromiso';
-    if (!p.medio || !p.op.trim() || !p.fecha || !banco || (esComp && !(p.serieReal || '').trim())) return;
+    if (!p.medio || !p.op.trim() || !p.fecha || (!banco && !SIN_BANCO(p.medio))
+        || (esComp && !(p.serieReal || '').trim())) return;
     const r = await api.pagarFactura(f.id, {
-      medio: p.medio, banco, op: p.op.trim(), fecha: p.fecha,
+      medio: p.medio, banco: SIN_BANCO(p.medio) ? null : banco, op: p.op.trim(), fecha: p.fecha,
       serieReal: esComp ? p.serieReal.trim() : null,
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fPago }; delete f2[f.id]; setFPago(f2);
+    const detalle = SIN_BANCO(p.medio) ? `${p.medio} ${p.op}` : `${p.medio} · ${banco} · ${p.op}`;
     setAviso(esComp
-      ? `Compromiso ${f.serie} pagado y convertido en factura ${p.serieReal.trim().toUpperCase()} (${p.medio} · ${banco} · ${p.op}).`
-      : `Factura ${f.serie} pagada (${p.medio} · ${banco} · ${p.op}).`);
+      ? `Compromiso ${f.serie} pagado y convertido en factura ${p.serieReal.trim().toUpperCase()} (${detalle}).`
+      : `Factura ${f.serie} saldada (${detalle}).`);
     setTimeout(() => setAviso(''), 5000);
   };
 
@@ -3118,7 +3124,9 @@ function Pagos({ user, db, api }) {
                   const atrasada = diasHoy(venc) < 0;
                   const bancoObra = (bancoDe[f.proyecto] || {}).banco || '—';
                   const esComp = f.tipoDoc === 'Compromiso';
-                  const listo = puede && p.medio && p.op.trim() && p.fecha && bancoObra !== '—' && (!esComp || (p.serieReal || '').trim());
+                  const listo = puede && p.medio && p.op.trim() && p.fecha
+                    && (bancoObra !== '—' || SIN_BANCO(p.medio))
+                    && (!esComp || (p.serieReal || '').trim());
                   return (
                     <tr key={f.n} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
@@ -3624,7 +3632,10 @@ function Auditoria({ user, db, api }) {
   const csvSemana = () => {
     const cab = ['Obra', 'Banco', 'Cuenta', 'Medio', 'N_Operacion', 'Factura', 'Proveedor', 'RUC', 'Monto', 'F_Pago', 'Pago_Por', 'Conciliada'];
     const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const filas = enSemana.map(f => [f.proyecto, f.banco || 'EFECTIVO', (bancoDe[f.proyecto] || {}).cuenta || '', f.medio, f.numOp || '', f.serie, f.prov, f.ruc, f.monto.toFixed(2), f.fechaPago, f.pagadoPor, f.conciliada ? 'SI' : 'NO'].map(esc).join(','));
+    // Fuera las saldadas con nota de credito: no movieron dinero del banco y
+    // buscarlas en el extracto es perseguir un movimiento que no existe.
+    const filas = enSemana.filter(f => !SIN_BANCO(f.medio))
+      .map(f => [f.proyecto, f.banco || 'EFECTIVO', (bancoDe[f.proyecto] || {}).cuenta || '', f.medio, f.numOp || '', f.serie, f.prov, f.ruc, f.monto.toFixed(2), f.fechaPago, f.pagadoPor, f.conciliada ? 'SI' : 'NO'].map(esc).join(','));
     const csv = '﻿' + cab.join(',') + '\n' + filas.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
