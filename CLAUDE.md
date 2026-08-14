@@ -96,6 +96,10 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
    - Fase B (contable, con Yheyson): valorización de saldos de Huancaro, guía de remisión PDF con firmas (Fernando entrega / Frank transporta / obra recibe), liquidación intercompany entre las empresas adjuntas **Gold y Majser**.
 Nuevos RQs: piso/nivel obligatorio (lista cerrada), fecha necesitada única por RQ (Compras gestiona por ítem), PDF solo cuando todos los ítems están decididos y solo con aprobados.
 
+### Punto extra (idea del dueño, 14 ago 2026): el Registro de Compras para SUNAT
+El sistema ya guarda, sin habérselo propuesto, casi todo lo que exige el Registro de Compras: serie, RUC y razón social del proveedor, fecha de emisión, monto, forma de pago, medio, N° de operación y obra. **Faltaría** el desglose de IGV (base imponible / IGV / total), el tipo de comprobante (factura, boleta, nota de crédito), la fecha de vencimiento del comprobante y la **detracción** cuando aplique. Con eso, Yheyson podría exportar el registro en vez de re-digitarlo desde los PDFs.
+**No tocar hasta terminar el piloto** (decisión del dueño). Va junto con los cinco casos de compra pendientes —detracción, pago parcial, un pago para varias facturas, anticipo y canje por letra— y con la nota de crédito / saldo a favor, porque son el mismo bloque contable.
+
 **Pendientes de Lucía (lunes):** equivalencias caja→unidades de los ~29 materiales "CAJA" (y PQT/ROLLO/PAR), su hoja de control de almacenes (inventarios iniciales por obra, ideal con precios), confirmar nombres de familias 62/73/91, y CONTROL_RQ_LUZ.xlsx (255 proveedores). Falta crear usuario del rol `pagos` en Auth + tabla usuarios.
 
 ## Esquema Supabase propuesto (siguiente tarea)
