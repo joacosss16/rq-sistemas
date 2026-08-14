@@ -2986,6 +2986,7 @@ function Pagos({ user, db, api }) {
   const [proy, setProy] = useState('TODOS');
   const [fPago, setFPago] = useState({});
   const [fSerie, setFSerie] = useState({});   // serie real de las facturas por llegar
+  const [verPagadas, setVerPagadas] = useState(false);   // lo hecho, plegado por defecto
   const [aviso, setAviso] = useState('');
   // Quien compró no cierra su propio documento: lo digita administración
   const puedeSerie = user.rol === 'administracion' || user.rol === 'pagos' || user.rol === 'gerente';
@@ -3262,11 +3263,24 @@ function Pagos({ user, db, api }) {
           entregas del día (arriba) y sale por el vuelto que el comprador devuelve
           al cerrar, que administración cuenta al recibirlo. */}
 
+      {/* Lo pagado ya no requiere ninguna accion de Pagos: se consulta cuando
+          hace falta, no ocupa la pantalla de trabajo. Con 210 facturas encima,
+          lo que si hay que pagar quedaba enterrado debajo. */}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-          Facturas pagadas · {pagadas.length}{pagadas.length > 0 ? ` · S/ ${pagadas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+        <div className="flex items-center gap-2 flex-wrap mb-3">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+            Facturas pagadas · {pagadas.length}{pagadas.length > 0 ? ` · S/ ${pagadas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : ''}</div>
+          {pagadas.length > 0 && (
+            <button onClick={() => setVerPagadas(!verPagadas)}
+              className="text-[10px] font-bold uppercase text-sky-400 hover:text-sky-300">
+              {verPagadas ? '· ocultar' : '· ver el detalle'}
+            </button>
+          )}
+        </div>
         {pagadas.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Aún no hay facturas pagadas{proy !== 'TODOS' ? ' en ' + proy : ''}.</div>
+        ) : !verPagadas ? (
+          <div className="text-slate-500 text-[11px]">Ya no requieren ninguna acción. Pulsa “ver el detalle” si necesitas consultar alguna.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
