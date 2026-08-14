@@ -4566,6 +4566,9 @@ export default function App() {
   const dbRef = useRef(null);
   const estaticosRef = useRef(null);   // cache de tablas casi-estáticas (catálogo, maestros)
   const dinamicosRef = useRef(null);   // último crudo de las transaccionales, para refrescar solo lo que cambió
+  // Hasta qué momento tenemos cada tabla al día (migración 44). Con esto el
+  // refresco pide "lo cambiado desde entonces" en vez de bajarlo todo otra vez.
+  const sincroRef = useRef({});
 
   useEffect(() => {
     // Supabase entrega un objeto NUEVO en cada evento (refresco de token,
@@ -4605,25 +4608,58 @@ export default function App() {
     // Transaccional. Tras una acción solo se vuelven a traer las tablas que
     // esa acción pudo tocar; el resto sale de la caché. Antes cada clic
     // rebajaba las 10 tablas enteras (~840 KB) y por eso se sentía lento.
+    // Tabla, orden, y si admite carga INCREMENTAL (migración 44).
+    // Incremental = "dame solo lo que cambió desde la última vez". Solo vale
+    // para tablas de las que NUNCA se borran filas: una fila borrada no puede
+    // llegar como cambio, el navegador no se enteraría jamás. Por eso
+    // factura_items (anular una factura borra sus líneas), stock_inicial y
+    // cajas_chicas (clave compuesta, sin `id`) y alertas_levantadas (se borran
+    // al reabrirlas) se siguen trayendo enteras. Pesan poco.
     const DIN = [
-      ['rqs', () => supabase.from('rqs').select('*').order('numero')],
-      ['rq_items', () => supabase.from('rq_items').select('*').order('creado_en').order('id')],
-      ['facturas', () => supabase.from('facturas').select('*').order('numero')],
-      ['factura_items', () => supabase.from('factura_items').select('*').order('factura_id').order('rq_item_id')],
-      ['salidas', () => supabase.from('salidas').select('*').order('numero')],
-      ['prestamos', () => supabase.from('prestamos').select('*').order('numero')],
-      ['solicitudes_material', () => supabase.from('solicitudes_material').select('*').order('numero')],
-      ['stock_inicial', () => supabase.from('stock_inicial').select('*').order('proyecto').order('codigo')],
-      ['cajas_chicas', () => supabase.from('cajas_chicas').select('*').order('proyecto')],
-      ['rendiciones', () => supabase.from('rendiciones').select('*').order('numero')],
-      ['entregas_caja', () => supabase.from('entregas_caja').select('*').order('numero')],
-      ['alertas_levantadas', () => supabase.from('alertas_levantadas').select('*')],
+      ['rqs',                  ['numero'],                   true],
+      ['rq_items',             ['creado_en', 'id'],          true],
+      ['facturas',             ['numero'],                   true],
+      ['factura_items',        ['factura_id', 'rq_item_id'], false],
+      ['salidas',              ['numero'],                   true],
+      ['prestamos',            ['numero'],                   true],
+      ['solicitudes_material', ['numero'],                   true],
+      ['stock_inicial',        ['proyecto', 'codigo'],       false],
+      ['cajas_chicas',         ['proyecto'],                 false],
+      ['rendiciones',          ['numero'],                   true],
+      ['entregas_caja',        ['numero'],                   true],
+      ['alertas_levantadas',   [],                           false],
     ];
+    const crearQ = (tabla, orden, desde) => () => {
+      let q = supabase.from(tabla).select('*');
+      if (desde) q = q.gt('actualizado_en', desde);
+      orden.forEach(o => { q = q.order(o); });
+      return q;
+    };
+    // Mezcla lo que llegó con lo que ya había, por id. Las filas que no
+    // cambiaron se quedan donde estaban; las nuevas van al final.
+    const mezclar = (previo, filas) => {
+      if (!previo || !previo.data) return { data: filas };
+      if (!filas.length) return previo;
+      const porId = new Map(previo.data.map(r => [r.id, r]));
+      filas.forEach(r => porId.set(r.id, r));
+      return { data: [...porId.values()] };
+    };
     const cache = dinamicosRef.current;
-    const qDin = DIN.map(([nombre, q]) =>
-      (soloTablas && cache && !soloTablas.includes(nombre))
-        ? Promise.resolve(cache[nombre])
-        : fetchAll(q));
+    const marcas = sincroRef.current;
+    const qDin = DIN.map(([nombre, orden, incremental]) => {
+      if (soloTablas && cache && !soloTablas.includes(nombre)) return Promise.resolve(cache[nombre]);
+      // Solo se pide "lo cambiado" si ya tenemos la foto completa de antes.
+      const desde = incremental && cache && cache[nombre] && cache[nombre].data ? marcas[nombre] : null;
+      return fetchAll(crearQ(nombre, orden, desde)).then(r => {
+        if (r.error) return r;
+        // La marca de agua se retrasa 2 segundos a propósito: si dos escrituras
+        // caen en el mismo instante, preferimos repetir una fila (la mezcla la
+        // ignora) antes que perderla para siempre.
+        const max = r.data.reduce((m, f) => (f.actualizado_en > m ? f.actualizado_en : m), '');
+        if (max) marcas[nombre] = new Date(Date.parse(max) - 2000).toISOString();
+        return desde ? mezclar(cache[nombre], r.data) : r;
+      });
+    });
     // Casi-estático: catálogo + maestros. Se trae una vez (o en refresco completo);
     // el auto-refresco reusa la caché para no volver a bajar los 1,740 materiales.
     const usarCache = soloDinamicos && estaticosRef.current;
