@@ -27,7 +27,7 @@ const TABS_POR_ROL = {
   residente: [['res', 'Mis requerimientos'], ['apr', 'Aprobaciones'], ['sto', 'Mi almacén'], ['his', 'Historial']],
   almacen: [['alm', 'Mi almacén']],
   pagos: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
-  administracion: [['ren', 'Rendiciones']],
+  administracion: [['pag', 'Pagos'], ['ren', 'Rendiciones']],
   comprador: [['dia', 'Compras del día'], ['fac', 'Facturar'], ['ren', 'Rendiciones']],
 };
 const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren', comprador: 'dia' };
@@ -2947,7 +2947,10 @@ function ComprasDelDia({ db, api }) {
 
 function Pagos({ user, db, api }) {
   const { facturas, rendiciones, bancoDe, entregas = [] } = db;
-  const puede = user.rol === 'pagos';
+  // Mónica lleva una sola cuenta (rol administracion) y hace las dos cosas.
+  // Se compensa haciéndolo visible: Auditoría avisa cuando la misma persona
+  // registró las entregas de un día y además cerró el arqueo de esa jornada.
+  const puede = user.rol === 'pagos' || user.rol === 'administracion';
   // Entregas de efectivo del día (migración 38)
   const [fEnt, setFEnt] = useState({
     proyecto: (PROYECTOS[0] || ['', ''])[1], monto: '', medio: 'Transferencia', numOp: '', fecha: HOY_ISO, motivo: '',
@@ -3630,6 +3633,24 @@ function Auditoria({ user, db, api }) {
         clave: `entregas-tarde:${tarde.length}:${monto.toFixed(2)}`,
         tipo: 'Entregas registradas después de su día',
         detalle: `${tarde.length} entrega(s) por S/ ${monto.toFixed(2)}${enEfectivo ? `, ${enEfectivo} de ellas EN EFECTIVO (sin respaldo bancario)` : ''}. Ej.: ${tarde.slice(0, 3).map(e => `${e.proyecto} ${fmt(e.fecha)} — ${e.motivoAtraso}`).join(' · ')}`,
+      });
+    }
+  }
+  {
+    // Sin separación de funciones: la misma persona puso el efectivo en manos
+    // del comprador y después contó y aprobó lo que devolvió. No se puede
+    // evitar con una sola persona de administración, pero sí se puede mirar.
+    const mismaMano = rendiciones.filter(r => r.estado === 'Aprobada' && r.aprobadoPor)
+      .map(r => ({ r, ents: entregas.filter(e => !e.anulMotivo
+        && e.proyecto === r.proyecto && e.fecha === r.fecha && e.entregadoPor === r.aprobadoPor) }))
+      .filter(x => x.ents.length > 0);
+    if (mismaMano.length) {
+      const quien = [...new Set(mismaMano.map(x => x.r.aprobadoPor))].join(', ');
+      const monto = mismaMano.reduce((a, x) => a + x.ents.reduce((b, e) => b + e.monto, 0), 0);
+      alertas.push({
+        clave: `misma-mano:${mismaMano.length}:${monto.toFixed(2)}`,
+        tipo: 'Entregó y aprobó la misma persona',
+        detalle: `${quien}: en ${mismaMano.length} jornada(s) entregó el efectivo (S/ ${monto.toFixed(2)}) y además cerró el arqueo de ese día. Es lo esperable con una sola persona de administración; conviene revisar el arqueo de esos días con más detalle.`,
       });
     }
   }
