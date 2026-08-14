@@ -411,9 +411,9 @@ function FiltroProyecto({ value, onChange, todos, excluir }) {
   );
 }
 
-function FechaInput({ value, onChange, className, min, disabled, inputRef, onKeyDown }) {
+function FechaInput({ value, onChange, className, min, max, disabled, inputRef, onKeyDown }) {
   return (
-    <input type="date" value={value} onChange={onChange} min={min} disabled={disabled}
+    <input type="date" value={value} onChange={onChange} min={min} max={max} disabled={disabled}
       ref={inputRef} onKeyDown={onKeyDown}
       onClick={e => { try { e.target.showPicker(); } catch (_) {} }}
       className={`${className} ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`} />
@@ -3045,7 +3045,11 @@ function Pagos({ user, db, api }) {
             <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Obra</div>
               <FiltroProyecto value={fEnt.proyecto} onChange={v => setFEnt({ ...fEnt, proyecto: v })} /></div>
             <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Día de la entrega</div>
-              <FechaInput value={fEnt.fecha} onChange={e => setFEnt({ ...fEnt, fecha: e.target.value })} className={`w-32 ${inputCls}`} /></div>
+              {/* Se permiten dias anteriores (si nadie registro la de ayer hay que
+                  poder ponerla) pero no futuros: no se entrega dinero manana.
+                  La base ademas rechaza los dias con la rendicion ya cerrada. */}
+              <FechaInput value={fEnt.fecha} max={HOY_ISO}
+                onChange={e => setFEnt({ ...fEnt, fecha: e.target.value })} className={`w-32 ${inputCls}`} /></div>
             <div><div className="text-[9px] font-bold uppercase text-slate-500 mb-0.5">Monto S/</div>
               <input type="number" step="any" min="0" value={fEnt.monto}
                 onChange={e => setFEnt({ ...fEnt, monto: e.target.value })} className={`w-28 ${inputCls} font-mono`} /></div>
