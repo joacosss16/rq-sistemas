@@ -1688,6 +1688,10 @@ function Compras({ user, db, api, modo }) {
     // dice a Pagos cuándo vence. Antes se guardaba 'Crédito' pelado y vencía el
     // mismo día, así que todos los compromisos nacían en rojo.
     if (k === 'compromiso') f.forma = v ? (esCredito(f.forma) ? f.forma : 'Crédito 30 días') : FORMAS_PAGO[0];
+    // Si ya pagaste no hay plazo que pactar: el dinero ya salió. Ofrecer aquí
+    // "Crédito 30 días" era un callejón sin salida — el servidor la rechaza
+    // diciendo que eso sería un compromiso, y nadie entiende por qué.
+    if (k === 'pendiente' && v) f.forma = 'Inmediato';
     setFFact({ ...fFact, [id]: f });
   };
 
@@ -1754,7 +1758,8 @@ function Compras({ user, db, api, modo }) {
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
       monto: Number(f.monto),
-      forma: f.compromiso ? (esCredito(f.forma) ? f.forma : 'Crédito 30 días') : f.efectivo ? 'Inmediato' : f.forma,
+      forma: f.compromiso ? (esCredito(f.forma) ? f.forma : 'Crédito 30 días')
+           : (f.efectivo || f.pendiente) ? 'Inmediato' : f.forma,
       proyecto: i.proyecto,
       efectivo: !!f.efectivo, compromiso: !!f.compromiso, pendiente: !!f.pendiente,
       medio: f.pendiente && !f.efectivo ? f.medio : null,
@@ -2129,7 +2134,7 @@ function Compras({ user, db, api, modo }) {
                             <select value={esCredito(ff.forma) ? ff.forma : 'Crédito 30 días'} onChange={e => setFF(i.id, 'forma', e.target.value)}
                               onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
                               {PLAZOS_CREDITO.map(x => <option key={x}>{x}</option>)}</select>
-                          ) : !ff.efectivo && (
+                          ) : !ff.efectivo && !ff.pendiente && (
                             <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
                               {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
                           )}
