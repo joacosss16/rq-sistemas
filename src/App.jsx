@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import { supabase, ENTORNO, ES_PRODUCCION } from './supabaseClient';
 import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from './caja';
+import { esDelDia } from './fechas';
 
 const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 const HOY_ISO = `${HOY.getFullYear()}-${String(HOY.getMonth() + 1).padStart(2, '0')}-${String(HOY.getDate()).padStart(2, '0')}`;
@@ -5096,9 +5097,13 @@ export default function App() {
         decididoPor: usrMap[r.decidido_por] ? usrMap[r.decidido_por].nombre : '',
         // "yo me encargo" (migración 50). Solo vale el mismo día: al siguiente
         // vuelve a estar libre sin que nadie tenga que soltarlo.
-        tomadoPor: (r.tomado_en || '').slice(0, 10) === HOY_ISO && usrMap[r.tomado_por]
+        // La hora se convierte al reloj de quien mira antes de comparar: la base
+        // guarda en UTC y Cusco va 5 horas por detrás, así que a partir de las
+        // 19:00 el texto guardado ya lleva la fecha del día siguiente. Leerle el
+        // prefijo hacía desaparecer todo lo que Frank tomaba al cerrar su jornada.
+        tomadoPor: esDelDia(r.tomado_en, HOY_ISO) && usrMap[r.tomado_por]
           ? usrMap[r.tomado_por].nombre : '',
-        tomadoPorId: (r.tomado_en || '').slice(0, 10) === HOY_ISO ? r.tomado_por : null,
+        tomadoPorId: esDelDia(r.tomado_en, HOY_ISO) ? r.tomado_por : null,
         fechaCompra: r.fecha_compra || '',
         creadoEn: r.creado_en || null, decididoEn: r.decidido_en || null,
       };
