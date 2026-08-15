@@ -380,7 +380,12 @@ function imprimirConteo({ obra, corte, filas }) {
 // La clave incluye el CONTENIDO: si mañana aparece un caso nuevo (otro ítem
 // anulado, otra obra bloqueada), el aviso se vuelve a abrir solo. Dar por
 // leído significa "ya vi esto", no "no me avises nunca más".
-function AlertaCerrable({ id, tono = 'rojo', resumen, children }) {
+// `desaparece`: para avisos INFORMATIVOS, que una vez vistos ya no hacen falta —
+// lo anulado se sigue viendo en su sitio. Sin esa marca, el aviso se colapsa a una
+// línea que se puede reabrir, que es lo correcto cuando la situación sigue activa
+// y explica por qué el sistema no deja hacer algo (la caja bloqueada, por ejemplo):
+// ahí borrarlo del todo dejaría a la persona sin saber qué pasa.
+function AlertaCerrable({ id, tono = 'rojo', resumen, desaparece = false, children }) {
   const clave = 'rq:aviso:' + id;
   const leido = () => { try { return localStorage.getItem(clave) === '1'; } catch { return false; } };
   const [cerrada, setCerrada] = useState(leido);
@@ -389,7 +394,7 @@ function AlertaCerrable({ id, tono = 'rojo', resumen, children }) {
     ? 'bg-orange-950 border-orange-800 text-orange-400'
     : 'bg-red-950 border-red-800 text-red-400';
 
-  if (cerrada) return (
+  if (cerrada) return desaparece ? null : (
     <button onClick={() => { try { localStorage.removeItem(clave); } catch { /* sin almacenamiento */ } setCerrada(false); }}
       className={`w-full text-left px-3 py-1.5 rounded border mb-3 text-[10px] font-bold uppercase opacity-60 hover:opacity-100 ${cls}`}>
       {resumen} · ver de nuevo
@@ -610,7 +615,8 @@ function Residente({ user, db, api }) {
       {esRes && anuladosRecientes.length > 0 && (
         <AlertaCerrable
           id={'anulados:' + anuladosRecientes.map(i => i.id).join(',')}
-          resumen={`⚠ Te anularon ${anuladosRecientes.length} ítem(s)`}>
+          resumen={`⚠ Te anularon ${anuladosRecientes.length} ítem(s)`}
+          desaparece>
           <div className="text-[11px] font-bold tracking-widest text-red-400 uppercase mb-2">
             ⚠ Te anularon {anuladosRecientes.length} ítem(s) · últimos 15 días</div>
           <table className="w-full text-xs">
