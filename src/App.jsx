@@ -21,6 +21,8 @@ const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso i
 // acto por transferencia tambien es inmediato. Las facturas viejas guardadas como
 // 'Contado' o 'Transferencia' siguen venciendo el mismo dia, igual que antes.
 const FORMAS_PAGO = ['Inmediato', 'Crédito 15 días', 'Crédito 30 días'];
+const PLAZOS_CREDITO = FORMAS_PAGO.filter(f => f.startsWith('Crédito'));
+const esCredito = f => (f || '').startsWith('Crédito');
 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['apr', 'Aprobaciones'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
@@ -1682,6 +1684,10 @@ function Compras({ user, db, api, modo }) {
       const p = proveedores.find(x => x[1] === v);
       if (p) f.ruc = p[0];
     }
+    // Un compromiso es siempre al crédito, pero el PLAZO importa: es lo que le
+    // dice a Pagos cuándo vence. Antes se guardaba 'Crédito' pelado y vencía el
+    // mismo día, así que todos los compromisos nacían en rojo.
+    if (k === 'compromiso') f.forma = v ? (esCredito(f.forma) ? f.forma : 'Crédito 30 días') : FORMAS_PAGO[0];
     setFFact({ ...fFact, [id]: f });
   };
 
@@ -1747,7 +1753,9 @@ function Compras({ user, db, api, modo }) {
     }
     const r = await api.registrarFactura({
       serie, prov: f.prov.trim().toUpperCase(), ruc: f.ruc, fecha: f.fecha,
-      monto: Number(f.monto), forma: f.compromiso ? 'Crédito' : f.efectivo ? 'Inmediato' : f.forma, proyecto: i.proyecto,
+      monto: Number(f.monto),
+      forma: f.compromiso ? (esCredito(f.forma) ? f.forma : 'Crédito 30 días') : f.efectivo ? 'Inmediato' : f.forma,
+      proyecto: i.proyecto,
       efectivo: !!f.efectivo, compromiso: !!f.compromiso, pendiente: !!f.pendiente,
       medio: f.pendiente && !f.efectivo ? f.medio : null,
       banco: f.pendiente && !f.efectivo ? f.banco.trim() : null,
@@ -2118,12 +2126,17 @@ function Compras({ user, db, api, modo }) {
                             disabled={!/^\d{11}$/.test(ff.ruc)} placeholder="Monto TOTAL S/ (inc. IGV)"
                             className={`w-full mb-1 ${pendCls(Number(ff.monto) > 0)} font-mono ${!/^\d{11}$/.test(ff.ruc) ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           {ff.compromiso ? (
-                            <div className={`w-full mb-1 ${inputCls} bg-slate-800 text-slate-400`}>Forma: Crédito (fija en compromisos)</div>
+                            <select value={esCredito(ff.forma) ? ff.forma : 'Crédito 30 días'} onChange={e => setFF(i.id, 'forma', e.target.value)}
+                              onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
+                              {PLAZOS_CREDITO.map(x => <option key={x}>{x}</option>)}</select>
                           ) : !ff.efectivo && (
                             <select value={ff.forma} onChange={e => setFF(i.id, 'forma', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
                               {FORMAS_PAGO.map(x => <option key={x}>{x}</option>)}</select>
                           )}
-                          {!ff.compromiso && (
+                          {/* La caja chica es de Frank: a Lucía no se le entrega efectivo.
+                              Si marcara esta casilla, el sistema le abriría una rendición
+                              del día a su nombre que nadie va a cerrar. */}
+                          {!ff.compromiso && !esCompras && (
                           <label className="flex items-start gap-1.5 mb-1 cursor-pointer text-[10px] text-slate-300">
                             <input type="checkbox" checked={!!ff.efectivo} onChange={e => setFF(i.id, 'efectivo', e.target.checked)} className="mt-0.5" />
                             <span>Ya pagada en <b>EFECTIVO</b> (caja chica de hoy) — queda Pagada y entra a la rendición del día</span>
