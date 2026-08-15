@@ -1684,6 +1684,14 @@ function Compras({ user, db, api, modo }) {
     setFFact({ ...fFact, [id]: { ...f, extras } });
   };
 
+  const tomar = async (i, valor) => {
+    const r = await api.tomarItem(i.id, valor);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    setAviso(valor ? `Te encargas de comprar "${i.desc}". El resto lo verá tomado por ti.`
+                   : `Soltaste "${i.desc}": vuelve a quedar libre.`);
+    setTimeout(() => setAviso(''), 5000);
+  };
+
   const [parcial, setParcial] = useState({});
   const registrarParcial = async i => {
     const f = parcial[i.id];
@@ -2004,9 +2012,20 @@ function Compras({ user, db, api, modo }) {
                               </div>
                             ) : (
                               <div className="flex flex-col gap-1">
+                                {/* Quién se encargó de comprarlo (migración 50). No bloquea:
+                                    avisa. Un candado que solo abre quien lo puso traba el
+                                    trabajo el día que esa persona no viene. */}
+                                {i.tomadoPor
+                                  ? <button onClick={() => tomar(i, false)}
+                                      className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-sky-950 text-sky-300 border border-sky-800"
+                                      title="Alguien dijo que se encarga de comprarlo hoy. Pulsa para soltarlo.">✋ Lo compra {i.tomadoPor.split(' ')[0]}</button>
+                                  : <button onClick={() => tomar(i, true)}
+                                      className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-sky-400 border border-slate-700 hover:border-sky-400"
+                                      title="Avisa al resto de que tú te encargas de comprarlo hoy. Caduca solo mañana.">Me encargo</button>}
                                 <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
                                   className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
-                                  title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                                  title={i.tomadoPor ? `Ojo: ${i.tomadoPor} dijo que se encargaba. Puedes comprarlo igual.` : 'Marca este ítem como comprado o recogido. Cambia el estado para todos.'}>
+                                  {i.tomadoPor ? '✓ Comprar igual' : '✓ Comprado'}</button>
                                 <button onClick={() => setParcial({ ...parcial, [i.id]: { cant: '', motivo: '', cerrar: false } })}
                                   className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-orange-400 border border-slate-700 hover:border-orange-400"
                                   title="Si el proveedor no tenía todo: se registra lo conseguido y el saldo vuelve a la cola de compras.">Compra parcial</button>
@@ -2923,8 +2942,26 @@ function ComprasDelDia({ db, api }) {
     setTimeout(() => setAviso(''), 4000);
   };
 
-  const pendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
+  // Frank compra lo de esta semana; lo ANTICIPADO (más de 7 días) es
+  // planificación de Lucía -- importaciones y compras grandes que se cotizan y
+  // se programan. Mezclarlo aquí empuja a comprar antes de tiempo, y adelantarse
+  // tampoco es gratis: inmoviliza plata, ocupa almacén y el material se estropea.
+  const HORIZONTE = 7;
+  const [verTodo, setVerTodo] = useState(false);
+  const todosPendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
     .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—');
+  const masAdelante = todosPendientes.filter(i => diasHoy(i.fecha) > HORIZONTE).length;
+  const pendientes = verTodo ? todosPendientes
+    : todosPendientes.filter(i => diasHoy(i.fecha) <= HORIZONTE);
+
+  const tomar = async (x, valor) => {
+    const r = await api.tomarItem(x.id, valor);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
+    setAviso(valor
+      ? `Te encargas de "${x.desc}" (RQ-${String(x.rq).padStart(3, '0')}). Lucía lo verá tomado por ti. Caduca solo mañana.`
+      : `Soltaste "${x.desc}": vuelve a quedar libre.`);
+    setTimeout(() => setAviso(''), 5000);
+  };
 
   const [parcial, setParcial] = useState({});
   const registrarParcial = async x => {
@@ -2939,7 +2976,8 @@ function ComprasDelDia({ db, api }) {
     if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porRQ: [], minFecha: i.fecha, proyectos: new Set() };
     const g = acc[i.cod];
     g.total += Number(i.cant);
-    g.porRQ.push({ id: i.id, rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha });
+    g.porRQ.push({ id: i.id, rq: i.rq, proyecto: i.proyecto, cant: Number(i.cant), fecha: i.fecha,
+                   desc: i.desc, tomadoPor: i.tomadoPor });
     if (i.fecha < g.minFecha) g.minFecha = i.fecha;
     g.proyectos.add(i.proyecto);
     return acc;
@@ -2951,10 +2989,19 @@ function ComprasDelDia({ db, api }) {
     <div>
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-          Compras del día · {grupos.length} material(es) por comprar · urgentes primero</div>
+          Compras del día · {grupos.length} material(es) · {verTodo ? 'todo lo pendiente' : `para los próximos ${HORIZONTE} días`} · urgentes primero
+          {masAdelante > 0 && (
+            <button onClick={() => setVerTodo(!verTodo)}
+              className="ml-2 text-[10px] font-bold uppercase text-sky-400 hover:text-sky-300">
+              {verTodo ? '· ver solo esta semana' : `· ver ${masAdelante} para más adelante`}
+            </button>
+          )}</div>
         <Aviso msg={aviso} />
         {grupos.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Nada por comprar: no hay ítems aprobados pendientes. ¡Buen día!</div>
+          <div className="text-center py-6 text-slate-500 text-sm">
+            {masAdelante > 0
+              ? `Nada urgente hoy. Hay ${masAdelante} ítem(s) para más adelante: los gestiona Lucía.`
+              : 'Nada por comprar: no hay ítems aprobados pendientes. ¡Buen día!'}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -2984,6 +3031,13 @@ function ComprasDelDia({ db, api }) {
                     <td className="py-2 px-1.5">
                       {g.porRQ.map((x, k) => (
                         <div key={k} className="h-7 flex items-center gap-1">
+                          {x.tomadoPor
+                            ? <button onClick={() => tomar(x, false)}
+                                className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-sky-950 text-sky-300 border border-sky-800 whitespace-nowrap"
+                                title="Lo tomaste tú (o alguien). Pulsa para soltarlo y que vuelva a quedar libre.">✋ {x.tomadoPor.split(' ')[0]}</button>
+                            : <button onClick={() => tomar(x, true)}
+                                className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-sky-400 border border-slate-700 hover:border-sky-400 whitespace-nowrap"
+                                title="Avisa al resto de que tú te encargas de comprar esto hoy. Caduca solo mañana.">Me encargo</button>}
                           <button onClick={() => marcarComprado(x)}
                             className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400 whitespace-nowrap"
                             title="Marca este ítem como comprado o recogido. Cambia el estado para todo el equipo.">✓ Comprado</button>
@@ -5040,6 +5094,11 @@ export default function App() {
         fechaCaducidad: r.fecha_caducidad || '',
         compradoPorId: r.comprado_por || null, compradoPor: usrMap[r.comprado_por] ? usrMap[r.comprado_por].nombre : '',
         decididoPor: usrMap[r.decidido_por] ? usrMap[r.decidido_por].nombre : '',
+        // "yo me encargo" (migración 50). Solo vale el mismo día: al siguiente
+        // vuelve a estar libre sin que nadie tenga que soltarlo.
+        tomadoPor: (r.tomado_en || '').slice(0, 10) === HOY_ISO && usrMap[r.tomado_por]
+          ? usrMap[r.tomado_por].nombre : '',
+        tomadoPorId: (r.tomado_en || '').slice(0, 10) === HOY_ISO ? r.tomado_por : null,
         fechaCompra: r.fecha_compra || '',
         creadoEn: r.creado_en || null, decididoEn: r.decidido_en || null,
       };
@@ -5443,6 +5502,10 @@ export default function App() {
       // Compra parcial (migración 49): el ítem se parte en dos — lo conseguido y
       // el saldo — para que la factura cubra lo comprado de verdad con su precio
       // real, en vez de forzar un precio inventado sobre la cantidad pedida.
+      // Tomar un ítem para comprarlo, o soltarlo. Quién lo tomó lo pone la base.
+      tomarItem: (id, tomar) => wrap(async () =>
+        await supabase.from('rq_items').update({ tomado_en: tomar ? HOY_ISO : null }).eq('id', id),
+        ['rq_items']),
       compraParcial: (item, cant, motivo, cerrarSaldo) => wrap(async () =>
         await supabase.rpc('compra_parcial', {
           p_item: item.id, p_cant: Number(cant), p_motivo: motivo.trim(),
