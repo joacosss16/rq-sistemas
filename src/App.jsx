@@ -1525,6 +1525,9 @@ function Compras({ user, db, api, modo }) {
     (r.estado === 'Con diferencia' || r.estado === 'Observada') && r.fecha < HOY_ISO);
   const facturarSolo = modo === 'facturar';   // rol comprador: solo factura, no decide
   const puedeFacturar = user.rol === 'compras' || user.rol === 'comprador';
+  // Dar por cerrado el saldo de una compra parcial es decisión de compra, no de
+  // quien fue a buscar el material: solo Lucía. La base lo exige igual.
+  const esCompras = user.rol === 'compras';
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
@@ -1679,6 +1682,19 @@ function Compras({ user, db, api, modo }) {
     const f = fFact[id];
     const extras = f.extras.includes(itemId) ? f.extras.filter(x => x !== itemId) : [...f.extras, itemId];
     setFFact({ ...fFact, [id]: { ...f, extras } });
+  };
+
+  const [parcial, setParcial] = useState({});
+  const registrarParcial = async i => {
+    const f = parcial[i.id];
+    const r = await api.compraParcial(i, f.cant, f.motivo, f.cerrar);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 9000); return; }
+    const p2 = { ...parcial }; delete p2[i.id]; setParcial(p2);
+    const saldo = Number(i.cant) - Number(f.cant);
+    setAviso(f.cerrar
+      ? `Compra parcial de "${i.desc}": ${f.cant} de ${i.cant}. Las ${saldo} que faltan quedaron cerradas con tu motivo.`
+      : `Compra parcial de "${i.desc}": ${f.cant} de ${i.cant}. El saldo de ${saldo} vuelve a la cola de compras.`);
+    setTimeout(() => setAviso(''), 8000);
   };
 
   const registrarFactura = async i => {
@@ -1962,9 +1978,40 @@ function Compras({ user, db, api, modo }) {
                     {post ? (
                       i.estado === '—' ? (
                         puedeFacturar
-                          ? <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
-                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
-                              title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                          ? (parcial[i.id] ? (
+                              <div className="p-2 bg-slate-950 border border-orange-800 rounded w-56">
+                                <div className="text-[9px] font-bold uppercase text-orange-400 mb-1">Compra parcial · pedido: {i.cant}</div>
+                                <input type="number" min="1" step="any" value={parcial[i.id].cant}
+                                  onChange={e => setParcial({ ...parcial, [i.id]: { ...parcial[i.id], cant: e.target.value } })}
+                                  placeholder={`¿Cuánto se consiguió? (menos de ${i.cant})`} className={`w-full mb-1 ${inputCls}`} />
+                                <input value={parcial[i.id].motivo}
+                                  onChange={e => setParcial({ ...parcial, [i.id]: { ...parcial[i.id], motivo: e.target.value } })}
+                                  placeholder="¿Por qué no había todo?" className={`w-full mb-1 ${inputCls}`} />
+                                {esCompras && (
+                                  <label className="flex items-start gap-1 text-[9px] text-slate-300 mb-1 cursor-pointer">
+                                    <input type="checkbox" checked={!!parcial[i.id].cerrar}
+                                      onChange={e => setParcial({ ...parcial, [i.id]: { ...parcial[i.id], cerrar: e.target.checked } })} />
+                                    <span>Lo que falta ya no se va a comprar</span>
+                                  </label>
+                                )}
+                                <div className="flex gap-1">
+                                  <button onClick={() => registrarParcial(i)}
+                                    disabled={!(Number(parcial[i.id].cant) > 0 && Number(parcial[i.id].cant) < Number(i.cant) && parcial[i.id].motivo.trim())}
+                                    className={btnOk(Number(parcial[i.id].cant) > 0 && Number(parcial[i.id].cant) < Number(i.cant) && !!parcial[i.id].motivo.trim())}>Registrar</button>
+                                  <button onClick={() => { const p2 = { ...parcial }; delete p2[i.id]; setParcial(p2); }}
+                                    className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400">Cancelar</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col gap-1">
+                                <button onClick={() => updItem(i, { estado: 'Comprado' }, `Ítem "${i.desc}" marcado como Comprado. Ahora lo ve todo el equipo; el almacén lo cerrará al recibir.`)}
+                                  className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                                  title="Marca este ítem como comprado o recogido. Cambia el estado para todos.">✓ Comprado</button>
+                                <button onClick={() => setParcial({ ...parcial, [i.id]: { cant: '', motivo: '', cerrar: false } })}
+                                  className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-orange-400 border border-slate-700 hover:border-orange-400"
+                                  title="Si el proveedor no tenía todo: se registra lo conseguido y el saldo vuelve a la cola de compras.">Compra parcial</button>
+                              </div>
+                            ))
                           : <span className="text-slate-500 text-[10px]">Por comprar</span>
                       ) : (
                         <div>
@@ -2879,6 +2926,15 @@ function ComprasDelDia({ db, api }) {
   const pendientes = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, proyecto: r.proyecto })))
     .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—');
 
+  const [parcial, setParcial] = useState({});
+  const registrarParcial = async x => {
+    const f = parcial[x.id];
+    const r = await api.compraParcial({ id: x.id }, f.cant, f.motivo, false);
+    if (r.error) { avisar('⚠ ' + r.error, 8000); return; }
+    const p2 = { ...parcial }; delete p2[x.id]; setParcial(p2);
+    avisar(`Compra parcial registrada: ${f.cant} de ${x.cant}. El saldo de ${x.cant - Number(f.cant)} vuelve a la cola de compras.`, 7000);
+  };
+
   const grupos = Object.values(pendientes.reduce((acc, i) => {
     if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porRQ: [], minFecha: i.fecha, proyectos: new Set() };
     const g = acc[i.cod];
@@ -2927,10 +2983,33 @@ function ComprasDelDia({ db, api }) {
                     </td>
                     <td className="py-2 px-1.5">
                       {g.porRQ.map((x, k) => (
-                        <div key={k} className="h-7 flex items-center">
+                        <div key={k} className="h-7 flex items-center gap-1">
                           <button onClick={() => marcarComprado(x)}
                             className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400 whitespace-nowrap"
                             title="Marca este ítem como comprado o recogido. Cambia el estado para todo el equipo.">✓ Comprado</button>
+                          <button onClick={() => setParcial({ ...parcial, [x.id]: { cant: '', motivo: '' } })}
+                            className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-orange-400 border border-slate-700 hover:border-orange-400 whitespace-nowrap"
+                            title="Si el proveedor no tenía todo: se registra lo que conseguiste y el saldo vuelve a la cola de compras.">Parcial</button>
+                        </div>
+                      ))}
+                      {/* Formulario de compra parcial, debajo de los botones */}
+                      {g.porRQ.filter(x => parcial[x.id]).map(x => (
+                        <div key={'p' + x.id} className="mt-1 p-2 bg-slate-950 border border-orange-800 rounded w-64">
+                          <div className="text-[9px] font-bold uppercase text-orange-400 mb-1">
+                            Compra parcial · RQ-{String(x.rq).padStart(3, '0')} (pedido: {x.cant})</div>
+                          <input type="number" min="1" step="any" value={parcial[x.id].cant}
+                            onChange={e => setParcial({ ...parcial, [x.id]: { ...parcial[x.id], cant: e.target.value } })}
+                            placeholder={`¿Cuánto conseguiste? (menos de ${x.cant})`} className={`w-full mb-1 ${inputCls}`} />
+                          <input value={parcial[x.id].motivo}
+                            onChange={e => setParcial({ ...parcial, [x.id]: { ...parcial[x.id], motivo: e.target.value } })}
+                            placeholder="¿Por qué no había todo?" className={`w-full mb-1 ${inputCls}`} />
+                          <div className="flex gap-1">
+                            <button onClick={() => registrarParcial(x)}
+                              disabled={!(Number(parcial[x.id].cant) > 0 && Number(parcial[x.id].cant) < x.cant && parcial[x.id].motivo.trim())}
+                              className={btnOk(Number(parcial[x.id].cant) > 0 && Number(parcial[x.id].cant) < x.cant && !!parcial[x.id].motivo.trim())}>Registrar</button>
+                            <button onClick={() => { const p2 = { ...parcial }; delete p2[x.id]; setParcial(p2); }}
+                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400">Cancelar</button>
+                          </div>
                         </div>
                       ))}</td>
                   </tr>
@@ -5361,6 +5440,14 @@ export default function App() {
         return { numero: rq.numero };
         // crea materiales 97xxxx nuevos -> hay que refrescar el catálogo
       }, ['rqs', 'rq_items'], true),
+      // Compra parcial (migración 49): el ítem se parte en dos — lo conseguido y
+      // el saldo — para que la factura cubra lo comprado de verdad con su precio
+      // real, en vez de forzar un precio inventado sobre la cantidad pedida.
+      compraParcial: (item, cant, motivo, cerrarSaldo) => wrap(async () =>
+        await supabase.rpc('compra_parcial', {
+          p_item: item.id, p_cant: Number(cant), p_motivo: motivo.trim(),
+          p_cerrar_saldo: !!cerrarSaldo,
+        }), ['rqs', 'rq_items']),
       setPerecedero: (codigo, valor) => wrap(async () =>
         await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo), [], true),
       conciliarFactura: (id, valor) => wrap(async () => {
