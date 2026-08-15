@@ -1773,10 +1773,15 @@ function Compras({ user, db, api, modo }) {
   const porComprar = Object.values(flatBase
     .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—')
     .reduce((acc, i) => {
-      if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porObra: {}, minFecha: i.fecha };
+      if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porObra: {}, minFecha: i.fecha, tomados: {}, nItems: 0 };
       const g = acc[i.cod];
       g.total += Number(i.cant);
+      g.nItems += 1;
       g.porObra[i.proyecto] = (g.porObra[i.proyecto] || 0) + Number(i.cant);
+      // Quién dijo que se encarga de comprarlo (migración 50). Va aquí porque
+      // este consolidado es donde Lucía decide qué comprar: si el aviso solo
+      // estuviera en la tabla de gestión, ella no lo vería a tiempo.
+      if (i.tomadoPor) g.tomados[i.tomadoPor] = (g.tomados[i.tomadoPor] || 0) + 1;
       if (i.fecha < g.minFecha) g.minFecha = i.fecha;
       return acc;
     }, {}))
@@ -1831,7 +1836,15 @@ function Compras({ user, db, api, modo }) {
                     <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
                     <td className="py-2 px-1.5 text-slate-300 text-[10px]">
                       {Object.entries(g.porObra).map(([o, c]) => `${o}: ${c}`).join(' · ')}
-                      {Object.keys(g.porObra).length > 1 && <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-green-950 text-green-400">consolidable</span>}</td>
+                      {Object.keys(g.porObra).length > 1 && <span className="ml-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-green-950 text-green-400">consolidable</span>}
+                      {/* Quién se encargó ya de comprarlo. Avisa, no bloquea: si
+                          Lucía tiene motivo para comprarlo igual, puede. */}
+                      {Object.keys(g.tomados).length > 0 && (
+                        <div className="text-[10px] text-sky-400 mt-1">
+                          ✋ {Object.entries(g.tomados).map(([quien, n]) =>
+                            `${quien.split(' ')[0]} se encarga${n < g.nItems ? ` de ${n} de ${g.nItems} pedidos` : ''}`).join(' · ')}
+                        </div>
+                      )}</td>
                     <td className={`py-2 px-1.5 whitespace-nowrap ${urg < 2 ? 'text-red-400 font-bold' : 'text-slate-300'}`}>{fmt(g.minFecha)}{urg < 2 ? ' · URGENTE' : ''}</td>
                     <td className="py-2 px-1.5 text-[10px]">
                       {otras.length === 0 ? <span className="text-slate-600">—</span> : otras.map(x => {
