@@ -5,10 +5,7 @@ import { esDelDia, HOY_ISO, fmt, dias, diasHoy } from './fechas';
 import { estadoCaducidad, calcularStocks, stockDetalleObra } from './stock';
 import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito, vencimientoDe, MEDIOS_PAGO, ETIQUETA_NRO, SIN_BANCO } from './pago';
 import { imprimirRQ, imprimirCierre, imprimirConteo } from './pdf';
-
-// Se llenan desde la base al cargar (tabla proyectos / usuarios con rol almacén)
-let PROYECTOS = [];
-let ALMACENEROS = {};
+import { PROYECTOS, ALMACENEROS, setMaestros } from './maestros';
 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 
@@ -4767,9 +4764,13 @@ export default function App() {
       const n = nomProy[b.codigo];
       if (n) bancoDe[n] = { banco: b.banco || '', cuenta: b.nro_cuenta || '' };
     });
-    PROYECTOS = prj.filter(p => p.activo).map(p => [p.codigo, p.nombre]);
-    ALMACENEROS = {};
-    usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { ALMACENEROS[nomProy[u.proyecto_asignado]] = u.nombre; });
+    // ÚNICO cambio de texto deliberado de la mudanza (etapa 5): un import es
+    // de solo lectura, así que ya no se asigna aquí — se arma en locales con
+    // LAS MISMAS expresiones de antes y se publica con setMaestros.
+    const proy2 = prj.filter(p => p.activo).map(p => [p.codigo, p.nombre]);
+    const alm2 = {};
+    usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { alm2[nomProy[u.proyecto_asignado]] = u.nombre; });
+    setMaestros(proy2, alm2);
 
     const matMap = {}; mats.forEach(m => { matMap[m.codigo] = m; });
     // unidad de consumo: si el material se compra en caja, la base es und_base
