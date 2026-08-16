@@ -27,3 +27,23 @@ export function diaLocal(ts) {
 export function esDelDia(ts, hoyISO) {
   return !!ts && diaLocal(ts) === hoyISO;
 }
+
+// ============================================================
+// El "hoy" de la aplicación (movido de App.jsx, etapa 1 de la
+// separación en módulos — mismo texto, solo cambió de archivo).
+//
+// HOY_ISO se calcula UNA vez al cargar la página. Tiene que haber UNA
+// sola definición en todo src/ : App.jsx tiene un vigilante que recarga
+// la página al cruzar la medianoche comparando contra este valor — si
+// existieran dos copias, el vigilante miraría una y las pantallas otra,
+// y la app amanecería con la fecha de ayer sin dar ningún error.
+//
+// El sufijo 'T00:00:00' de fmt y dias NO es decorativo: sin él, una
+// fecha '2026-08-15' se interpreta en tiempo universal y en Cusco
+// (UTC-5) se muestra como 14 de agosto. Hay una prueba que lo vigila.
+// ============================================================
+const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+export const HOY_ISO = `${HOY.getFullYear()}-${String(HOY.getMonth() + 1).padStart(2, '0')}-${String(HOY.getDate()).padStart(2, '0')}`;
+export const fmt = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
+export const dias = (a, b) => Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000);
+export const diasHoy = f => dias(f, HOY_ISO);

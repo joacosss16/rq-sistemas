@@ -7,7 +7,7 @@
 // en Lima o en un servidor en UTC.
 // ============================================================
 
-import { diaLocal, esDelDia } from '../src/fechas.js';
+import { diaLocal, esDelDia, HOY_ISO, fmt, dias, diasHoy } from '../src/fechas.js';
 
 let ok = 0, fallos = 0;
 function prueba(nombre, fn) {
@@ -68,6 +68,41 @@ prueba('sin hora guardada no es de ningún día', () => {
 prueba('una hora inválida no rompe la pantalla', () => {
   igual(diaLocal('no es una fecha'), '', 'texto basura');
   if (esDelDia('no es una fecha', HOY)) throw new Error('basura no es hoy');
+});
+
+console.log('\nEL "HOY" DE LA APLICACIÓN (movido de App.jsx en la separación)\n');
+
+prueba('HOY_ISO es la fecha local de hoy, no la universal', () => {
+  igual(HOY_ISO, HOY, 'HOY_ISO');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(HOY_ISO)) throw new Error('formato roto: ' + HOY_ISO);
+});
+
+prueba('diasHoy(hoy) es 0: diasHoy y HOY_ISO miran el mismo reloj', () => {
+  igual(diasHoy(HOY_ISO), 0, 'diasHoy(HOY_ISO)');
+});
+
+prueba('fmt muestra el día que le dieron, no el de la víspera', () => {
+  // El sufijo 'T00:00:00' de fmt es lo único que impide que en Cusco
+  // (UTC-5) la fecha '2026-08-15' se muestre como "14 ago.". Quien lo
+  // quite "porque sobra" rompe TODAS las fechas de la aplicación un día.
+  // Ojo: esta prueba solo delata esa rotura corriendo en una zona con
+  // reloj detrás de UTC (Perú lo está siempre).
+  const texto = fmt('2026-08-15');
+  if (!texto.includes('15')) throw new Error(`fmt('2026-08-15') mostró "${texto}"`);
+  igual(fmt(''), '—', 'fecha vacía');
+  igual(fmt(null), '—', 'fecha nula');
+});
+
+prueba('dias cruza meses y años sin perderse', () => {
+  igual(dias('2026-09-01', '2026-08-31'), 1, 'cruce de mes');
+  igual(dias('2027-01-01', '2026-12-31'), 1, 'cruce de año');
+  igual(dias('2026-03-01', '2026-02-28'), 1, '2026 no es bisiesto');
+});
+
+prueba('dias en negativo: la holgura de un ítem que llegó tarde', () => {
+  // Holgura = fechaNecesitada - fechaEntrega; negativa = llegó tarde (en rojo)
+  igual(dias('2026-08-10', '2026-08-15'), -5, 'llegó 5 días tarde');
+  igual(dias('2026-08-15', '2026-08-15'), 0, 'llegó justo');
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} fallas\n`);

@@ -1,13 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback, Fragment } from 'react';
 import { supabase, ENTORNO, ES_PRODUCCION } from './supabaseClient';
 import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from './caja';
-import { esDelDia } from './fechas';
-
-const HOY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
-const HOY_ISO = `${HOY.getFullYear()}-${String(HOY.getMonth() + 1).padStart(2, '0')}-${String(HOY.getDate()).padStart(2, '0')}`;
-const fmt = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: '2-digit' }) : '—';
-const dias = (a, b) => Math.round((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000);
-const diasHoy = f => dias(f, HOY_ISO);
+import { esDelDia, HOY_ISO, fmt, dias, diasHoy } from './fechas';
 
 // Se llenan desde la base al cargar (tabla proyectos / usuarios con rol almacén)
 let PROYECTOS = [];
