@@ -7,6 +7,7 @@ import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito, vencimientoDe, MEDIOS_PAGO, ETI
 import { imprimirRQ, imprimirCierre, imprimirConteo } from './pdf';
 import { PROYECTOS, ALMACENEROS, setMaestros } from './maestros';
 import { canalClases, pillEstado, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde, Aviso, AnularBox, AlertaCerrable, FiltroProyecto, FechaInput, pendCls } from './ui';
+import { buscarEnCatalogo } from './busqueda';
 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 
@@ -58,17 +59,6 @@ function descargarCSV(items, nombre) {
   URL.revokeObjectURL(a.href);
 }
 
-
-// Búsqueda por palabras: ignora espacios extra y encuentra materiales que
-// contengan TODAS las palabras escritas, en cualquier orden.
-function buscarEnCatalogo(catalogo, q, max) {
-  const palabras = q.toUpperCase().split(/\s+/).filter(Boolean);
-  if (!palabras.length || q.trim().length < 2) return [];
-  return catalogo.filter(m => {
-    const texto = m[1].toUpperCase() + ' ' + m[0] + ' ' + (m[3] || '').toUpperCase();
-    return palabras.every(p => texto.includes(p));
-  }).slice(0, max);
-}
 
 function Buscador({ catalogo, onPick, stockDe, deshabilitado, inputRef }) {
   const [q, setQ] = useState('');
