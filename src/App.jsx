@@ -3,21 +3,13 @@ import { supabase, ENTORNO, ES_PRODUCCION } from './supabaseClient';
 import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from './caja';
 import { esDelDia, HOY_ISO, fmt, dias, diasHoy } from './fechas';
 import { estadoCaducidad, calcularStocks, stockDetalleObra } from './stock';
+import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito, vencimientoDe, MEDIOS_PAGO, ETIQUETA_NRO, SIN_BANCO } from './pago';
 
 // Se llenan desde la base al cargar (tabla proyectos / usuarios con rol almacén)
 let PROYECTOS = [];
 let ALMACENEROS = {};
 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
-// La FORMA dice CUANDO se paga; el MEDIO (mas abajo) dice CON QUE. Antes esta
-// lista mezclaba los dos ejes -- tenia 'Contado' y 'Transferencia' como si fueran
-// alternativas del mismo tipo -- y ademas las dos hacian lo mismo: vencer hoy.
-// 'Inmediato' las reemplaza porque no se confunde con "en efectivo": pagar en el
-// acto por transferencia tambien es inmediato. Las facturas viejas guardadas como
-// 'Contado' o 'Transferencia' siguen venciendo el mismo dia, igual que antes.
-const FORMAS_PAGO = ['Inmediato', 'Crédito 15 días', 'Crédito 30 días'];
-const PLAZOS_CREDITO = FORMAS_PAGO.filter(f => f.startsWith('Crédito'));
-const esCredito = f => (f || '').startsWith('Crédito');
 
 const TABS_POR_ROL = {
   gerente: [['res', 'Residente'], ['com', 'Compras'], ['alm', 'Almacén'], ['apr', 'Aprobaciones'], ['cat', 'Catálogo'], ['his', 'Historial'], ['pag', 'Pagos'], ['ren', 'Rendiciones'], ['aud', 'Auditoría'], ['tab', 'Tablero'], ['rep', 'Reporte mensual']],
@@ -30,19 +22,6 @@ const TABS_POR_ROL = {
 };
 const TAB_INICIAL = { gerente: 'tab', compras: 'com', residente: 'res', almacen: 'alm', pagos: 'pag', administracion: 'ren', comprador: 'dia' };
 const UMBRAL_MONTO_INUSUAL = 10000; // S/ — pagos por encima se marcan para revisión
-
-// Vencimiento de una factura: fecha + días de crédito (contado vence el mismo día)
-function vencimientoDe(f) {
-  const d = new Date(f.fecha + 'T00:00:00');
-  d.setDate(d.getDate() + (f.forma === 'Crédito 15 días' ? 15 : f.forma === 'Crédito 30 días' ? 30 : 0));
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-// 'Nota de crédito' no mueve dinero del banco: el proveedor cancela la deuda con
-// un documento. Por eso no pide banco (pide la serie de la nota) y queda fuera
-// del CSV de conciliación bancaria, donde solo debe ir lo que movió plata.
-const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta', 'Nota de crédito'];
-const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher', 'Nota de crédito': 'Serie de la nota' };
-const SIN_BANCO = m => m === 'Nota de crédito';
 
 const canalClases = {
   URGENTE: 'bg-red-950 text-red-400 border-red-800',
