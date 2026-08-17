@@ -329,12 +329,27 @@ export default function App() {
       (itemsPorRq[r.rq_id] = itemsPorRq[r.rq_id] || []).push(it);
     });
 
+    // El canal de un RQ es el de su ítem MÁS urgente, y el de cada ítem lo
+    // calcula la BASE con las fechas reales (trg_rq_items_biu). El canal que
+    // viaja en la cabecera lo declara el navegador de quien crea el RQ: si se
+    // usara ese, el "% de urgentes" -- con el que se mide quién planifica y
+    // quién apaga incendios -- lo estaría declarando la persona medida. El
+    // sistema ya sabía la verdad y la tiraba al dibujar; aquí se recupera.
+    const ORDEN_CANAL = { URGENTE: 0, GENERAL: 1, ANTICIPADO: 2, 'ESPECIAL LIMA': 2 };
+    const canalDeItems = (items, declarado) => {
+      const cs = (items || []).map(i => i.canal).filter(Boolean);
+      if (!cs.length) return declarado;   // RQ sin líneas: no hay de dónde derivarlo
+      return cs.reduce((a, b) => (ORDEN_CANAL[b] ?? 9) < (ORDEN_CANAL[a] ?? 9) ? b : a);
+    };
+
     const rqs = rqsR.data.map(r => ({
       id: r.id, n: r.numero, proyecto: nomProy[r.proyecto] || r.proyecto, partida: r.partida,
       tipo: r.tipo || 'RQ', cotizacionRef: r.cotizacion_ref || '', arquitecto: r.solicitante_diseno || '',
       residente: r.tipo === 'Cotizacion' ? (r.solicitante_diseno || 'Diseño') : (usrMap[r.residente_id] ? usrMap[r.residente_id].nombre : ''),
       almacen: r.almacen_resp || '',
-      piso: r.piso || '', canal: r.canal, just: r.justificacion || '', fechaRQ: r.fecha_rq,
+      piso: r.piso || '', canal: canalDeItems(itemsPorRq[r.id], r.canal),
+      canalDeclarado: r.canal,   // lo que dijo el navegador al crear: se guarda para poder auditarlo
+      just: r.justificacion || '', fechaRQ: r.fecha_rq,
       creadoEn: r.creado_en || null,   // marca real con hora (auditoría y patrón horario)
       creadoPor: usrMap[r.creado_por] ? usrMap[r.creado_por].nombre : '', items: itemsPorRq[r.id] || [],
     }));

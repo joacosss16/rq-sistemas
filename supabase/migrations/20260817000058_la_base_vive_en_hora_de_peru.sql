@@ -1,0 +1,69 @@
+-- ============================================================
+-- Migración 58 · La base pasa a vivir en hora de Perú
+--
+-- EL PROBLEMA
+-- El proyecto de Supabase nace configurado en hora universal (UTC) y
+-- Cusco va cinco horas por detrás. Así que **desde las 19:00 la base ya
+-- cambió de día y la pantalla no**. De 7 de la noche a medianoche, todos
+-- los días, los dos relojes discrepan.
+--
+-- Lo que eso provoca, medido:
+--   · El residente a las 19:40 no puede registrar un RQ para hoy: la
+--     pantalla le ofrece "hoy 18" y la base lo rechaza diciendo que la
+--     fecha del RQ es 19 — un día que él nunca vio. Justo la franja en
+--     que aparecen las urgencias de obra.
+--   · El canal se corre un escalón: la pantalla dice GENERAL y no pide
+--     justificación, y la base clasifica URGENTE. Urgencia sin explicar.
+--   · La compra en efectivo de Frank abre una rendición fechada MAÑANA
+--     mientras las entregas quedaron HOY. El arqueo de Mónica muestra
+--     que Frank debe todo lo que compró.
+--   · Las firmas de aprobación se fechan un día adelante.
+--
+-- Es la MISMA trampa de las 19:00 que se arregló el 14 de agosto en
+-- src/fechas.js. Aquella cerró la mitad de la pantalla; esta cierra la
+-- mitad de la base, que quedó viva.
+--
+-- POR QUÉ ASÍ Y NO REESCRIBIENDO LAS FUNCIONES
+-- current_date aparece 50 veces repartidas en las 57 migraciones.
+-- Reescribirlas una por una es exactamente el tipo de cambio que a este
+-- proyecto ya le costó perder comportamiento tres veces. Una sola línea
+-- las corrige todas a la vez y no toca ni una función.
+--
+-- Perú no cambia de hora en todo el año: America/Lima es siempre UTC-5,
+-- sin horario de verano. No hay ambigüedad posible ni saltos dos veces
+-- al año, que es lo que haría peligroso este cambio en otros países.
+--
+-- QUÉ NO CAMBIA
+-- Las horas ya guardadas (creado_en, actualizado_en y demás timestamptz)
+-- son instantes absolutos: siguen apuntando al mismo momento exacto.
+-- Solo cambia cómo se leen y qué día se considera "hoy" de aquí en
+-- adelante. Las fechas ya guardadas (date) tampoco se tocan.
+-- La carga incremental compara instantes dentro de la base, así que
+-- tampoco se ve afectada.
+-- ============================================================
+
+alter database postgres set timezone to 'America/Lima';
+
+-- ============================================================
+-- IMPORTANTE AL CORRERLA
+--
+-- El cambio se aplica a las conexiones NUEVAS. Supabase reutiliza
+-- conexiones, así que puede tardar un momento en verse en toda la app.
+-- Si al comprobar todavía sale UTC, esperar un minuto y repetir.
+--
+-- COMPROBACIÓN — las dos consultas tienen que dar lo mismo que el reloj
+-- de pared de Cusco:
+--
+--   show timezone;                    -- debe decir America/Lima
+--   select current_date, now();       -- deben coincidir con el día real
+--
+-- LA PRUEBA QUE DE VERDAD IMPORTA, y hay que hacerla DESPUÉS DE LAS 19:00
+-- (antes de esa hora no se puede distinguir si funcionó):
+--   1. Como residente, crear un RQ con fecha necesitada = hoy.
+--      Antes: lo rechazaba. Ahora: debe entrar.
+--   2. Como Pagos, registrar una entrega de efectivo del día.
+--      Antes: pedía motivo de atraso por una entrega de hace un minuto.
+--      Ahora: debe entrar sin pedir nada.
+--   3. Como Frank, registrar una factura en efectivo y comprobar que se
+--      engancha a la rendición de HOY, la misma de esa entrega.
+-- ============================================================

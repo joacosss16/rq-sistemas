@@ -60,7 +60,7 @@ export function ReporteMensual({ db }) {
   }, [rqs, facturas]);
 
   const flatAll = useMemo(() => rqs.flatMap(r => r.items.map(i => ({
-    ...i, rq: r.n, canal: r.canal, proyecto: r.proyecto, fechaRQ: r.fechaRQ, residente: r.residente,
+    ...i, rq: r.n, canalRq: r.canal, proyecto: r.proyecto, fechaRQ: r.fechaRQ, residente: r.residente,
   }))), [rqs]);
 
   const delMes = (f, m) => !!f && f.slice(0, 7) === m;

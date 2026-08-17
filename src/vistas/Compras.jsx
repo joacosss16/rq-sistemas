@@ -45,7 +45,7 @@ export function Compras({ user, db, api, modo }) {
   };
 
   const rqMap = Object.fromEntries(rqs.map(r => [r.n, r]));
-  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso, tipoRq: r.tipo, cotizacionRef: r.cotizacionRef })));
+  const flatBase = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canalRq: r.canal, residente: r.residente, just: r.just, proyecto: r.proyecto, piso: r.piso, tipoRq: r.tipo, cotizacionRef: r.cotizacionRef })));
   // Cerrado para Compras: aprobado, comprado y pagado. Lo que falte recibir
   // lo sigue viendo el almacén y el Tablero, pero aquí ya no estorba.
   const cerradoParaCompras = i => i.pago === 'Pagado'

@@ -23,7 +23,7 @@ export function Almacen({ user, db, api }) {
 
   const porRecibir = rqs.flatMap(r => r.items
     .filter(i => i.decision === 'Aprobado' && i.estado !== 'Entregado')
-    .map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canal: r.canal, residente: r.residente, proyecto: r.proyecto })))
+    .map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canalRq: r.canal, residente: r.residente, proyecto: r.proyecto })))
     .filter(i => i.proyecto === proy);
 
   const getF = id => form[id] || { cant: '', obs: '' };
