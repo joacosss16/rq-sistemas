@@ -34,12 +34,16 @@ export function AprobacionesResidente({ user, db, api }) {
     const r2 = { ...rech }; delete r2['s' + sa.n]; setRech(r2);
     avisar(`Salida #${sa.n} rechazada. El stock no se tocó. El almacenero verá el motivo.`);
   };
-  const aprobarPres = async p => {
-    // Gerencia no tiene obra propia: aprueba el lado que falte. Sin esto
-    // siempre habría firmado el de destino, aunque el pendiente fuera el otro.
-    const lado = todas
-      ? (!p.aprobOrigen ? 'aprob_origen' : 'aprob_destino')
-      : (p.origen === user.proyecto ? 'aprob_origen' : 'aprob_destino');
+  // Gerencia no tiene obra propia, así que ELIGE el lado con un botón por
+  // cada uno. Antes se le elegía solo — el primero sin firmar — y eso
+  // significaba que su clic firmaba POR el residente de origen: el préstamo
+  // desaparecía de la bandeja de Edwin sin que él lo viera, y la firma no se
+  // puede deshacer. Peor todavía, la columna decía "Recibes (destino)"
+  // mientras el botón firmaba el origen. Un residente normal no elige nada:
+  // solo puede firmar su propio lado.
+  const aprobarPres = async (p, ladoElegido) => {
+    const lado = ladoElegido
+      || (p.origen === user.proyecto ? 'aprob_origen' : 'aprob_destino');
     const r = await api.updPrestamo(p.id, { [lado]: { por: user.nombre, fecha: HOY_ISO } });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
     const cual = lado === 'aprob_origen' ? `origen (${p.origen})` : `destino (${p.destino})`;
@@ -116,7 +120,16 @@ export function AprobacionesResidente({ user, db, api }) {
                     <td className="py-2 px-1.5 font-mono text-slate-200">{p.cant}</td>
                     <td className="py-2 px-1.5 text-slate-300">{p.origen}</td>
                     <td className="py-2 px-1.5 text-slate-300">{p.destino}</td>
-                    <td className="py-2 px-1.5 text-[10px] font-semibold text-slate-400">{p.origen === user.proyecto ? 'Prestas (origen)' : 'Recibes (destino)'}</td>
+                    <td className="py-2 px-1.5 text-[10px] font-semibold text-slate-400">
+                      {todas ? (
+                        <>
+                          <div className={p.aprobOrigen ? 'text-green-400' : 'text-yellow-400'}>
+                            {p.aprobOrigen ? `✓ origen · ${p.aprobOrigen}` : '○ origen sin firmar'}</div>
+                          <div className={p.aprobDestino ? 'text-green-400' : 'text-yellow-400'}>
+                            {p.aprobDestino ? `✓ destino · ${p.aprobDestino}` : '○ destino sin firmar'}</div>
+                        </>
+                      ) : (p.origen === user.proyecto ? 'Prestas (origen)' : 'Recibes (destino)')}
+                    </td>
                     <td className="py-2 px-1.5">
                       {rech['p' + p.n] !== undefined ? (
                         <div className="w-44">
@@ -129,8 +142,26 @@ export function AprobacionesResidente({ user, db, api }) {
                           </div>
                         </div>
                       ) : (
-                        <div className="flex gap-1">
-                          <button onClick={() => aprobarPres(p)} className={btnVerde}>Aprobar</button>
+                        <div className="flex gap-1 flex-wrap">
+                          {todas ? (
+                            <>
+                              {/* Gerencia elige el lado a mano: firmar por el residente
+                                  de origen le quita su material sin que se entere, y no
+                                  se puede deshacer. Solo se ofrece el lado sin firmar. */}
+                              {!p.aprobOrigen && (
+                                <button onClick={() => aprobarPres(p, 'aprob_origen')} className={btnVerde}
+                                  title={`Firmar por la obra que PRESTA (${p.origen}). Úsalo solo si esa obra no tiene residente.`}>
+                                  Firmar origen · {p.origen}</button>
+                              )}
+                              {!p.aprobDestino && (
+                                <button onClick={() => aprobarPres(p, 'aprob_destino')} className={btnVerde}
+                                  title={`Firmar por la obra que RECIBE (${p.destino}). Úsalo solo si esa obra no tiene residente.`}>
+                                  Firmar destino · {p.destino}</button>
+                              )}
+                            </>
+                          ) : (
+                            <button onClick={() => aprobarPres(p)} className={btnVerde}>Aprobar</button>
+                          )}
                           <button onClick={() => setRech({ ...rech, ['p' + p.n]: '' })} className={btnRojo}>Rechazar</button>
                         </div>
                       )}
