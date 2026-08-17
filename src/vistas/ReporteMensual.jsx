@@ -74,7 +74,7 @@ export function ReporteMensual({ db }) {
       lista.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
     }
     return lista.map(mm => {
-      const rqsM = rqs.filter(r => delMes(r.fechaRQ, mm));
+      const rqsM = rqs.filter(r => r.tipo === 'RQ' && delMes(r.fechaRQ, mm));
       const itemsM = flatAll.filter(i => delMes(i.fechaRQ, mm));
       const holg = itemsM.filter(i => i.fechaEntrega && i.fecha).map(i => dias(i.fecha, i.fechaEntrega));
       return {
@@ -88,7 +88,8 @@ export function ReporteMensual({ db }) {
   }, [mes, rqs, flatAll]);
 
   // ── Datos del mes elegido
-  const rqsM = rqs.filter(r => delMes(r.fechaRQ, mes));
+  // Solo RQ: las cotizaciones no son planificacion de obra (ver Tablero).
+  const rqsM = rqs.filter(r => r.tipo === 'RQ' && delMes(r.fechaRQ, mes));
   const itemsM = flatAll.filter(i => delMes(i.fechaRQ, mes));
   // Las anuladas no se cuentan como facturado: nunca movieron plata.
   const factM = facturas.filter(f => !f.anulMotivo && delMes(f.fecha, mes));

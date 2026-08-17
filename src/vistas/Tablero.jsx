@@ -35,7 +35,10 @@ export function Tablero({ db, user }) {
   const { rqs, facturas, prestamos, salidas } = db;
   const [proy, setProy] = useState('TODOS');
   const [pagoF, setPagoF] = useState(null);
-  const rqsF = rqs.filter(r => proy === 'TODOS' || r.proyecto === proy);
+  // El semaforo de planificacion mide a los residentes: las cotizaciones de
+  // Compras (enchapes) no son planificacion de obra y nacen con la fecha del
+  // dia, o sea URGENTE. Contarlas le imputaria urgencias al arquitecto.
+  const rqsF = rqs.filter(r => r.tipo === 'RQ' && (proy === 'TODOS' || r.proyecto === proy));
   const flatAll = rqs.flatMap(r => r.items.map(i => ({ ...i, rq: r.n, canalRq: r.canal, proyecto: r.proyecto, partida: r.partida, piso: r.piso, fechaRQ: r.fechaRQ, residente: r.residente })));
   const flat = flatAll.filter(i => proy === 'TODOS' || i.proyecto === proy);
   const urg = rqsF.filter(r => r.canal === 'URGENTE').length;

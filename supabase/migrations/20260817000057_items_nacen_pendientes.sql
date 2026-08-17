@@ -67,8 +67,15 @@ begin
   -- El pedido por cotización nace aprobado por diseño.
   select tipo into v_tipo from public.rqs where id = new.rq_id;
   if v_tipo = 'Cotizacion' then
-    -- Aun así, lo que no decide la cotización se limpia igual: nadie
-    -- recibe ni paga en el momento de crear el pedido.
+    -- La cotización nace decidida, pero la FIRMA la pone el servidor: si
+    -- se dejara pasar la del cliente, este mismo camino permitiría grabar
+    -- "la aprobó Lucía a tal hora" sin que fuera verdad — el agujero que
+    -- esta migración vino a cerrar, colado por la puerta de al lado.
+    new.decidido_por      := auth.uid();
+    new.decidido_en       := now();
+    new.motivo_rechazo    := null;
+    -- Y lo que no decide la cotización se limpia igual: nadie recibe ni
+    -- paga en el momento de crear el pedido.
     new.estado            := '—';
     new.pago              := '—';
     new.cant_recibida     := 0;
@@ -127,21 +134,39 @@ commit;
 notify pgrst, 'reload schema';
 
 -- ============================================================
--- ANTES DE CORRER, comprobar si el agujero ya se usó. Debe dar 0 filas:
+-- ANTES DE CORRER, comprobar si el agujero ya se usó.
 --
---   select r.numero, i.codigo, i.decision, i.cant_recibida, i.creado_en
+-- Una línea decidida SIN firma de quién la decidió es la huella exacta.
+-- Hay que descartar dos casos legítimos: los saldos de compra parcial
+-- (que heredan la decisión del original) y todo lo anterior al 12 de
+-- agosto, que es cuando la migración 40 empezó a guardar la firma.
+--
+-- OJO: la marca `compra_parcial` se queda en el ítem ORIGINAL, no en el
+-- saldo — por eso el saldo se identifica buscando a su hermano, no por
+-- esa columna. (Una primera versión de esta consulta filtraba al revés
+-- y habría dado falsas alarmas.)
+--
+--   with saldos as (
+--     select h.id from public.rq_items h
+--       join public.rq_items o
+--         on o.rq_id = h.rq_id and o.codigo = h.codigo and o.id <> h.id
+--        and o.compra_parcial is not null
+--        and (o.compra_parcial ->> 'saldo')::numeric = h.cant
+--   )
+--   select r.numero as rq, r.proyecto, i.codigo, i.cant,
+--          i.decision, i.estado, i.cant_recibida,
+--          i.creado_en at time zone 'America/Lima' as creado_hora_cusco
 --     from public.rq_items i
 --     join public.rqs r on r.id = i.rq_id
 --    where r.tipo = 'RQ'
+--      and i.id not in (select id from saldos)
 --      and i.decision <> 'Pendiente'
 --      and i.decidido_por is null
---      and i.compra_parcial is null
 --    order by i.creado_en desc;
 --
--- Una línea decidida SIN firma de quién la decidió es la huella exacta
--- de este agujero. Si aparecen filas, avisar antes de seguir: hay que
--- mirarlas una por una (pueden ser también anteriores a la migración 40,
--- que fue la que empezó a guardar la firma).
+-- Cómo leerla: filas creadas ANTES del 12 de agosto son normales. Una
+-- posterior a esa fecha sí usó el agujero — mirarla una por una y avisar
+-- antes de seguir. Cerrar la puerta no limpia lo que ya entró.
 --
 -- CÓMO COMPROBAR DESPUÉS
 -- 1. Un residente crea un RQ normal: la línea nace Pendiente. Igual que antes.
