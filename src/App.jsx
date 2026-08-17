@@ -583,7 +583,20 @@ export default function App() {
           // compromiso → factura real: la serie llega con el comprobante al pagar
           ...(serieReal ? { serie: serieReal.trim().toUpperCase(), tipo_doc: 'Factura' } : {}),
         }).eq('id', id);
-        if (r.error && r.error.code === '23505') return { error: { message: `La factura  de ese RUC ya está registrada. Verifica la serie.` } };
+        // El numero de la serie se perdio de este mensaje el 11 ago 2026 al
+        // reescribir esta capa por rendimiento: decia "La factura  de ese RUC",
+        // con el hueco. Sin el numero, la salida natural era inventar una
+        // variante ("F001-000500-B") que no existe en ningun comprobante.
+        if (r.error && r.error.code === '23505') {
+          const n = (serieReal || '').trim().toUpperCase();
+          const fs = (dbRef.current && dbRef.current.facturas) || [];
+          const esta = fs.find(f => f.id === id);
+          const otra = fs.find(f => f.serie === n && esta && f.ruc === esta.ruc && f.id !== id);
+          const donde = otra ? ` Ya la usa la factura de ${otra.proyecto} por S/ ${otra.monto.toFixed(2)}.` : '';
+          return { error: { message: `⚠ El numero ${n} ya esta registrado para ese proveedor.${donde} `
+            + `Suele pasar cuando el proveedor junta varias entregas en una sola factura. `
+            + `NO invente una variante del numero: avise a Compras para resolverlo.` } };
+        }
         return r;
       }, ['facturas']),
       resolverRendicion: (id, { estado, observacion }) => wrap(async () => {

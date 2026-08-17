@@ -42,7 +42,8 @@ export function Tablero({ db, user }) {
   const pctUrg = rqsF.length ? Math.round(urg / rqsF.length * 100) : 0;
   const entregados = flat.filter(i => i.estado === 'Entregado').length;
   const tarde = flat.filter(i => i.fechaEntrega && i.fecha && dias(i.fecha, i.fechaEntrega) < 0).length;
-  const factF = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
+  // Las anuladas no suman al KPI Facturado: nunca movieron plata.
+  const factF = facturas.filter(f => !f.anulMotivo && (proy === 'TODOS' || f.proyecto === proy));
   const presActivos = prestamos.filter(p => p.estado === 'Prestado' && (proy === 'TODOS' || p.origen === proy || p.destino === proy)).length;
 
   const holguras = flat.filter(i => i.fechaEntrega && i.fecha).map(i => dias(i.fecha, i.fechaEntrega));
@@ -71,7 +72,7 @@ export function Tablero({ db, user }) {
     return {
       p, rqs: rp.length,
       urgPct: rp.length ? Math.round(rp.filter(r => r.canal === 'URGENTE').length / rp.length * 100) : null,
-      fact: facturas.filter(f => f.proyecto === p).reduce((a, f) => a + f.monto, 0),
+      fact: facturas.filter(f => !f.anulMotivo && f.proyecto === p).reduce((a, f) => a + f.monto, 0),
       holg: hs.length ? +(hs.reduce((a, b) => a + b, 0) / hs.length).toFixed(1) : null,
       aTiempo: hs.length ? Math.round(hs.filter(h => h >= 0).length / hs.length * 100) : null,
       incorrPct: sp.length ? Math.round(sp.filter(s => s.uso === 'Incorrecto').length / sp.length * 100) : null,

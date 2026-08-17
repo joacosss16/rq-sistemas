@@ -61,7 +61,10 @@ export function Auditoria({ user, db, api }) {
   const [aviso, setAvisoRaw] = useState('');
   const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 5000); };
 
-  const pagadas = facturas.filter(f => f.estadoPago === 'Pagada');
+  // Desde la migracion 53 una compra en EFECTIVO se puede anular con la jornada
+  // abierta, y conserva estado Pagada. Sin este filtro entraria al CSV de
+  // conciliacion bancaria y al total de la semana como si hubiera movido plata.
+  const pagadas = facturas.filter(f => !f.anulMotivo && f.estadoPago === 'Pagada');
   const enSemana = pagadas.filter(f => f.fechaPago >= desde && f.fechaPago <= hasta)
     .sort((a, b) => (a.proyecto + a.fechaPago < b.proyecto + b.fechaPago ? -1 : 1));
 
@@ -101,7 +104,7 @@ export function Auditoria({ user, db, api }) {
   pagadas.filter(f => f.fechaPago && f.fechaPago < f.fecha)
     .forEach(f => alertas.push({ clave: `pago-anterior:${f.serie}:${f.fechaPago}`, tipo: 'Pago anterior a la factura', detalle: `${f.serie}: factura del ${fmt(f.fecha)} pagada el ${fmt(f.fechaPago)}` }));
   {
-    const vencidas = facturas.filter(f => f.estadoPago !== 'Pagada' && diasHoy(vencimientoDe(f)) < 0);
+    const vencidas = facturas.filter(f => !f.anulMotivo && f.estadoPago !== 'Pagada' && diasHoy(vencimientoDe(f)) < 0);
     if (vencidas.length) {
       const monto = vencidas.reduce((a, f) => a + f.monto, 0);
       alertas.push({ clave: `vencidas:${vencidas.length}:${monto.toFixed(2)}`, tipo: 'Facturas vencidas sin pagar', detalle: `${vencidas.length} factura(s) por S/ ${monto.toFixed(2)}; la más antigua: ${vencidas.sort((a, b) => (vencimientoDe(a) < vencimientoDe(b) ? -1 : 1))[0].serie} (venció ${fmt(vencimientoDe(vencidas[0]))})` });

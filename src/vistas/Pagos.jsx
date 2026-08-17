@@ -54,7 +54,11 @@ export function Pagos({ user, db, api }) {
   // Quien compró no cierra su propio documento: lo digita administración
   const puedeSerie = user.rol === 'administracion' || user.rol === 'pagos' || user.rol === 'gerente';
 
-  const fs = facturas.filter(f => proy === 'TODOS' || f.proyecto === proy);
+  // Una factura anulada no se paga: la base rechaza cualquier cambio sobre ella.
+  // Dejarla en la cola solo ofrecia un boton que iba a fallar DESPUES de que
+  // Pagos ya hizo la transferencia en el banco, y de paso inflaba la deuda de
+  // la obra. Su rastro se sigue viendo tachado en Compras, que es su sitio.
+  const fs = facturas.filter(f => !f.anulMotivo && (proy === 'TODOS' || f.proyecto === proy));
   const pend = fs.filter(f => f.estadoPago !== 'Pagada');
   const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
   // Se paga obra por obra: cada una tiene su cuenta, así que quien paga entra a

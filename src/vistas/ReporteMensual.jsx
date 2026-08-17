@@ -90,7 +90,8 @@ export function ReporteMensual({ db }) {
   // ── Datos del mes elegido
   const rqsM = rqs.filter(r => delMes(r.fechaRQ, mes));
   const itemsM = flatAll.filter(i => delMes(i.fechaRQ, mes));
-  const factM = facturas.filter(f => delMes(f.fecha, mes));
+  // Las anuladas no se cuentan como facturado: nunca movieron plata.
+  const factM = facturas.filter(f => !f.anulMotivo && delMes(f.fecha, mes));
   const salM = salidas.filter(s => delMes(s.fecha, mes));
   const presM = prestamos.filter(p => delMes(p.fecha, mes));
   const solM = (solicitudes || []).filter(s => delMes(s.fecha, mes));
@@ -151,8 +152,8 @@ export function ReporteMensual({ db }) {
     pagadas: pagadasM.length,
     montoPagado: pagadasM.reduce((a, f) => a + f.monto, 0),
     plazoProm: plazos.length ? (plazos.reduce((a, b) => a + b, 0) / plazos.length).toFixed(1) : '—',
-    pendientes: facturas.filter(f => f.estadoPago !== 'Pagada').length,
-    deuda: facturas.filter(f => f.estadoPago !== 'Pagada').reduce((a, f) => a + f.monto, 0),
+    pendientes: facturas.filter(f => !f.anulMotivo && f.estadoPago !== 'Pagada').length,
+    deuda: facturas.filter(f => !f.anulMotivo && f.estadoPago !== 'Pagada').reduce((a, f) => a + f.monto, 0),
   };
 
   // ── DIFERENCIAS DE CAJA CHICA (la goterita diaria es lo que importa)
@@ -420,7 +421,7 @@ export function ReporteMensual({ db }) {
 
       <Bloque id="pag" titulo="Pagos" sub="Lo pagado en el mes y la deuda viva al cierre. Haz clic en un indicador para ver las facturas.">
         {(() => {
-          const pend = facturas.filter(f => f.estadoPago !== 'Pagada');
+          const pend = facturas.filter(f => !f.anulMotivo && f.estadoPago !== 'Pagada');
           return (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             <Tarjeta l="Facturas pagadas" v={pagos.pagadas} c="text-green-400"
