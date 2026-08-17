@@ -615,6 +615,27 @@ export function Compras({ user, db, api, modo }) {
                             className={`w-full mb-1 ${pendCls(/^\d{11}$/.test(ff.ruc))} font-mono ${!ff.prov.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
                           {ff.ruc && !/^\d{11}$/.test(ff.ruc) && <div className="text-[9px] text-red-400 mb-1">RUC inválido</div>}
                           {ff.ruc && /^\d{11}$/.test(ff.ruc) && !proveedores.some(p => p[0] === ff.ruc) && <div className="text-[9px] text-sky-400 mb-1">Proveedor nuevo: se agregará al maestro.</div>}
+                          {/* Aviso PREVENTIVO, nunca bloqueante. Si el proveedor junta las
+                              entregas del mes en una sola factura, al pagar el segundo
+                              compromiso el sistema lo rechaza (serie+RUC no se repiten) y
+                              el pago ya salió del banco. Este es el único momento en que
+                              todavía se puede evitar. NO convertirlo en guarda: dos compras
+                              al mismo proveedor con dos facturas reales distintas es lo
+                              normal todos los días. */}
+                          {(() => {
+                            if (!/^\d{11}$/.test(ff.ruc)) return null;
+                            const vivos = facturas.filter(f => f.tipoDoc === 'Compromiso' && f.estadoPago !== 'Pagada'
+                              && !f.anulMotivo && f.ruc === ff.ruc && f.proyecto === i.proyecto);
+                            if (!vivos.length) return null;
+                            return (
+                              <div className="text-[9px] text-orange-400 bg-orange-950 border border-orange-800 rounded px-2 py-1 mb-1">
+                                Ojo: ya hay {vivos.length} compromiso(s) sin pagar de este proveedor en {i.proyecto}
+                                {' '}({vivos.map(f => f.serie).join(', ')}). Si a fin de mes emite UNA sola factura por
+                                todas las entregas, solo se va a poder cerrar una. Conviene acordar con él una factura
+                                por entrega.
+                              </div>
+                            );
+                          })()}
                           <FechaInput value={ff.fecha} onChange={e => setFF(i.id, 'fecha', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`} />
                           <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} onKeyDown={enterSiguiente}
                             disabled={!/^\d{11}$/.test(ff.ruc)} placeholder="Monto TOTAL S/ (inc. IGV)"

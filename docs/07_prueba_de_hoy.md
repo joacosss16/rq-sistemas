@@ -110,6 +110,15 @@ sin pagar, y como gerencia la anulas con motivo.
       *(Antes decía "La factura ␣ de ese RUC", sin el número — por eso
       la gente inventaba `F001-000500-B`.)*
 
+### 2.3b · El aviso preventivo (la otra mitad del arreglo 5)
+- [ ] Como **Lucía**: registrar un compromiso a crédito de un proveedor.
+- [ ] Registrar un **segundo** compromiso del **mismo proveedor y la
+      misma obra**: al digitar el RUC debe aparecer un **recuadro naranja**
+      avisando que ya hay compromisos sin pagar de ese proveedor, con sus
+      números, y sugiriendo acordar una factura por entrega.
+- [ ] **El aviso NO debe bloquear el botón**: es informativo. Dos compras
+      al mismo proveedor con facturas distintas es lo normal.
+
 ### 2.4 · Que los arreglos de la base no rompieron lo normal
 - [ ] **Pagos** paga una factura por transferencia: entra normal.
 - [ ] **Administración** digita la serie real de un compromiso: entra.
