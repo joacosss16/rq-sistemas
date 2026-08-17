@@ -65,8 +65,31 @@ export function Auditoria({ user, db, api }) {
   // abierta, y conserva estado Pagada. Sin este filtro entraria al CSV de
   // conciliacion bancaria y al total de la semana como si hubiera movido plata.
   const pagadas = facturas.filter(f => !f.anulMotivo && f.estadoPago === 'Pagada');
-  const enSemana = pagadas.filter(f => f.fechaPago >= desde && f.fechaPago <= hasta)
+
+  // ¿Este movimiento salió de una CUENTA BANCARIA? Es la única pregunta que
+  // decide qué se concilia. Se define una sola vez porque de ella cuelgan tres
+  // cosas que antes no coincidían: el CSV, la tabla de la pantalla y la alerta
+  // de "sin conciliar hace 14+ días".
+  //   · Efectivo        → salió de la caja chica, se audita en su rendición.
+  //   · Nota de crédito → no movió dinero, el proveedor canceló con un documento.
+  // Antes las pagadas en efectivo entraban igual, así que Yheyson las buscaba en
+  // un extracto donde no podían estar, y a los 14 días CADA compra de Frank se
+  // volvía una alerta roja permanente por plata que nunca pasó por un banco.
+  const movioBanco = medio => medio !== 'Efectivo' && !SIN_BANCO(medio);
+
+  const porBanco = pagadas.filter(f => movioBanco(f.medio));
+  const enSemana = porBanco.filter(f => f.fechaPago >= desde && f.fechaPago <= hasta)
     .sort((a, b) => (a.proyecto + a.fechaPago < b.proyecto + b.fechaPago ? -1 : 1));
+
+  // El dinero que Pagos le entrega al comprador TAMBIÉN sale del banco, pero no
+  // es una compra: es una entrega a rendir cuenta — la empresa se lo pasa a sí
+  // misma y Frank queda debiéndolo hasta que lo sustenta con facturas o devuelve
+  // el vuelto. Aparece en el extracto, así que sin ella la conciliación no cuadra;
+  // y va marcada como TRASLADO para que nadie la sume como gasto: sería contar dos
+  // veces la misma plata, primero al salir y otra vez convertida en material.
+  const entregasSemana = entregas
+    .filter(e => !e.anulMotivo && movioBanco(e.medio) && e.fecha >= desde && e.fecha <= hasta)
+    .sort((a, b) => (a.proyecto + a.fecha < b.proyecto + b.fecha ? -1 : 1));
 
   // ---------- NIVEL 1: alertas automáticas (sobre TODOS los datos) ----------
   const alertas = [];
@@ -145,7 +168,9 @@ export function Auditoria({ user, db, api }) {
   }
   pagadas.filter(f => f.monto > UMBRAL_MONTO_INUSUAL)
     .forEach(f => alertas.push({ clave: `monto-inusual:${f.serie}`, tipo: 'Monto inusual', detalle: `${f.serie} (${f.proyecto}): S/ ${f.monto.toFixed(2)} — revisar con lupa (umbral S/ ${UMBRAL_MONTO_INUSUAL})` }));
-  pagadas.filter(f => !f.conciliada && f.fechaPago && diasHoy(f.fechaPago) <= -14)
+  // Solo lo que salió del banco puede conciliarse contra el banco. Las compras
+  // en efectivo se auditan por su rendición, no aquí.
+  porBanco.filter(f => !f.conciliada && f.fechaPago && diasHoy(f.fechaPago) <= -14)
     .forEach(f => alertas.push({ clave: `sin-conciliar:${f.serie}`, tipo: 'Sin conciliar hace 14+ días', detalle: `${f.serie} (${f.proyecto}) pagada el ${fmt(f.fechaPago)} sigue sin conciliar contra el banco` }));
 
   // Las alertas levantadas salen de la lista activa pero NO se borran: quedan
@@ -177,12 +202,26 @@ export function Auditoria({ user, db, api }) {
   };
 
   const csvSemana = () => {
-    const cab = ['Obra', 'Banco', 'Cuenta', 'Medio', 'N_Operacion', 'Factura', 'Proveedor', 'RUC', 'Monto', 'F_Pago', 'Pago_Por', 'Conciliada'];
+    // El archivo lleva EXACTAMENTE lo que pasó por el banco, ni más ni menos:
+    // así su suma cuadra contra el extracto sin sumar ni restar a mano.
+    // La columna Concepto separa las dos naturalezas, que es la distinción que
+    // después necesita el Registro de Compras: el PAGO A PROVEEDOR es gasto y da
+    // crédito fiscal; la ENTREGA A RENDIR no es ninguna de las dos cosas, es la
+    // misma plata de la empresa cambiando de sitio.
+    const cab = ['Concepto', 'Obra', 'Banco', 'Cuenta', 'Medio', 'N_Operacion', 'Documento', 'Proveedor_o_Destino', 'RUC', 'Monto', 'Fecha', 'Registro_Por', 'Conciliada'];
     const esc = v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    // Fuera las saldadas con nota de credito: no movieron dinero del banco y
-    // buscarlas en el extracto es perseguir un movimiento que no existe.
-    const filas = enSemana.filter(f => !SIN_BANCO(f.medio))
-      .map(f => [f.proyecto, f.banco || 'EFECTIVO', (bancoDe[f.proyecto] || {}).cuenta || '', f.medio, f.numOp || '', f.serie, f.prov, f.ruc, f.monto.toFixed(2), f.fechaPago, f.pagadoPor, f.conciliada ? 'SI' : 'NO'].map(esc).join(','));
+    // La entrega no guarda banco propio: sale de la cuenta de su obra, que es
+    // como Pagos trabaja (cada obra paga desde la suya).
+    const cuenta = obra => (bancoDe[obra] || {}).cuenta || '';
+    const bancoObra = obra => (bancoDe[obra] || {}).banco || '';
+    const filas = [
+      ...enSemana.map(f => ['PAGO A PROVEEDOR', f.proyecto, f.banco, cuenta(f.proyecto), f.medio, f.numOp || '',
+        f.serie, f.prov, f.ruc, f.monto.toFixed(2), f.fechaPago, f.pagadoPor, f.conciliada ? 'SI' : 'NO']),
+      // Sin RUC ni serie: no es un comprobante. El destino es la persona que
+      // recibió el dinero y queda debiéndolo hasta rendirlo.
+      ...entregasSemana.map(e => ['ENTREGA A RENDIR', e.proyecto, bancoObra(e.proyecto), cuenta(e.proyecto), e.medio, e.numOp || '',
+        'ENT-' + String(e.n).padStart(4, '0'), 'Comprador (entrega a rendir)', '', e.monto.toFixed(2), e.fecha, e.entregadoPor, '']),
+    ].map(f => f.map(esc).join(','));
     const csv = '﻿' + cab.join(',') + '\n' + filas.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
@@ -205,7 +244,8 @@ export function Auditoria({ user, db, api }) {
             <FechaInput value={desde} onChange={e => setDesde(e.target.value)} className={`w-32 ${inputCls}`} />
             <label className="text-[10px] text-slate-500 uppercase">al</label>
             <FechaInput value={hasta} onChange={e => setHasta(e.target.value)} className={`w-32 ${inputCls}`} />
-            <button onClick={csvSemana} disabled={!enSemana.length} className={btnOk(enSemana.length > 0)}>⤓ CSV para conciliar</button>
+            <button onClick={csvSemana} disabled={!enSemana.length && !entregasSemana.length}
+              className={btnOk(enSemana.length > 0 || entregasSemana.length > 0)}>⤓ CSV para conciliar</button>
           </div>
         </div>
       </div>
@@ -262,7 +302,15 @@ export function Auditoria({ user, db, api }) {
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
-          Pagos del período · {enSemana.length} · S/ {totalSemana.toFixed(2)} · sin conciliar: {sinConciliar}</div>
+          Pagos por banco del período · {enSemana.length} · S/ {totalSemana.toFixed(2)} · sin conciliar: {sinConciliar}</div>
+        {entregasSemana.length > 0 && (
+          <div className="text-[11px] text-slate-400 bg-slate-950 border border-slate-800 rounded px-3 py-2 mb-3">
+            El CSV incluye además <b className="text-slate-200">{entregasSemana.length} entrega(s) de dinero al comprador</b> por
+            S/ {entregasSemana.reduce((a, e) => a + e.monto, 0).toFixed(2)}, marcadas como <b>ENTREGA A RENDIR</b>.
+            También salieron del banco, pero <b>no son gasto</b>: es plata de la empresa que el comprador rinde después con
+            facturas. No las sumes junto a los pagos — sería contar dos veces el mismo dinero. Se controlan en Rendiciones.
+          </div>
+        )}
         <Aviso msg={aviso} />
         {enSemana.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Sin pagos en el período seleccionado.</div>
@@ -274,9 +322,9 @@ export function Auditoria({ user, db, api }) {
                 {enSemana.map(f => (
                   <tr key={f.n} className="border-b border-slate-800">
                     <td className="py-2 px-1.5 text-slate-300 whitespace-nowrap">{f.proyecto}</td>
-                    <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.medio === 'Efectivo' ? 'Caja chica' : f.banco}</td>
+                    <td className="py-2 px-1.5 text-slate-400 whitespace-nowrap">{f.banco}</td>
                     <td className="py-2 px-1.5">
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${f.medio === 'Efectivo' ? 'bg-yellow-950 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>{f.medio}</span></td>
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400">{f.medio}</span></td>
                     <td className="py-2 px-1.5 font-mono text-slate-300">{f.numOp || '—'}</td>
                     <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}</td>
                     <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
@@ -300,7 +348,7 @@ export function Auditoria({ user, db, api }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Ritual semanal: descarga el CSV, ábrelo junto al estado de cuenta de cada banco, y marca aquí cada pago verificado. Lo que quede sin conciliar 14 días se vuelve alerta roja. Los pagos en efectivo se auditan por su rendición (pestaña Rendiciones).</div>
+        <div className="mt-3 text-slate-500 text-[11px]">Ritual semanal: descarga el CSV, ábrelo junto al estado de cuenta de cada banco, y marca aquí cada pago verificado. Lo que quede sin conciliar 14 días se vuelve alerta roja. Esta tabla y el CSV llevan <b>solo lo que salió de una cuenta bancaria</b>: las compras en efectivo se auditan por su rendición (pestaña Rendiciones), y las saldadas con nota de crédito no movieron dinero.</div>
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mt-3">
