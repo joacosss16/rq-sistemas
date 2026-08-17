@@ -211,7 +211,11 @@ export default function App() {
     setMaestros(proy2, alm2);
 
     const matMap = {}; mats.forEach(m => { matMap[m.codigo] = m; });
-    // unidad de consumo: si el material se compra en caja, la base es und_base
+    // Unidad de consumo: si el material se compra en caja, la base es und_base.
+    // OJO: esto es solo el RESPALDO. Desde la migracion 59 la unidad viaja
+    // congelada en cada linea, porque deducirla del catalogo reescribia el
+    // pasado: cargar una equivalencia de caja convertia un '3 CAJA' ya
+    // registrado en '3 UND', sin tocar el numero y sin que nadie lo notara.
     const undDe = m => (m && (m.und_base || m.und)) || '';
     const factorMap = {};
     mats.forEach(m => { if (m.factor_caja) factorMap[m.codigo] = { factor: Number(m.factor_caja), undCompra: m.und, undBase: m.und_base || 'UND' }; });
@@ -295,7 +299,7 @@ export default function App() {
     itemR.data.forEach(r => {
       const m = matMap[r.codigo] || {};
       const it = {
-        id: r.id, cod: r.codigo, desc: m.descripcion || r.codigo, und: undDe(m),
+        id: r.id, cod: r.codigo, desc: m.descripcion || r.codigo, und: r.und || undDe(m),
         cant: Number(r.cant), fecha: r.fecha_necesitada, destino: r.destino, color: r.color || '', obs: r.obs || '',
         canal: r.canal, decision: r.decision, estado: r.estado, motivoRechazo: r.motivo_rechazo || '',
         motivoAnulacion: r.anulacion ? r.anulacion.motivo : '', anuladoPor: r.anulacion ? r.anulacion.por : '',
@@ -426,7 +430,7 @@ export default function App() {
     const salidas = salR.data.map(s => ({
       id: s.id, n: s.numero, fecha: s.fecha, proyecto: nomProy[s.proyecto] || s.proyecto,
       cod: s.codigo, desc: matMap[s.codigo] ? matMap[s.codigo].descripcion : s.codigo,
-      und: undDe(matMap[s.codigo]), cant: Number(s.cant),
+      und: s.und || undDe(matMap[s.codigo]), cant: Number(s.cant),
       reingresada: Number(s.cant_reingresada || 0),
       reingresoPor: s.reingreso ? s.reingreso.por : '', fechaReingreso: s.reingreso ? s.reingreso.fecha : '',
       aprobacion: s.aprobacion || 'Aprobada',
@@ -442,7 +446,7 @@ export default function App() {
       id: p.id, n: p.numero, fecha: p.fecha,
       origen: nomProy[p.origen] || p.origen, destino: nomProy[p.destino] || p.destino,
       cod: p.codigo, desc: matMap[p.codigo] ? matMap[p.codigo].descripcion : p.codigo,
-      und: undDe(matMap[p.codigo]), cant: Number(p.cant),
+      und: p.und || undDe(matMap[p.codigo]), cant: Number(p.cant),
       autoriza: p.autoriza, estado: p.estado, fechaCierre: p.fecha_cierre,
       aprobOrigen: p.aprob_origen ? p.aprob_origen.por : '', aprobDestino: p.aprob_destino ? p.aprob_destino.por : '',
       rechazoMotivo: p.rechazo ? p.rechazo.motivo : '', rechazoPor: p.rechazo ? p.rechazo.por : '',
@@ -453,7 +457,7 @@ export default function App() {
     const stockInicial = siR.data.map(si => ({
       proyecto: nomProy[si.proyecto] || si.proyecto, cod: si.codigo,
       desc: matMap[si.codigo] ? matMap[si.codigo].descripcion : si.codigo,
-      und: undDe(matMap[si.codigo]),
+      und: si.und || undDe(matMap[si.codigo]),
       cant: Number(si.cant), fecha: si.fecha_inventario,
     }));
 
