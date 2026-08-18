@@ -6,7 +6,7 @@ import { estadoCaducidad, calcularStocks, stockDetalleObra } from './stock';
 import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito, vencimientoDe, MEDIOS_PAGO, ETIQUETA_NRO, SIN_BANCO } from './pago';
 import { imprimirRQ, imprimirCierre, imprimirConteo } from './pdf';
 import { PROYECTOS, ALMACENEROS, setMaestros } from './maestros';
-import { canalClases, pillEstado, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde, Aviso, AnularBox, AlertaCerrable, FiltroProyecto, FechaInput, pendCls } from './ui';
+import { canalClases, pillEstado, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde, Aviso, AnularBox, AlertaCerrable, FiltroProyecto, FechaInput, pendCls, avisoLeido, alEnterarse } from './ui';
 import { buscarEnCatalogo } from './busqueda';
 import { Login } from './vistas/Login';
 import { Catalogo } from './vistas/Catalogo';
@@ -808,12 +808,23 @@ export default function App() {
     db.salidas.filter(s => s.proyecto === user.proyecto && !s.anulada && s.aprobacion === 'Pendiente').length +
     db.prestamos.filter(p => p.estado === 'Solicitado' && ((p.origen === user.proyecto && !p.aprobOrigen) || (p.destino === user.proyecto && !p.aprobDestino))).length
   ) : 0;
-  // Aviso al residente: ítems suyos anulados en los últimos 15 días
-  const anulRecientes = (user.rol === 'residente' && db)
+  // Aviso al residente: ítems suyos anulados en los últimos 15 días.
+  // La insignia se apaga con el mismo "Enterado" que cierra el aviso de la
+  // vista: la clave se arma IGUAL que allí (ver Residente.jsx). Antes eran dos
+  // cálculos independientes, así que el panel se iba y el número rojo se
+  // quedaba quince días — y quien pulsaba Enterado concluía, con razón, que no
+  // había servido de nada.
+  const anuladosRes = (user.rol === 'residente' && db)
     ? db.rqs.filter(r => r.proyecto === user.proyecto)
         .flatMap(r => r.items)
-        .filter(i => i.decision === 'Anulado' && i.fechaAnulacion && dias(HOY_ISO, i.fechaAnulacion) <= 15).length
-    : 0;
+        .filter(i => i.decision === 'Anulado' && i.fechaAnulacion && dias(HOY_ISO, i.fechaAnulacion) <= 15)
+        .sort((a, b) => (a.fechaAnulacion < b.fechaAnulacion ? 1 : -1))
+    : [];
+  const anulRecientes = anuladosRes.length && !avisoLeido('anulados:' + anuladosRes.map(i => i.id).join(','))
+    ? anuladosRes.length : 0;
+  // Enterarse no cambia ningún dato, así que hay que redibujar a mano.
+  const [, redibujar] = useState(0);
+  alEnterarse(useCallback(() => redibujar(n => n + 1), []));
 
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>

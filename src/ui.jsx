@@ -86,17 +86,35 @@ export function AnularBox({ label = 'Anular', onConfirm }) {
 // línea que se puede reabrir, que es lo correcto cuando la situación sigue activa
 // y explica por qué el sistema no deja hacer algo (la caja bloqueada, por ejemplo):
 // ahí borrarlo del todo dejaría a la persona sin saber qué pasa.
+// ¿Ya se dio por leído este aviso? Lo consultan también las insignias de las
+// pestañas: antes el aviso se cerraba pero el número rojo seguía puesto quince
+// días, y quien pulsaba Enterado concluía —con razón— que no había funcionado.
+export const avisoLeido = id => {
+  try { return localStorage.getItem('rq:aviso:' + id) === '1'; } catch { return false; }
+};
+// Cerrar o reabrir un aviso no cambia ningún dato, así que React no se entera
+// solo. Este aviso al resto de la pantalla es lo que hace que la insignia se
+// apague en el momento, y no en el refresco siguiente.
+const EVENTO_AVISO = 'rq:aviso-cambiado';
+export const alEnterarse = fn => {
+  useEffect(() => {
+    window.addEventListener(EVENTO_AVISO, fn);
+    return () => window.removeEventListener(EVENTO_AVISO, fn);
+  }, [fn]);
+};
+
 export function AlertaCerrable({ id, tono = 'rojo', resumen, desaparece = false, children }) {
   const clave = 'rq:aviso:' + id;
   const leido = () => { try { return localStorage.getItem(clave) === '1'; } catch { return false; } };
   const [cerrada, setCerrada] = useState(leido);
   useEffect(() => { setCerrada(leido()); }, [clave]);   // clave nueva = situación nueva
+  const avisarCambio = () => window.dispatchEvent(new Event(EVENTO_AVISO));
   const cls = tono === 'naranja'
     ? 'bg-orange-950 border-orange-800 text-orange-400'
     : 'bg-red-950 border-red-800 text-red-400';
 
   if (cerrada) return desaparece ? null : (
-    <button onClick={() => { try { localStorage.removeItem(clave); } catch { /* sin almacenamiento */ } setCerrada(false); }}
+    <button onClick={() => { try { localStorage.removeItem(clave); } catch { /* sin almacenamiento */ } setCerrada(false); avisarCambio(); }}
       className={`w-full text-left px-3 py-1.5 rounded border mb-3 text-[10px] font-bold uppercase opacity-60 hover:opacity-100 ${cls}`}>
       {resumen} · ver de nuevo
     </button>
@@ -106,7 +124,7 @@ export function AlertaCerrable({ id, tono = 'rojo', resumen, desaparece = false,
     <div className={`rounded-md border p-4 mb-3 ${cls}`}>
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">{children}</div>
-        <button onClick={() => { try { localStorage.setItem(clave, '1'); } catch { /* sin almacenamiento */ } setCerrada(true); }}
+        <button onClick={() => { try { localStorage.setItem(clave, '1'); } catch { /* sin almacenamiento */ } setCerrada(true); avisarCambio(); }}
           className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap shrink-0">
           Enterado
         </button>
