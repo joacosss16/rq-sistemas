@@ -12,7 +12,7 @@ import { calcularStocks } from '../stock';
 import { imprimirRQ } from '../pdf';
 import { PROYECTOS, ALMACENEROS } from '../maestros';
 import { buscarEnCatalogo } from '../busqueda';
-import { Aviso, AlertaCerrable, FechaInput, inputCls, lblCls, thCls, btnOk, pillEstado, pendCls, canalClases } from '../ui';
+import { Aviso, AlertaCerrable, FechaInput, FiltroProyecto, inputCls, lblCls, thCls, btnOk, pillEstado, pendCls, canalClases } from '../ui';
 
 function canalDeFecha(f) {
   if (!f) return null;
@@ -125,7 +125,9 @@ export function Residente({ user, db, api }) {
     setSolForm(null);
   };
 
-  const misRqs = esRes ? rqs.filter(r => r.proyecto === user.proyecto && r.tipo !== 'Cotizacion') : rqs;
+  const misRqs = esRes
+    ? rqs.filter(r => r.proyecto === user.proyecto && r.tipo !== 'Cotizacion')
+    : rqs.filter(r => proyF === 'TODOS' || r.proyecto === proyF);
   const misSol = esRes ? solicitudes.filter(s => s.solicitanteId === user.id) : solicitudes;
   // Aviso: ítems míos anulados por Compras/gerencia en los últimos 15 días
   const anuladosRecientes = misRqs
@@ -136,6 +138,10 @@ export function Residente({ user, db, api }) {
   // Un RQ se archiva solo cuando ya no queda nada por atender:
   // cada ítem está Entregado, o cerrado por rechazo/anulación.
   const [verArchivados, setVerArchivados] = useState(false);
+  // Gerencia entra aqui sin obra propia y ve los RQ de las cinco obras
+  // mezclados. Un residente no necesita filtro -- solo tiene una obra --
+  // pero sin el, esta pantalla es inservible para gerencia.
+  const [proyF, setProyF] = useState('TODOS');
   const rqCerrado = r => r.items.length > 0 &&
     r.items.every(i => i.decision === 'Rechazado' || i.decision === 'Anulado' || i.estado === 'Entregado');
   // Orden a elección del residente: N° de RQ (el más reciente arriba, que es
@@ -321,7 +327,9 @@ export function Residente({ user, db, api }) {
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Mis requerimientos · estado (solo lectura — lo gestiona Compras)</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+            {esRes ? 'Mis requerimientos' : 'Requerimientos de todas las obras'} · estado (solo lectura — lo gestiona Compras)</div>
+          {!esRes && <FiltroProyecto value={proyF} onChange={setProyF} todos />}
           <div className="ml-auto flex items-center gap-1">
             <span className="text-[9px] font-bold uppercase text-slate-500">Ordenar por:</span>
             {[['num', 'N° RQ'], ['fecha', 'Fecha necesitada']].map(([k, l]) => (
