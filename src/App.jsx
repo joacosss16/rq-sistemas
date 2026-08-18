@@ -56,6 +56,17 @@ export default function App() {
   // Contador de generacion: si dos cargas se solapan (el refresco de 40 s y el
   // de un clic), la que empezo antes NO puede pisar a la que empezo despues.
   const epocaRef = useRef(0);
+  // Dar por leído un aviso no cambia ningún dato de la base, así que React no
+  // redibuja solo y la insignia de la pestaña se quedaría encendida hasta el
+  // refresco siguiente. Esto la apaga en el momento.
+  //
+  // OJO: va AQUÍ ARRIBA con los demás ganchos, nunca más abajo. Debajo hay
+  // cortes que devuelven la pantalla de carga antes de llegar al final, y un
+  // gancho puesto después de un corte se ejecuta unas veces sí y otras no.
+  // React lo detecta y tumba la aplicación entera: pantalla en blanco después
+  // de "cargando datos". Pasó exactamente eso el 18 ago 2026.
+  const [, redibujar] = useState(0);
+  alEnterarse(useCallback(() => redibujar(n => n + 1), []));
 
   useEffect(() => {
     // Supabase entrega un objeto NUEVO en cada evento (refresco de token,
@@ -822,9 +833,6 @@ export default function App() {
     : [];
   const anulRecientes = anuladosRes.length && !avisoLeido('anulados:' + anuladosRes.map(i => i.id).join(','))
     ? anuladosRes.length : 0;
-  // Enterarse no cambia ningún dato, así que hay que redibujar a mano.
-  const [, redibujar] = useState(0);
-  alEnterarse(useCallback(() => redibujar(n => n + 1), []));
 
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>
