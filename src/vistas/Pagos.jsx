@@ -1,5 +1,5 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState, Fragment } from 'react';
+import { useState, Fragment, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { vencimientoDe, MEDIOS_PAGO, ETIQUETA_NRO, SIN_BANCO } from '../pago';
 import { PROYECTOS } from '../maestros';
@@ -8,7 +8,7 @@ import { Aviso, AnularBox, FiltroProyecto, FechaInput, inputCls, thCls, btnOk, p
 // El alias interno (const vencimiento = vencimientoDe) se conserva tal
 // cual: de esa linea cuelga toda la columna Vence. No deduplicar.
 
-export function Pagos({ user, db, api }) {
+export function Pagos({ user, db, api, obraGlobal }) {
   const { facturas, rendiciones, bancoDe, entregas = [] } = db;
   // Mónica lleva una sola cuenta (rol administracion) y hace las dos cosas.
   // Se compensa haciéndolo visible: Auditoría avisa cuando la misma persona
@@ -47,6 +47,9 @@ export function Pagos({ user, db, api }) {
     && (fEnt.medio === 'Efectivo' || fEnt.numOp.trim().length > 0)
     && (!entregaAtrasada || fEnt.motivo.trim().length > 0);
   const [proy, setProy] = useState('TODOS');
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [fPago, setFPago] = useState({});
   const [fSerie, setFSerie] = useState({});   // serie real de las facturas por llegar
   const [verPagadas, setVerPagadas] = useState(false);   // lo hecho, plegado por defecto

@@ -1,14 +1,17 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState, Fragment } from 'react';
+import { useState, Fragment, useEffect } from 'react';
 import { fmt } from '../fechas';
 import { calcularStocks } from '../stock';
 import { PROYECTOS } from '../maestros';
 import { FiltroProyecto, thCls, pillEstado } from '../ui';
 
 // Historial de pedidos por material (residente: su obra · gerencia: todas)
-export function HistorialMateriales({ user, db }) {
+export function HistorialMateriales({ user, db, obraGlobal }) {
   const esRes = user.rol === 'residente';
   const [proy, setProy] = useState(esRes ? user.proyecto : 'TODOS');
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [abierto, setAbierto] = useState(null);
   const stocks = calcularStocks(db);
 

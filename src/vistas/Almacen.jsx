@@ -1,5 +1,5 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { estadoCaducidad, stockDetalleObra } from '../stock';
 import { PROYECTOS, ALMACENEROS } from '../maestros';
@@ -8,12 +8,15 @@ import { Aviso, AnularBox, FiltroProyecto, FechaInput, inputCls, lblCls, thCls, 
 // La lista de motivos de uso incorrecto viaja con la vista: nadie mas la usa.
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 
-export function Almacen({ user, db, api }) {
+export function Almacen({ user, db, api, obraGlobal }) {
   const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap } = db;
   const esAlm = user.rol === 'almacen';
   const [form, setForm] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState(esAlm ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : ''));
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [fSal, setFSal] = useState({});
   const [verif, setVerif] = useState({});
   const [fReing, setFReing] = useState({});

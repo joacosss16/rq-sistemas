@@ -65,6 +65,11 @@ export default function App() {
   // gancho puesto después de un corte se ejecuta unas veces sí y otras no.
   // React lo detecta y tumba la aplicación entera: pantalla en blanco después
   // de "cargando datos". Pasó exactamente eso el 18 ago 2026.
+  // MODO INSPECCION DE OBRA (solo gerencia). El tablero y el reporte mensual
+  // NUNCA se filtran: ahi se comparan las cinco obras y es lo que senala cual
+  // se esta saliendo. Elegida la obra, los modulos operativos la obedecen para
+  // ir a mirar de cerca. Arranca en TODOS: elegir es un acto consciente.
+  const [obraGlobal, setObraGlobal] = useState('TODOS');
   const [, redibujar] = useState(0);
   alEnterarse(useCallback(() => redibujar(n => n + 1), []));
 
@@ -845,6 +850,14 @@ export default function App() {
         <div className="font-extrabold text-sm tracking-widest text-yellow-400">
           COPACABANA <span className="text-slate-600 font-medium">/ RQ</span></div>
         <div className="text-slate-400 text-[11px]">{user.nombre}{user.proyecto ? ' · ' + user.proyecto : ''} <span className="text-slate-600">({user.rol})</span></div>
+        {!user.proyecto && user.rol === 'gerente' && (
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded border ${obraGlobal === 'TODOS'
+            ? 'border-slate-700 bg-slate-900' : 'border-yellow-400 bg-yellow-950'}`}>
+            <span className={`text-[9px] font-bold uppercase tracking-widest ${obraGlobal === 'TODOS' ? 'text-slate-500' : 'text-yellow-400'}`}>
+              {obraGlobal === 'TODOS' ? 'Viendo todas las obras' : 'Viendo solo'}</span>
+            <FiltroProyecto value={obraGlobal} onChange={setObraGlobal} todos />
+          </div>
+        )}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 bg-slate-800 p-1 rounded">
             {tabs.map(([k, l]) => {
@@ -864,17 +877,17 @@ export default function App() {
         </div>
       </div>
       <div className="p-4">
-        {tab === 'res' && <Residente user={user} db={db} api={api} />}
-        {tab === 'com' && <Compras user={user} db={db} api={api} />}
+        {tab === 'res' && <Residente user={user} db={db} api={api} obraGlobal={obraGlobal} />}
+        {tab === 'com' && <Compras user={user} db={db} api={api} obraGlobal={obraGlobal} />}
         {tab === 'dia' && <ComprasDelDia db={db} api={api} />}
         {tab === 'sto' && <AlmacenResidente user={user} db={db} />}
-        {tab === 'his' && <HistorialMateriales user={user} db={db} />}
-        {tab === 'apr' && <AprobacionesResidente user={user} db={db} api={api} />}
+        {tab === 'his' && <HistorialMateriales user={user} db={db} obraGlobal={obraGlobal} />}
+        {tab === 'apr' && <AprobacionesResidente user={user} db={db} api={api} obraGlobal={obraGlobal} />}
         {tab === 'fac' && <Compras user={user} db={db} api={api} modo="facturar" />}
-        {tab === 'alm' && <Almacen user={user} db={db} api={api} />}
+        {tab === 'alm' && <Almacen user={user} db={db} api={api} obraGlobal={obraGlobal} />}
         {tab === 'cat' && <Catalogo user={user} db={db} api={api} />}
-        {tab === 'pag' && <Pagos user={user} db={db} api={api} />}
-        {tab === 'ren' && <Rendiciones user={user} db={db} api={api} />}
+        {tab === 'pag' && <Pagos user={user} db={db} api={api} obraGlobal={obraGlobal} />}
+        {tab === 'ren' && <Rendiciones user={user} db={db} api={api} obraGlobal={obraGlobal} />}
         {tab === 'aud' && <Auditoria user={user} db={db} api={api} />}
         {tab === 'tab' && <Tablero db={db} user={user} />}
         {tab === 'rep' && user.rol === 'gerente' && <ReporteMensual db={db} />}

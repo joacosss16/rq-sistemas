@@ -1,9 +1,9 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { HOY_ISO } from '../fechas';
-import { Aviso, inputCls, thCls, btnRojo, btnVerde } from '../ui';
+import { Aviso, FiltroProyecto, inputCls, thCls, btnRojo, btnVerde } from '../ui';
 
-export function AprobacionesResidente({ user, db, api }) {
+export function AprobacionesResidente({ user, db, api, obraGlobal }) {
   const { salidas, prestamos } = db;
   const [aviso, setAviso] = useState('');
   const [rech, setRech] = useState({});
@@ -14,11 +14,18 @@ export function AprobacionesResidente({ user, db, api }) {
   // alta. Sin esto, esa obra no puede entregar material y la única salida es
   // el editor SQL en plena jornada.
   const todas = !user.proyecto;
+  // Esta vista nunca tuvo filtro: al residente no le hace falta (una sola obra)
+  // y a gerencia le mezclaba las cinco. Sigue a la obra elegida en la cabecera,
+  // y tambien se puede cambiar aqui.
+  const [proy, setProy] = useState('TODOS');
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
+  const enFiltro = p => !todas || proy === 'TODOS' || p === proy;
   const miObra = p => todas || p === user.proyecto;
 
-  const salPend = salidas.filter(s => miObra(s.proyecto) && !s.anulada && s.aprobacion === 'Pendiente');
+  const salPend = salidas.filter(s => miObra(s.proyecto) && enFiltro(s.proyecto) && !s.anulada && s.aprobacion === 'Pendiente');
   // préstamos donde falta una aprobación (la mía, o cualquiera si es gerencia)
   const presPend = prestamos.filter(p => p.estado === 'Solicitado' &&
+    (enFiltro(p.origen) || enFiltro(p.destino)) &&
     ((miObra(p.origen) && !p.aprobOrigen) || (miObra(p.destino) && !p.aprobDestino)));
 
   const aprobarSal = async sa => {
@@ -62,7 +69,10 @@ export function AprobacionesResidente({ user, db, api }) {
     <div>
       <Aviso msg={aviso} />
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Salidas de almacén por aprobar · {salPend.length}</div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Salidas de almacén por aprobar · {salPend.length}</div>
+          {todas && <FiltroProyecto value={proy} onChange={setProy} todos />}
+        </div>
         {salPend.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Nada pendiente. Aquí llegan las salidas que pide el almacenero; sin tu OK no descuentan stock.</div>
         ) : (
@@ -105,7 +115,7 @@ export function AprobacionesResidente({ user, db, api }) {
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Préstamos por aprobar (tu lado) · {presPend.length}</div>
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">{todas ? 'Préstamos por aprobar' : 'Préstamos por aprobar (tu lado)'} · {presPend.length}</div>
         {presPend.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Nada pendiente. Un préstamo se activa solo cuando lo aprueban los residentes de origen y destino.</div>
         ) : (

@@ -1,5 +1,5 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { fmt } from '../fechas';
 import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from '../caja';
 import { Aviso, FiltroProyecto, inputCls, thCls, btnOk, btnRojo } from '../ui';
@@ -7,7 +7,7 @@ import { Aviso, FiltroProyecto, inputCls, thCls, btnOk, btnRojo } from '../ui';
 // La prop cajas que no se usa se conserva tal cual: limpiar firmas de
 // props es de otra revision, no de la mudanza.
 
-export function Rendiciones({ user, db, api }) {
+export function Rendiciones({ user, db, api, obraGlobal }) {
   const { rendiciones, facturas, cajas, tolerancias = {}, bancoDe, entregas = [] } = db;
   // Solo administración cierra la caja del día. Antes el rol `pagos` también
   // podía, porque Mónica llevaba los dos frentes; eso ponía a la misma persona
@@ -16,6 +16,9 @@ export function Rendiciones({ user, db, api }) {
   // rendiciones están aprobadas para saber qué reponer.
   const puede = user.rol === 'administracion';
   const [proy, setProy] = useState('TODOS');
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [obs, setObs] = useState({});
   const [corr, setCorr] = useState({});   // texto de la corrección de una rendición observada
   const [arqueo, setArqueo] = useState({});     // efectivo contado al cerrar el día

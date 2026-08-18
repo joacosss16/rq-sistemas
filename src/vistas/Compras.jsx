@@ -1,5 +1,5 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
-import { useState, Fragment } from 'react';
+import { useState, Fragment, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { estadoCaducidad, calcularStocks } from '../stock';
 import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito } from '../pago';
@@ -16,7 +16,7 @@ import { HistorialPrecios } from './HistorialPrecios';
 // 2. HistorialPrecios se muestra en AMBOS modos (Frank negocia en
 //    mostrador con el); PedidoCotizacion solo cuando NO es facturar.
 
-export function Compras({ user, db, api, modo }) {
+export function Compras({ user, db, api, modo, obraGlobal }) {
   const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {}, rendiciones = [] } = db;
   // Obras con la caja chica trabada: descuadre o observación sin resolver de días anteriores
   const cajasTrabadas = rendiciones.filter(r =>
@@ -29,6 +29,9 @@ export function Compras({ user, db, api, modo }) {
   const [rechazo, setRechazo] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState('TODOS');
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [fFact, setFFact] = useState({});
   const [buscaExtra, setBuscaExtra] = useState({});   // filtro de la lista "otros ítems que cubre"
   const [triage, setTriage] = useState(null);

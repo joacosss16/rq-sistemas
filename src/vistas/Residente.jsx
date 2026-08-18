@@ -6,7 +6,7 @@
 // exclusivo: canalDeFecha (el canal URGENTE/GENERAL/ANTICIPADO se
 // decide solo con la fecha), NIVELES y el Buscador del catalogo.
 // ============================================================
-import { useState, useMemo, useRef, Fragment } from 'react';
+import { useState, useMemo, useRef, Fragment, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { calcularStocks } from '../stock';
 import { imprimirRQ } from '../pdf';
@@ -55,7 +55,7 @@ function Buscador({ catalogo, onPick, stockDe, deshabilitado, inputRef }) {
   );
 }
 
-export function Residente({ user, db, api }) {
+export function Residente({ user, db, api, obraGlobal }) {
   const { rqs, catalogo, solicitudes, codProy } = db;
   const esRes = user.rol === 'residente';
   const proyIni = esRes ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : '');
@@ -76,6 +76,9 @@ export function Residente({ user, db, api }) {
   // tumba la vista entera: JavaScript no deja leer una variable antes de
   // su declaración. Pasó exactamente eso el 18 ago 2026.
   const [proyF, setProyF] = useState('TODOS');
+  // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
+  // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
+  useEffect(() => { if (obraGlobal) setProyF(obraGlobal); }, [obraGlobal]);
   const ch = canalDeFecha(cab.fecha);
   const urgente = ch && ch.k === 'URGENTE';
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
@@ -161,6 +164,30 @@ export function Residente({ user, db, api }) {
   const rqsActivos = ordenar(misRqs.filter(r => !rqCerrado(r)));
   const rqsArchivados = ordenar(misRqs.filter(rqCerrado));
   const mostrados = [...rqsActivos, ...(verArchivados ? rqsArchivados : [])];
+
+  // Resumen de arriba. Sigue al filtro: si se elige una obra, estos numeros son
+  // los de esa obra y la lista de abajo es la misma. Definiciones, que es de
+  // donde depende que el numero sirva o mienta:
+  //   RETRASADO  -- tiene algun item APROBADO, sin entregar, cuya fecha
+  //                 necesitada ya paso. Es material que la obra esperaba y no
+  //                 tiene. Lo pendiente de decidir NO cuenta aqui: eso todavia
+  //                 no es un retraso de entrega, es un retraso de Compras.
+  //   INCOMPLETO -- llego parte y falta el saldo. El almacen ya recibio algo.
+  //   POR DECIDIR-- Compras aun no dijo si se compra. Se cuenta aparte porque
+  //                 apunta a otra persona: los tres primeros miran a la obra,
+  //                 este mira al area de compras.
+  // Un mismo RQ puede estar en varias columnas: son lentes, no etapas.
+  const rqRetrasado = r => r.items.some(i =>
+    i.decision === 'Aprobado' && i.estado !== 'Entregado' && i.fecha && i.fecha < HOY_ISO);
+  const rqIncompleto = r => r.items.some(i => i.estado === 'Incompleto');
+  const rqPorDecidir = r => r.items.some(i => i.decision === 'Pendiente');
+  const resumen = [
+    { k: 'Total', n: misRqs.length, cls: 'text-slate-200' },
+    { k: 'En curso', n: rqsActivos.length, cls: 'text-sky-400' },
+    { k: 'Retrasados', n: misRqs.filter(rqRetrasado).length, cls: 'text-red-400' },
+    { k: 'Incompletos', n: misRqs.filter(rqIncompleto).length, cls: 'text-orange-400' },
+    { k: 'Por decidir', n: misRqs.filter(rqPorDecidir).length, cls: 'text-yellow-400' },
+  ];
 
   return (
     <div>
@@ -328,6 +355,15 @@ export function Residente({ user, db, api }) {
           </table>
         </div>
       )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+        {resumen.map(x => (
+          <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+            <div className={`text-2xl font-bold font-mono ${x.n > 0 ? x.cls : 'text-slate-600'}`}>{x.n}</div>
+            <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">{x.k}</div>
+          </div>
+        ))}
+      </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-2 mb-3 flex-wrap">

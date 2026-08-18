@@ -9,7 +9,7 @@
 // Si se reteclea esa línea, se pierde sin que nada falle.
 // ============================================================
 import { useState, useMemo } from 'react';
-import { HOY_ISO } from '../fechas';
+import { HOY_ISO, fmt } from '../fechas';
 import { buscarEnCatalogo } from '../busqueda';
 import { inputCls, thCls } from '../ui';
 
