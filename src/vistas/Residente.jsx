@@ -68,6 +68,14 @@ export function Residente({ user, db, api }) {
   // los avisos (incluidos los de error) se autolimpian
   const setAviso = m => { setAvisoRaw(m); if (m) setTimeout(() => setAvisoRaw(''), m.startsWith('⚠') ? 8000 : 6000); };
   const [enviando, setEnviando] = useState(false);
+  // Gerencia entra aquí sin obra propia y ve los RQ de las cinco obras
+  // mezclados. Un residente no necesita filtro -- solo tiene una obra --
+  // pero sin él, esta pantalla es inservible para gerencia.
+  //
+  // OJO: va ANTES de misRqs, que es donde se usa. Declararlo después
+  // tumba la vista entera: JavaScript no deja leer una variable antes de
+  // su declaración. Pasó exactamente eso el 18 ago 2026.
+  const [proyF, setProyF] = useState('TODOS');
   const ch = canalDeFecha(cab.fecha);
   const urgente = ch && ch.k === 'URGENTE';
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
@@ -138,10 +146,6 @@ export function Residente({ user, db, api }) {
   // Un RQ se archiva solo cuando ya no queda nada por atender:
   // cada ítem está Entregado, o cerrado por rechazo/anulación.
   const [verArchivados, setVerArchivados] = useState(false);
-  // Gerencia entra aqui sin obra propia y ve los RQ de las cinco obras
-  // mezclados. Un residente no necesita filtro -- solo tiene una obra --
-  // pero sin el, esta pantalla es inservible para gerencia.
-  const [proyF, setProyF] = useState('TODOS');
   const rqCerrado = r => r.items.length > 0 &&
     r.items.every(i => i.decision === 'Rechazado' || i.decision === 'Anulado' || i.estado === 'Entregado');
   // Orden a elección del residente: N° de RQ (el más reciente arriba, que es
