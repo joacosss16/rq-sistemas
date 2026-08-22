@@ -64,6 +64,34 @@ export function Pagos({ user, db, api, obraGlobal }) {
   const fs = facturas.filter(f => !f.anulMotivo && (proy === 'TODOS' || f.proyecto === proy));
   const pend = fs.filter(f => f.estadoPago !== 'Pagada');
   const pagadas = fs.filter(f => f.estadoPago === 'Pagada');
+
+  // Resumen de vigilancia (solo gerencia). Sigue al filtro de obra.
+  //   VENCIDAS -- el plazo del proveedor ya paso. Una factura vencida hace 40
+  //               dias no es un olvido: es una relacion que se esta
+  //               deteriorando, y llega como reclamo antes que como numero.
+  //   EFECTIVO SIN RENDIR -- entregado a la calle, jornada aun abierta.
+  //   SIN CONCILIAR +14d -- pagado por banco y nunca verificado contra el
+  //               extracto. Es la alerta de Auditoria, adelantada aqui.
+  const deudaTotal = pend.reduce((a, f) => a + f.monto, 0);
+  const vencidas = pend.filter(f => vencimientoDe(f) < HOY_ISO);
+  const vencidaMax = vencidas.length ? Math.max(...vencidas.map(f => dias(HOY_ISO, vencimientoDe(f)))) : null;
+  const vencenSemana = pend.filter(f => { const ve = vencimientoDe(f); return ve >= HOY_ISO && dias(ve, HOY_ISO) <= 7; });
+  const efectivoCalle = entregas
+    .filter(e => !e.anulMotivo && !diaCerrado(e.proyecto, e.fecha) && (proy === 'TODOS' || e.proyecto === proy))
+    .reduce((a, e) => a + e.monto, 0);
+  const sinConciliar14 = pagadas.filter(f => f.medio !== 'Efectivo' && !SIN_BANCO(f.medio)
+    && !f.conciliada && f.fechaPago && dias(HOY_ISO, f.fechaPago) >= 14).length;
+  const resumenPagos = [
+    { k: 'Deuda total', n: 'S/ ' + deudaTotal.toFixed(2), on: deudaTotal > 0, cls: 'text-slate-200' },
+    { k: 'Vencidas', n: vencidas.length, on: vencidas.length > 0, cls: 'text-red-400',
+      nota: vencidas.length ? `la más antigua: ${vencidaMax} d · S/ ${vencidas.reduce((a, f) => a + f.monto, 0).toFixed(2)}` : null },
+    { k: 'Vencen en 7 días', n: vencenSemana.length, on: vencenSemana.length > 0, cls: 'text-yellow-400',
+      nota: vencenSemana.length ? `S/ ${vencenSemana.reduce((a, f) => a + f.monto, 0).toFixed(2)} por tener listos` : null },
+    { k: 'Efectivo sin rendir', n: 'S/ ' + efectivoCalle.toFixed(2), on: efectivoCalle > 0, cls: 'text-purple-400',
+      nota: efectivoCalle > 0 ? 'entregado, jornada abierta' : null },
+    { k: 'Sin conciliar · +14 d', n: sinConciliar14, on: sinConciliar14 > 0, cls: 'text-orange-400',
+      nota: sinConciliar14 ? 'pagado y nunca verificado contra el banco' : null },
+  ];
   // Se paga obra por obra: cada una tiene su cuenta, así que quien paga entra a
   // un banco, liquida lo de esa obra y recién cambia de cuenta. La lista va
   // agrupada por obra con su banco y su subtotal, no mezclada.
@@ -131,6 +159,17 @@ export function Pagos({ user, db, api, obraGlobal }) {
 
   return (
     <div>
+      {user.rol === 'gerente' && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+          {resumenPagos.map(x => (
+            <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+              <div className={`text-xl font-bold font-mono ${x.on ? x.cls : 'text-slate-600'}`}>{x.n}</div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase leading-tight">{x.k}</div>
+              {x.nota && <div className="text-[9px] text-slate-500 leading-tight mt-0.5">{x.nota}</div>}
+            </div>
+          ))}
+        </div>
+      )}
       {/* Entregas de efectivo del día (migración 38). La caja chica no es un
           fondo fijo: al comprador se le entrega dinero una o varias veces al
           día, y lo que reciba es contra lo que se cuadra el cierre. */}

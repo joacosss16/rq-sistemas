@@ -13,11 +13,12 @@ export function HistorialMateriales({ user, db, obraGlobal }) {
   // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
   useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const [abierto, setAbierto] = useState(null);
+  const [verRanking, setVerRanking] = useState(false);
   const stocks = calcularStocks(db);
 
   const flat = db.rqs
     .filter(r => (esRes ? r.proyecto === user.proyecto : (proy === 'TODOS' || r.proyecto === proy)))
-    .flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, proyecto: r.proyecto })))
+    .flatMap(r => r.items.map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, proyecto: r.proyecto, partida: r.partida, piso: r.piso })))
     .filter(i => i.decision !== 'Rechazado' && i.decision !== 'Anulado');
 
   const grupos = Object.values(flat.reduce((acc, i) => {
@@ -32,8 +33,79 @@ export function HistorialMateriales({ user, db, obraGlobal }) {
       : PROYECTOS.reduce((a, [, p]) => a + (((stocks[p] || {})[g.cod] || {}).cant || 0), 0),
   })).sort((a, b) => b.total - a.total);
 
+  // MAS COMPRADOS -- donde negociar por volumen. En multifamiliares el mismo
+  // cemento, fierro y porcelanato se compra cientos de veces, piso tras piso:
+  // bajar 3% el material que concentra el gasto vale mas que bajar 30%
+  // cualquier otro. Y la comparacion POR OBRA es la joya: los edificios se
+  // repiten, asi que el consumo por nivel deberia ser predecible -- si una
+  // obra lleva 40 por nivel y otra equivalente 55, hay desperdicio, robo o un
+  // error de presupuesto. Eso no se ve en ningun otro sitio del sistema.
+  const precioProm = db.precioProm || {};
+  const porMat = {};
+  flat.forEach(i => {
+    const e = porMat[i.cod] = porMat[i.cod] || { cod: i.cod, desc: i.desc, und: i.und, veces: 0, cant: 0, partidas: {}, obras: {} };
+    e.veces += 1; e.cant += Number(i.cant);
+    if (i.partida) e.partidas[i.partida] = (e.partidas[i.partida] || 0) + 1;
+    const o = e.obras[i.proyecto] = e.obras[i.proyecto] || { cant: 0, niveles: {} };
+    o.cant += Number(i.cant);
+    if (i.piso) o.niveles[i.piso] = (o.niveles[i.piso] || 0) + Number(i.cant);
+  });
+  const ranking = Object.values(porMat).map(e => ({
+    ...e,
+    valor: precioProm[e.cod] != null ? e.cant * precioProm[e.cod] : null,
+    partida: (Object.entries(e.partidas).sort((x, y) => y[1] - x[1])[0] || ['—'])[0],
+  })).sort((x, y) => ((y.valor ?? -1) - (x.valor ?? -1)) || (y.cant - x.cant)).slice(0, 10);
+  const sinPrecioTop = ranking.filter(e => e.valor === null).length;
+
   return (
     <div>
+      {!esRes && ranking.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+              Más comprados · dónde negociar por volumen</div>
+            <button onClick={() => setVerRanking(v => !v)}
+              className="ml-auto text-[10px] font-bold uppercase text-yellow-400 hover:text-yellow-300">
+              {verRanking ? '✕ cerrar' : `ver top ${ranking.length}`}</button>
+          </div>
+          {!verRanking && (
+            <div className="text-[11px] text-slate-500 mt-1">
+              Los pocos materiales que concentran el gasto son donde una negociación mueve la aguja.
+              Y la comparación por obra delata consumos que no deberían ser distintos.</div>
+          )}
+          {verRanking && (
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-xs">
+                <thead><tr>{['#', 'Material', 'Veces', 'Cant. total', 'S/ (precio prom.)', 'Partida más usada', 'Por obra (pasa el mouse: por nivel)'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {ranking.map((e, idx) => (
+                    <tr key={e.cod} className="border-b border-slate-800 align-top">
+                      <td className="py-1.5 px-1.5 font-mono text-slate-500">{idx + 1}</td>
+                      <td className="py-1.5 px-1.5 text-slate-200">{e.desc} <span className="text-slate-500">({e.und})</span>
+                        <div className="font-mono text-[10px] text-slate-500">{e.cod}</div></td>
+                      <td className="py-1.5 px-1.5 font-mono text-slate-300">{e.veces}</td>
+                      <td className="py-1.5 px-1.5 font-mono font-bold text-yellow-400">{e.cant}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-green-400">{e.valor !== null ? 'S/ ' + e.valor.toFixed(2) : <span className="text-slate-600">sin precio aún</span>}</td>
+                      <td className="py-1.5 px-1.5 font-mono text-[10px] text-slate-400">{e.partida}</td>
+                      <td className="py-1.5 px-1.5">
+                        {Object.entries(e.obras).sort((x, y) => y[1].cant - x[1].cant).map(([o, x]) => (
+                          <span key={o}
+                            title={Object.entries(x.niveles).map(([niv, c]) => `${niv}: ${c} ${e.und}`).join(' · ') || 'sin nivel registrado'}
+                            className="inline-block mr-2 mb-0.5 px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 cursor-help">
+                            {o} <b className="font-mono">{x.cant}</b></span>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="text-[10px] text-slate-500 mt-2">
+                Ordenado por gasto (cantidad × precio promedio pagado){sinPrecioTop > 0 ? `; ${sinPrecioTop} sin compras registradas aún, ordenados por cantidad` : ''}.
+                Si dos obras equivalentes consumen distinto por nivel, ahí hay desperdicio, robo o un error de presupuesto — es la única pantalla donde eso se ve.</div>
+            </div>
+          )}
+        </div>
+      )}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">

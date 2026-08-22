@@ -5,12 +5,12 @@
 // texto idéntico; solo se agregó "export" y estos imports.
 // ============================================================
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { fmt } from '../fechas';
+import { fmt, HOY_ISO } from '../fechas';
 import { buscarEnCatalogo } from '../busqueda';
 import { Aviso, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde } from '../ui';
 
 export function Catalogo({ user, db, api }) {
-  const { catalogo, solicitudes, familias } = db;
+  const { catalogo, solicitudes, familias, levantadas = {} } = db;
   const puedeAprobar = user.rol === 'compras';
   const [edit, setEdit] = useState({});   // n -> { desc, und, famIu, cod }
   const [rech, setRech] = useState({});
@@ -40,6 +40,58 @@ export function Catalogo({ user, db, api }) {
   };
 
   const [famForm, setFamForm] = useState(null);   // null | { iu, nombre }
+
+  // POSIBLES DUPLICADOS. Un mismo material cargado dos veces con codigos
+  // distintos hace tres danos a la vez: el consolidado no los junta (se compra
+  // dos veces en vez de negociar por volumen), el historial de precios se parte
+  // en dos series, y el stock aparece partido. Un catalogo sucio quita poder de
+  // negociacion sin que nadie lo note.
+  // El parecido se mide por palabras compartidas dentro de la MISMA familia:
+  // dos descripciones que comparten el 80% de sus palabras son sospechosas.
+  const [verDup, setVerDup] = useState(false);
+  const palabrasDe = t => new Set(String(t).toUpperCase().replace(/[^A-Z0-9ÑÁÉÍÓÚ ]/g, ' ').split(/\s+/).filter(w => w.length > 1));
+  const parecidos = (a, b) => {
+    const A = palabrasDe(a), B = palabrasDe(b);
+    if (A.size < 2 || B.size < 2) return false;
+    let comunes = 0; A.forEach(w => { if (B.has(w)) comunes++; });
+    return comunes / Math.min(A.size, B.size) >= 0.8;
+  };
+  // El descarte vive en la BASE (alertas_levantadas), no en el navegador: si
+  // Lucia revisa un par y no son duplicados, gerencia tampoco lo vuelve a ver,
+  // y al reves. Es la leccion del Enterado que se quedaba en un solo aparato.
+  const claveDup = (c1, c2) => 'dup:' + [c1, c2].sort().join(':');
+  const duplicados = useMemo(() => {
+    const porFam = {};
+    catalogo.forEach(m => { const iu = String(m[0]).slice(0, 2); (porFam[iu] = porFam[iu] || []).push(m); });
+    const pares = [];
+    Object.values(porFam).forEach(ms => {
+      for (let i = 0; i < ms.length && pares.length < 40; i++)
+        for (let j = i + 1; j < ms.length && pares.length < 40; j++)
+          if (!levantadas[claveDup(ms[i][0], ms[j][0])] && parecidos(ms[i][1], ms[j][1]))
+            pares.push([ms[i], ms[j]]);
+    });
+    return pares;
+  }, [catalogo, levantadas]);
+  // Los ya revisados, por si uno se descarto por error: se pueden reabrir.
+  const dupDescartados = Object.entries(levantadas)
+    .filter(([k]) => k.startsWith('dup:'))
+    .map(([k, v]) => {
+      const [, c1, c2] = k.split(':');
+      const d = c => (catalogo.find(m => m[0] === c) || [c, c])[1];
+      return { clave: k, c1, c2, d1: d(c1), d2: d(c2), por: v.por, fecha: v.fecha };
+    });
+  const noSonDuplicados = async (m1, m2) => {
+    const r = await api.levantarAlerta({
+      clave: claveDup(m1[0], m2[0]), tipo: 'Duplicado descartado',
+      detalle: `${m1[0]} ${m1[1]} ≠ ${m2[0]} ${m2[1]}`,
+      nota: 'Revisado: no son el mismo material',
+    });
+    if (r.error) { setAviso('⚠ ' + r.error); return; }
+    setAviso(`Par descartado. No se vuelve a mostrar a nadie; se puede reabrir desde la lista de descartados.`);
+  };
+  // Lo mismo, para avisar ANTES de aprobar una solicitud: el duplicado se
+  // evita aqui o no se evita nunca.
+  const parecidosEnCatalogo = desc => catalogo.filter(m => parecidos(desc, m[1])).slice(0, 2);
 
   // Primer IU libre entre 01 y 99
   const sugerirIU = () => {
@@ -125,6 +177,21 @@ export function Catalogo({ user, db, api }) {
   return (
     <div>
       <Aviso msg={aviso} />
+      {user.rol === 'gerente' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          {[
+            { k: 'Materiales', n: catalogo.length, cls: 'text-slate-200' },
+            { k: 'Solicitudes pendientes', n: pend.length, cls: 'text-yellow-400' },
+            { k: 'Aprobados este mes', n: solicitudes.filter(x => x.estado === 'Aprobado' && (x.fecha || '').slice(0, 7) === HOY_ISO.slice(0, 7)).length, cls: 'text-green-400' },
+            { k: 'Posibles duplicados', n: duplicados.length, cls: 'text-orange-400' },
+          ].map(x => (
+            <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+              <div className={`text-2xl font-bold font-mono ${x.n > 0 ? x.cls : 'text-slate-600'}`}>{x.n}</div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase leading-tight">{x.k}</div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Solicitudes de material nuevo · {pend.length} pendiente(s)</div>
         {pend.length === 0 ? (
@@ -142,8 +209,17 @@ export function Catalogo({ user, db, api }) {
                       <td className="py-2 px-1.5 text-slate-400">{fmt(s.fecha)}</td>
                       <td className="py-2 px-1.5 text-slate-400">{s.solicitante} · {s.proyecto}</td>
                       <td className="py-2 px-1.5">
-                        {puedeAprobar ? <input value={getEdit(s).desc} onChange={e => setEditCampo(s, 'desc', e.target.value)} className={`w-52 ${inputCls}`} />
-                          : <span className="text-slate-200">{s.desc}</span>}</td>
+                        {puedeAprobar ? (
+                          <div>
+                            <input value={getEdit(s).desc} onChange={e => setEditCampo(s, 'desc', e.target.value)} className={`w-52 ${inputCls}`} />
+                            {/* El duplicado se evita AQUI o no se evita nunca: este es el
+                                momento en que todavia no existe. */}
+                            {parecidosEnCatalogo(getEdit(s).desc).map(m => (
+                              <div key={m[0]} className="text-[9px] text-orange-400 mt-1 w-52 leading-tight">
+                                ⚠ Parecido a {m[0]} · {m[1]} — ¿es el mismo? Si lo es, recházalo con ese código como motivo.</div>
+                            ))}
+                          </div>
+                        ) : <span className="text-slate-200">{s.desc}</span>}</td>
                       <td className="py-2 px-1.5">
                         {puedeAprobar ? (
                           <div>
@@ -214,6 +290,70 @@ export function Catalogo({ user, db, api }) {
                 <button onClick={() => setFamForm(null)} className="px-3 py-1.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 hover:text-slate-200">Cancelar</button>
               </div>
               <div className="text-[10px] text-slate-500 mt-2">Los materiales de esta familia llevarán códigos que empiezan con su IU. Crear una familia no se puede deshacer desde la app si ya tiene materiales.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {duplicados.length > 0 && (
+        <div className="bg-slate-900 border border-orange-900 rounded-md p-4 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-[11px] font-bold tracking-widest text-orange-400 uppercase">
+              ⚠ Posibles duplicados · {duplicados.length} par(es)</div>
+            <button onClick={() => setVerDup(v => !v)}
+              className="ml-auto text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200">
+              {verDup ? '✕ cerrar' : 'ver'}</button>
+          </div>
+          {!verDup && (
+            <div className="text-[11px] text-slate-500 mt-1">
+              El mismo material con dos códigos hace tres daños a la vez: el consolidado no los junta
+              (se compra dos veces en vez de negociar por volumen), el historial de precios se parte
+              en dos, y el stock aparece dividido.</div>
+          )}
+          {verDup && (
+            <table className="w-full text-xs mt-3">
+              <thead><tr>{['Código', 'Material', 'Código', 'Se parece a', 'Und', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {duplicados.map(([m1, m2]) => (
+                  <tr key={m1[0] + m2[0]} className="border-b border-slate-800">
+                    <td className="py-1.5 px-1.5 font-mono text-[11px] text-slate-500">{m1[0]}</td>
+                    <td className="py-1.5 px-1.5 text-slate-200">{m1[1]}</td>
+                    <td className="py-1.5 px-1.5 font-mono text-[11px] text-slate-500">{m2[0]}</td>
+                    <td className="py-1.5 px-1.5 text-slate-200">{m2[1]}</td>
+                    <td className="py-1.5 px-1.5 text-slate-500">{m1[2]}{m1[2] !== m2[2] ? ` / ${m2[2]}` : ''}</td>
+                    <td className="py-1.5 px-1.5">
+                      {puedeAprobar && (
+                        <button onClick={() => noSonDuplicados(m1, m2)}
+                          className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-green-700 hover:text-green-400 whitespace-nowrap">
+                          No son duplicados</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {verDup && (
+            <div className="text-[10px] text-slate-500 mt-2">
+              Si un par es el mismo material, dejen de usar uno de los dos códigos en pedidos nuevos y
+              avisen a gerencia — unificar lo ya registrado se decide caso por caso, no se borra nada.
+              Si NO lo son, el botón lo descarta para todos.</div>
+          )}
+          {verDup && dupDescartados.length > 0 && (
+            <div className="mt-3 border-t border-slate-800 pt-2">
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase mb-1">
+                Descartados · {dupDescartados.length} — revisados y no eran duplicados</div>
+              {dupDescartados.map(d => (
+                <div key={d.clave} className="flex items-center gap-2 text-[10px] text-slate-500 py-0.5">
+                  <span className="font-mono">{d.c1}</span> {d.d1} <span className="text-slate-700">≠</span>
+                  <span className="font-mono">{d.c2}</span> {d.d2}
+                  <span className="text-slate-600">· {d.por}</span>
+                  {puedeAprobar && (
+                    <button onClick={async () => { const r = await api.reabrirAlerta(d.clave); if (r.error) setAviso('⚠ ' + r.error); }}
+                      className="text-slate-500 hover:text-yellow-400 underline underline-offset-2">reabrir</button>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>

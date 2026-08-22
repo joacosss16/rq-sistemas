@@ -9,14 +9,24 @@ import { Aviso, AnularBox, FiltroProyecto, FechaInput, inputCls, lblCls, thCls, 
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 
 export function Almacen({ user, db, api, obraGlobal }) {
-  const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap } = db;
+  const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap, precioProm = {} } = db;
   const esAlm = user.rol === 'almacen';
+  // Gerencia entra aqui a VIGILAR, no a operar (decision del dueno, 18 ago
+  // 2026). Los formularios de recibir, corregir y prestar son la mesa de
+  // trabajo del almacenero y para quien viene a mirar son ruido.
+  // La suplencia (almacenero de vacaciones) NO se resuelve devolviendo estos
+  // formularios: va con cuentas de emergencia, apuntado para despues del piloto.
+  const soloVigila = !esAlm;
   const [form, setForm] = useState({});
   const [aviso, setAviso] = useState('');
   const [proy, setProy] = useState(esAlm ? user.proyecto : (PROYECTOS[0] ? PROYECTOS[0][1] : ''));
   // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
   // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
-  useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
+  // Un almacen es de UNA obra: no existe el "stock de todas", asi que esta vista
+  // NO usa el selector global -- que ademas se oculta mientras se esta aqui.
+  // Manda solo el de esta pantalla. Tener dos controles encendidos y en
+  // desacuerdo era exactamente lo que confundia (18 ago 2026).
+  const mandaLaCabecera = false;
   const [fSal, setFSal] = useState({});
   const [verif, setVerif] = useState({});
   const [fReing, setFReing] = useState({});
@@ -98,6 +108,61 @@ export function Almacen({ user, db, api, obraGlobal }) {
     .filter(s => s.dias === null || s.dias > DIAS_SIN_MOV)
     .sort((a, b) => (b.dias ?? 99999) - (a.dias ?? 99999));
 
+  // Resumen de vigilancia. Sigue a la obra elegida, igual que el resto.
+  //   NEGATIVO   -- descuadre real de inventario: el sistema dice que salio mas
+  //                 de lo que entro. Alguien tiene que ir a contar.
+  //   VENCIDO    -- ya no se puede usar y bloquea la salida. Plata perdida.
+  //   POR VENCER -- a 30 dias o menos. Todavia se puede consumir o transferir.
+  //   SIN MOVER  -- comprado y quieto +30 dias. Plata detenida en esta obra
+  //                 mientras quiza otra lo esta comprando: candidato a prestamo.
+  //   USO INCORRECTO -- material pagado y desperdiciado. Va SIEMPRE con el % de
+  //                 salidas verificadas al lado: un 0% sobre el 10% revisado no
+  //                 es un cero, es un "no sabemos".
+  const negativos = stock.filter(s => s.stock < 0).length;
+  const cadVencidos = stock.filter(s => s.cadMin && diasHoy(s.cadMin) < 0).length;
+  const cadPorVencer = stock.filter(s => s.cadMin && diasHoy(s.cadMin) >= 0 && diasHoy(s.cadMin) <= 30).length;
+  const salVerif = salidasProy.filter(s => !s.anulada && s.aprobacion === 'Aprobada');
+  const verificadas = salVerif.filter(s => s.uso !== 'Pendiente');
+  const incorrectas = verificadas.filter(s => s.uso === 'Incorrecto').length;
+  const pctIncorrecto = verificadas.length ? Math.round(incorrectas / verificadas.length * 100) : null;
+  const pctVerificado = salVerif.length ? Math.round(verificadas.length / salVerif.length * 100) : null;
+  // Valorizado del almacen: stock x precio promedio pagado. Los materiales sin
+  // ninguna compra registrada no tienen precio, asi que el total es PARCIAL y
+  // hay que decirlo -- un total que finge estar completo se usa para decidir.
+  const valorizado = stock.reduce((a, x) => a + (precioProm[x.cod] != null ? x.stock * precioProm[x.cod] : 0), 0);
+  const sinPrecio = stock.filter(x => x.stock > 0 && precioProm[x.cod] == null).length;
+
+  // Material que llego a medias y sigue esperando el saldo: obra parada.
+  const incompletos = rqs.filter(r => r.proyecto === proy)
+    .flatMap(r => r.items).filter(i => i.estado === 'Incompleto').length;
+
+  // USO INCORRECTO POR CAUSA. NO se promedia el reingreso entre causas: para
+  // "no se completo el trabajo" lo esperable es que vuelva casi todo, y para
+  // "uso inadecuado" que no vuelva nada. Un promedio entre 100% y 0% da 50% y
+  // no significa nada -- se mueve solo con la mezcla de causas del mes.
+  // Cada causa es una conversacion distinta con una persona distinta:
+  //   no se completo, sin recuperar -> hay material tirado en obra, ir por el
+  //   uso inadecuado                -> supervision o capacitacion
+  //   se encontro botado            -> desorden en obra
+  const porCausa = MOTIVOS_USO.map(m => {
+    const ss = verificadas.filter(x => x.uso === 'Incorrecto' && (x.motivoUso || 'Otro') === m);
+    const salio = ss.reduce((a, x) => a + Number(x.cant), 0);
+    const volvio = ss.reduce((a, x) => a + Number(x.reingresada || 0), 0);
+    return { m, n: ss.length, salio, volvio, pct: salio > 0 ? Math.round(volvio / salio * 100) : null };
+  }).filter(x => x.n > 0);
+
+  const resumen = [
+    { k: 'Materiales', n: stock.length, cls: 'text-slate-200' },
+    { k: 'Stock negativo', n: negativos, cls: 'text-red-400', nota: negativos ? 'hay que ir a contar' : null },
+    { k: 'Vencidos', n: cadVencidos, cls: 'text-red-400' },
+    { k: 'Por vencer · 30 d', n: cadPorVencer, cls: 'text-yellow-400' },
+    { k: 'Sin mover · +30 d', n: sinMov.length, cls: 'text-orange-400', nota: sinMov.length ? 'candidatos a préstamo' : null },
+    { k: 'Por recibir', n: porRecibir.length, cls: 'text-sky-400', nota: porRecibir.length ? 'comprado sin llegar' : null },
+    { k: 'Incompletos', n: incompletos, cls: 'text-orange-400', nota: incompletos ? 'esperando el saldo' : null },
+    { k: 'Uso incorrecto', n: pctIncorrecto === null ? '—' : pctIncorrecto + '%', cls: 'text-red-400',
+      nota: pctVerificado === null ? 'sin salidas' : `sobre el ${pctVerificado}% verificado` },
+  ];
+
   const darSalida = async (s, f) => {
     const r = await api.darSalida({ proyecto: proy, cod: s.cod, cant: Number(f.cant), hoja: f.hoja.trim(), zona: f.zona.trim() });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
@@ -147,6 +212,17 @@ export function Almacen({ user, db, api, obraGlobal }) {
   };
 
   const presProy = prestamos.filter(p => p.origen === proy || p.destino === proy);
+  // Para vigilar, lo que importa es lo ACTIVO: material que fisicamente esta en
+  // otra obra ahora mismo y no hay que confundir con faltante. Lo devuelto y lo
+  // transferido ya no mueve nada, asi que se archiva detras del clic.
+  const presActivos = presProy.filter(p => p.estado === 'Prestado');
+  const [verPres, setVerPres] = useState(false);
+  // La lista de "por recibir" es la mesa del almacenero: para gerencia son
+  // decenas de filas que dicen lo mismo. El DATO si sirve -- material comprado
+  // que no ha llegado -- asi que se queda como contador y la tabla se archiva
+  // detras del clic. Mismo trato que los prestamos y las solicitudes.
+  const [verRecibir, setVerRecibir] = useState(false);
+  const presMostrar = soloVigila ? (verPres ? presProy : presActivos) : presProy;
 
   const setPres = async (p, estado) => {
     const r = await api.updPrestamo(p.id, { estado });
@@ -160,23 +236,48 @@ export function Almacen({ user, db, api, obraGlobal }) {
 
   return (
     <div>
+      {soloVigila && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          {resumen.map(x => (
+            <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+              <div className={`text-2xl font-bold font-mono ${x.n && x.n !== '—' ? x.cls : 'text-slate-600'}`}>{x.n}</div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase leading-tight">{x.k}</div>
+              {x.nota && <div className="text-[9px] text-slate-500 leading-tight mt-0.5">{x.nota}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Almacén de obra · recepción de materiales</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{soloVigila ? 'Almacén de obra' : 'Almacén de obra · recepción de materiales'}</div>
           <div className="ml-auto flex items-center gap-2">
-            {esAlm ? <span className="text-slate-300 text-[11px] font-semibold">{(PROYECTOS.find(p => p[1] === proy) || [''])[0]} · {proy}</span>
+            {esAlm || mandaLaCabecera
+              ? <span className="text-slate-300 text-[11px] font-semibold">{(PROYECTOS.find(p => p[1] === proy) || [''])[0]} · {proy}
+                  {mandaLaCabecera && <span className="text-slate-500 font-normal"> · elegida arriba</span>}</span>
               : <FiltroProyecto value={proy} onChange={setProy} />}
             {ALMACENEROS[proy] && <span className="text-slate-400 text-[11px]">Almacenero: {ALMACENEROS[proy]}</span>}
+            {soloVigila && porRecibir.length > 0 && (
+              <button onClick={() => setVerRecibir(v => !v)}
+                className="px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500">
+                <span className="font-mono font-bold text-sky-400">{porRecibir.length}</span>
+                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
+                  por recibir · {verRecibir ? '✕ cerrar' : 'ver'}</span>
+              </button>
+            )}
           </div>
         </div>
         {!esAlm && <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: las recepciones, salidas y préstamos los registra el almacenero de cada obra.</div>}
         <Aviso msg={aviso} />
-        {porRecibir.length === 0 ? (
+        {soloVigila && !verRecibir ? null : porRecibir.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Nada por recibir en {proy}. Los ítems aparecen aquí cuando Compras los aprueba.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['RQ', 'Descripción', 'Pedido', 'Recibido', 'Falta', 'Estado', 'Cant. que llega', 'Observaciones', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{(soloVigila
+                ? ['RQ', 'Descripción', 'Pedido', 'Recibido', 'Falta', 'Estado']
+                : ['RQ', 'Descripción', 'Pedido', 'Recibido', 'Falta', 'Estado', 'Cant. que llega', 'Observaciones', '']
+              ).map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {porRecibir.map(i => {
                   const f = getF(i.id);
@@ -193,6 +294,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
                       <td className="py-2 px-1.5 font-mono text-slate-300">{rec}</td>
                       <td className={`py-2 px-1.5 font-mono ${falta > 0 ? 'text-orange-400' : 'text-green-400'}`}>{falta}</td>
                       <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}>{i.estado}</span></td>
+                      {!soloVigila && (<>
                       <td className="py-2 px-1.5">
                         {fc ? (
                           <div>
@@ -219,6 +321,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
                         {i.obsAlmacen && <div className="text-[9px] text-slate-500 mt-1 w-48">Anterior: {i.obsAlmacen}</div>}</td>
                       <td className="py-2 px-1.5">
                         <button onClick={() => recibir(i)} disabled={!listo} className={btnOk(listo)}>Registrar recepción</button></td>
+                      </>)}
                     </tr>
                   );
                 })}
@@ -232,7 +335,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
       {/* Corregir una cantidad mal digitada. Va en su propio bloque porque
           alcanza también a lo ya Entregado, que sale de la tabla de arriba:
           justo el caso de digitar 40 donde iba 4 y completar el pedido. */}
-      {recibidasRecientes.length > 0 && (
+      {!soloVigila && recibidasRecientes.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">Recepciones de los últimos {DIAS_CORREGIR} días · corregir</div>
           <div className="text-[11px] text-slate-500 mb-3">Si te equivocaste al digitar una cantidad, corrígela aquí. Se te pedirá el motivo y queda registrado con tu nombre y la fecha: no se borra nada.</div>
@@ -276,13 +379,23 @@ export function Almacen({ user, db, api, obraGlobal }) {
       )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Stock del almacén · {proy}</div>
+        <div className="flex items-baseline gap-3 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Stock del almacén · {proy}</div>
+          <div className="ml-auto text-right">
+            <div className="text-xl font-bold font-mono text-green-400">S/ {valorizado.toFixed(2)}</div>
+            <div className="text-[9px] text-slate-500 uppercase tracking-widest">
+              valorizado{sinPrecio > 0 ? ` · parcial: ${sinPrecio} sin precio` : ''}</div>
+          </div>
+        </div>
         {stock.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Sin materiales en este almacén. El stock se forma con las recepciones registradas arriba.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead><tr>{['Código', 'Material', 'Und', 'Caducidad', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <thead><tr>{(soloVigila
+                ? ['Código', 'Material', 'Und', 'Caducidad', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock']
+                : ['Código', 'Material', 'Und', 'Caducidad', 'Inicial', 'Recibido', 'Salidas', 'Préstamos ±', 'Stock', 'Cant. salida', 'N° hoja de trabajo', 'Zona de trabajo', '']
+              ).map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {stock.map(s => {
                   const f = fSal[s.cod] || { cant: '', hoja: '', zona: '' };
@@ -308,12 +421,14 @@ export function Almacen({ user, db, api, obraGlobal }) {
                       <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
                       <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}
                         {s.reservado > 0 && <div className="text-[9px] text-yellow-400 font-normal">−{s.reservado} pend. aprob.</div>}</td>
+                      {!soloVigila && (<>
                       <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setS('cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
                         {Number(f.cant) > s.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({s.disponible})</div>}</td>
                       <td className="py-2 px-1.5"><input value={f.hoja} onChange={e => setS('hoja', e.target.value)} disabled={!esAlm} placeholder="HT-001" className={`w-20 ${inputCls} font-mono`} /></td>
                       <td className="py-2 px-1.5"><input value={f.zona} onChange={e => setS('zona', e.target.value)} disabled={!esAlm} placeholder="Piso 3 - Dpto 301" className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5">
                         <button onClick={() => darSalida(s, f)} disabled={!listo} className={btnOk(listo)}>Solicitar aprobación</button></td>
+                      </>)}
                     </tr>
                   );
                 })}
@@ -321,7 +436,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = inicial (inventario físico) + recibido − salidas ± préstamos.</div>
+        <div className="mt-3 text-slate-500 text-[11px]">{soloVigila ? 'Stock = inicial (inventario físico) + recibido − salidas ± préstamos. Lo negativo indica un descuadre que hay que ir a contar.' : 'Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = inicial (inventario físico) + recibido − salidas ± préstamos.'}</div>
       </div>
 
       <div className={`bg-slate-900 border rounded-md p-4 mb-3 ${sinMov.length ? 'border-yellow-700' : 'border-slate-800'}`}>
@@ -354,7 +469,18 @@ export function Almacen({ user, db, api, obraGlobal }) {
       </div>
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Préstamos entre almacenes</div>
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Préstamos entre almacenes</div>
+          {soloVigila && (
+            <button onClick={() => setVerPres(v => !v)}
+              className="ml-auto px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500">
+              <span className="font-mono font-bold text-purple-400">{presActivos.length}</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
+                activo(s) · {verPres ? '✕ cerrar' : 'ver'}</span>
+            </button>
+          )}
+        </div>
+        {!soloVigila && (<>
         <div className="grid md:grid-cols-4 gap-2 mb-3">
           <div className="md:col-span-2"><label className={lblCls}>Material (con stock)</label>
             <select value={fPres.cod} onChange={e => setFPres({ ...fPres, cod: e.target.value })} disabled={!esAlm} className={`w-full ${inputCls}`}>
@@ -367,13 +493,14 @@ export function Almacen({ user, db, api, obraGlobal }) {
             <FiltroProyecto value={fPres.destino} onChange={v => setFPres({ ...fPres, destino: v })} excluir={proy} /></div>
         </div>
         <button onClick={prestar} disabled={!presOk} className={btnOk(!!presOk)}>Solicitar aprobación (origen + destino)</button>
+        </>)}
 
-        {presProy.length > 0 && (
+        {(soloVigila ? verPres : presProy.length > 0) && presMostrar.length > 0 && (
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-xs">
               <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Origen', 'Destino', 'Aprobación', 'Estado', 'Acción'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {presProy.map(p => (
+                {presMostrar.map(p => (
                   <tr key={p.n} className="border-b border-slate-800 align-top">
                     <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{p.n}</td>
                     <td className="py-2 px-1.5 text-slate-400">{fmt(p.fecha)}</td>
@@ -410,6 +537,33 @@ export function Almacen({ user, db, api, obraGlobal }) {
 
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Salidas registradas · {proy} · verificación de uso</div>
+        {soloVigila && porCausa.length > 0 && (
+          <div className="border border-slate-800 rounded p-3 mb-3">
+            <div className="text-[10px] font-bold tracking-widest text-red-400 uppercase mb-2">Uso incorrecto · por causa</div>
+            <table className="w-full text-xs">
+              <thead><tr>{['Causa', 'Veces', 'Salió', 'Volvió al almacén', 'Se perdió'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
+              <tbody>
+                {porCausa.map(c => (
+                  <tr key={c.m} className="border-b border-slate-900">
+                    <td className="py-1.5 px-1.5 text-slate-200">{c.m}</td>
+                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{c.n}</td>
+                    <td className="py-1.5 px-1.5 font-mono text-slate-300">{c.salio}</td>
+                    <td className={`py-1.5 px-1.5 font-mono ${c.pct >= 80 ? 'text-green-400' : c.pct >= 30 ? 'text-yellow-400' : 'text-red-400'}`}>
+                      {c.volvio} {c.pct !== null && <span className="text-[10px]">({c.pct}%)</span>}</td>
+                    <td className="py-1.5 px-1.5 font-mono text-red-400">{c.salio - c.volvio}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-2 text-slate-500 text-[10px] leading-relaxed">
+              Cada causa es una conversación distinta. <b className="text-slate-400">No se completó el trabajo</b> con poco
+              reingreso significa material sano tirado en obra: hay que ir a recogerlo, no es desperdicio.
+              <b className="text-slate-400"> Uso inadecuado</b> sí es pérdida — es supervisión o capacitación.
+              <b className="text-slate-400"> Se encontró botado</b> es desorden en obra.
+              Por eso no se promedia el reingreso entre causas: lo esperable es casi todo en la primera y casi nada en la tercera.
+            </div>
+          </div>
+        )}
         {salidasProy.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Sin salidas registradas en {proy}.</div>
         ) : (

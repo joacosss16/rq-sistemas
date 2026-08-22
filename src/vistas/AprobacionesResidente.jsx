@@ -1,6 +1,6 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
 import { useState, useEffect } from 'react';
-import { HOY_ISO } from '../fechas';
+import { HOY_ISO, dias } from '../fechas';
 import { Aviso, FiltroProyecto, inputCls, thCls, btnRojo, btnVerde } from '../ui';
 
 export function AprobacionesResidente({ user, db, api, obraGlobal }) {
@@ -20,6 +20,13 @@ export function AprobacionesResidente({ user, db, api, obraGlobal }) {
   const [proy, setProy] = useState('TODOS');
   useEffect(() => { if (obraGlobal) setProy(obraGlobal); }, [obraGlobal]);
   const enFiltro = p => !todas || proy === 'TODOS' || p === proy;
+  // Para gerencia lo que importa no es la lista: es CUANTO lleva esperando la
+  // mas vieja. Tres dias de una salida sin firmar es una cuadrilla parada
+  // media semana. La lista queda detras del clic, como en las demas vistas.
+  const [verLista, setVerLista] = useState(false);
+  const esperaMax = xs => xs.length ? Math.max(...xs.map(x => dias(HOY_ISO, x.fecha)).filter(d => !isNaN(d))) : null;
+  const porObraTxt = xs => Object.entries(xs.reduce((a, x) => { a[x.proyecto] = (a[x.proyecto] || 0) + 1; return a; }, {}))
+    .map(([o, c]) => `${o} ${c}`).join(' · ');
   const miObra = p => todas || p === user.proyecto;
 
   const salPend = salidas.filter(s => miObra(s.proyecto) && enFiltro(s.proyecto) && !s.anulada && s.aprobacion === 'Pendiente');
@@ -68,6 +75,33 @@ export function AprobacionesResidente({ user, db, api, obraGlobal }) {
   return (
     <div>
       <Aviso msg={aviso} />
+      {todas && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className={`text-2xl font-bold font-mono ${salPend.length ? 'text-yellow-400' : 'text-slate-600'}`}>{salPend.length}</span>
+              {salPend.length > 0 && <span className="text-[10px] font-mono text-yellow-400">· la más vieja: {esperaMax(salPend)} d</span>}
+              {salPend.length === 0 && <span className="text-[10px] font-mono text-green-500">✓ al día</span>}
+            </div>
+            <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">Salidas esperando al residente</div>
+            {salPend.length > 0 && <div className="text-[9px] text-slate-500 mt-0.5">{porObraTxt(salPend)} · material que no puede salir del almacén</div>}
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className={`text-2xl font-bold font-mono ${presPend.length ? 'text-purple-400' : 'text-slate-600'}`}>{presPend.length}</span>
+              {presPend.length > 0 && <span className="text-[10px] font-mono text-purple-400">· el más viejo: {esperaMax(presPend)} d</span>}
+              {presPend.length === 0 && <span className="text-[10px] font-mono text-green-500">✓ al día</span>}
+            </div>
+            <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">Préstamos esperando firma</div>
+            {presPend.length > 0 && <div className="text-[9px] text-slate-500 mt-0.5">material trabado entre dos obras</div>}
+          </div>
+          <button onClick={() => setVerLista(v => !v)}
+            className="sm:col-span-2 text-left px-3 py-1.5 rounded border border-slate-800 bg-slate-900 hover:border-slate-600 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            {verLista ? '✕ Cerrar el detalle' : 'Ver el detalle y destrabar'}
+          </button>
+        </div>
+      )}
+      {(!todas || verLista) && (<>
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Salidas de almacén por aprobar · {salPend.length}</div>
@@ -183,6 +217,7 @@ export function AprobacionesResidente({ user, db, api, obraGlobal }) {
           </div>
         )}
       </div>
+      </>)}
     </div>
   );
 }

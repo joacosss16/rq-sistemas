@@ -1,6 +1,6 @@
 // Movido de App.jsx (etapa 9 de la separacion en modulos), texto identico.
 import { useState, useEffect } from 'react';
-import { fmt } from '../fechas';
+import { fmt, HOY_ISO, dias } from '../fechas';
 import { cuadreCaja, diferenciaArqueo, excedeTolerancia } from '../caja';
 import { Aviso, FiltroProyecto, inputCls, thCls, btnOk, btnRojo } from '../ui';
 
@@ -50,6 +50,26 @@ export function Rendiciones({ user, db, api, obraGlobal }) {
   const pendientes = lista.filter(r => !cerrada(r));
   const archivadas = lista.filter(cerrada);
   const [verArchivadas, setVerArchivadas] = useState(false);
+
+  // Resumen de vigilancia (solo gerencia). Lo que importa del efectivo:
+  //   CON DIFERENCIA / OBSERVADA -- ademas del dinero, BLOQUEAN la caja de esa
+  //     obra: al dia siguiente el comprador no puede registrar compras en
+  //     efectivo hasta que se resuelva. Cada dia sin resolver es una obra
+  //     comprando sin caja.
+  //   ABIERTAS DE DIAS ANTERIORES -- jornadas que nadie cerro: el efectivo de
+  //     ese dia sigue sin arquear.
+  const conProblema = pendientes.filter(r => r.estado === 'Con diferencia' || r.estado === 'Observada');
+  const problemaMax = conProblema.length ? Math.max(...conProblema.map(r => dias(HOY_ISO, r.fecha))) : null;
+  const abiertasViejas = pendientes.filter(r => r.estado === 'Abierta' && r.fecha < HOY_ISO);
+  const difAcum = conProblema.reduce((a, r) => a + Math.abs(Number(r.diferencia) || 0), 0);
+  const resumenRen = [
+    { k: 'Jornadas por cerrar', n: pendientes.length, on: pendientes.length > 0, cls: 'text-yellow-400' },
+    { k: 'Con diferencia u observadas', n: conProblema.length, on: conProblema.length > 0, cls: 'text-red-400',
+      nota: conProblema.length ? `bloquean la caja de su obra · la más vieja: ${problemaMax} d` : null },
+    { k: 'Diferencia acumulada', n: 'S/ ' + difAcum.toFixed(2), on: difAcum > 0, cls: 'text-red-400' },
+    { k: 'Abiertas de días anteriores', n: abiertasViejas.length, on: abiertasViejas.length > 0, cls: 'text-orange-400',
+      nota: abiertasViejas.length ? 'efectivo del día sin arquear' : null },
+  ];
   const mostradas = verArchivadas ? lista : pendientes;
 
   const cerrarArqueo = async (r, contado, diferencia, excede, motivo) => {
@@ -93,6 +113,17 @@ export function Rendiciones({ user, db, api, obraGlobal }) {
 
   return (
     <div>
+      {user.rol === 'gerente' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+          {resumenRen.map(x => (
+            <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
+              <div className={`text-xl font-bold font-mono ${x.on ? x.cls : 'text-slate-600'}`}>{x.n}</div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase leading-tight">{x.k}</div>
+              {x.nota && <div className="text-[9px] text-slate-500 leading-tight mt-0.5">{x.nota}</div>}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">

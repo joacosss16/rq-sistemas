@@ -14,7 +14,8 @@ import { HistorialPrecios } from './HistorialPrecios';
 //    pestania fac con modo='facturar' (Frank). Facturar NO es un
 //    componente aparte -- extraerlo seria reescritura.
 // 2. HistorialPrecios se muestra en AMBOS modos (Frank negocia en
-//    mostrador con el); PedidoCotizacion solo cuando NO es facturar.
+//    mostrador con el, y gerencia tambien lo consulta); PedidoCotizacion solo
+//    para quien compra y cuando NO es facturar.
 
 export function Compras({ user, db, api, modo, obraGlobal }) {
   const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {}, rendiciones = [] } = db;
@@ -74,6 +75,31 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
     },
     comprado: i => i.estado === 'Comprado',
     incompleto: i => i.estado === 'Incompleto',
+  };
+  // Cada contador que representa trabajo DETENIDO lleva ademas la ESPERA DEL MAS
+  // VIEJO, que es lo que de verdad mide. No es lo mismo tener 12 pendientes de
+  // hoy que 12 donde el mas antiguo lleva nueve dias: el numero dice cuanto hay,
+  // la espera dice cuanto duele.
+  //
+  // Cada uno se mide desde SU momento, no desde una fecha generica:
+  //   por decidir  -> desde que el residente lo pidio (es lo que el espera)
+  //   por comprar  -> desde que Lucia lo aprobo
+  //   anulacion    -> desde que se pidio la anulacion (espera al dueno)
+  //   sin factura  -> desde que se compro
+  //   incompletos  -> desde que llego la parte
+  // Los de flujo normal no llevan espera: siempre hay material en transito.
+  const espera = {
+    decidir:      i => i.fechaRQ,
+    porComprar:   i => (i.decididoEn || '').slice(0, 10) || i.fechaRQ,
+    anulPend:     i => i.anulSolFecha,
+    sinFactura48: i => i.fechaCompra || i.fechaRQ,
+    incompleto:   i => i.fechaEntrega,
+  };
+  const masViejo = k => {
+    const f = espera[k];
+    if (!f) return null;
+    const ds = flatAbierto.filter(esTriage[k]).map(f).filter(Boolean).map(x => dias(HOY_ISO, x));
+    return ds.length ? Math.max(...ds) : null;
   };
   const chips = [
     !facturarSolo && ['decidir', 'Por decidir', 'text-yellow-400'],
@@ -322,10 +348,14 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
           No se pueden registrar más compras en efectivo de esa obra hasta que se resuelva. Las compras con factura a crédito o transferencia siguen normales.</div>
       </AlertaCerrable>
     )}
-    {!facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
-    {/* el comprador también negocia en el mostrador: necesita el histórico de precios */}
-    <HistorialPrecios db={db} />
-    {!facturarSolo && porComprar.length > 0 && (
+    {/* Lo registra Lucia con la cotizacion del arquitecto. Gerencia no lo usa:
+        es un formulario de trabajo, no informacion para analizar. */}
+    {puedeFacturar && !facturarSolo && <PedidoCotizacion user={user} db={db} api={api} />}
+    {/* El consolidado es la herramienta de compra de Lucia: junta el mismo
+        material de varias obras para comprarlo una vez. Gerencia no compra --
+        para ella es ruido operativo, no analisis. Lo mismo con el historial de
+        precios, que es para negociar en el mostrador. */}
+    {puedeFacturar && !facturarSolo && porComprar.length > 0 && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">
           Consolidado por comprar · {porComprar.length} material(es) · une pedidos de varias obras (la factura sigue siendo una por obra)</div>
@@ -385,15 +415,22 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
           {facturarSolo ? 'Lo que compraste · registra aquí su factura' : 'Gestión de compras · aprobación, estado y seguimiento'}</div>
         <div className="ml-auto"><FiltroProyecto value={proy} onChange={setProy} todos /></div>
       </div>
-      <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
         {chips.map(([k, l, cls]) => {
           const n = flatAbierto.filter(esTriage[k]).length;
           const activo = triage === k;
+          const dm = n > 0 ? masViejo(k) : null;
           return (
-            <button key={k} onClick={() => setTriage(activo ? null : k)}
-              className={`px-2.5 py-1.5 rounded text-[10px] font-bold uppercase border ${activo ? 'border-yellow-400 ring-1 ring-yellow-400 bg-slate-800' : 'border-slate-700 bg-slate-800 hover:border-slate-500'}`}>
-              <span className={`font-mono mr-1 ${cls}`}>{n}</span>
-              <span className="text-slate-300">{l}{activo ? ' ✕' : ''}</span>
+            <button key={k} onClick={() => setTriage(activo ? null : k)} title="Clic para ver solo estos"
+              className={`text-left px-3 py-2 rounded border ${activo
+                ? 'border-yellow-400 ring-1 ring-yellow-400 bg-slate-800'
+                : 'border-slate-800 bg-slate-900 hover:border-slate-600'}`}>
+              <div className="flex items-baseline gap-1.5 flex-wrap">
+                <span className={`text-2xl font-bold font-mono ${n === 0 ? 'text-slate-600' : cls}`}>{n}</span>
+                {n === 0 && espera[k] && <span className="text-[10px] font-mono text-green-500">✓ al día</span>}
+                {dm !== null && <span className={`text-[10px] font-mono ${cls}`}>· el más viejo: {dm} d</span>}
+              </div>
+              <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase">{l}{activo ? ' · ✕ quitar filtro' : ''}</div>
             </button>
           );
         })}
@@ -846,6 +883,10 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
         </div>
       )}
     </div>
+      {/* Al final: es consulta para negociar, no parte del trabajo del dia.
+          Arriba estorbaba lo que si hay que atender. Lo ven Lucia, Frank
+          (que negocia en el mostrador) y gerencia. */}
+      <HistorialPrecios db={db} />
     </div>
   );
 }

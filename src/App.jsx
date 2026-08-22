@@ -56,20 +56,23 @@ export default function App() {
   // Contador de generacion: si dos cargas se solapan (el refresco de 40 s y el
   // de un clic), la que empezo antes NO puede pisar a la que empezo despues.
   const epocaRef = useRef(0);
+  // MODO INSPECCIÓN DE OBRA (solo gerencia). El tablero y el reporte mensual
+  // NUNCA se filtran: ahí se comparan las cinco obras y es lo que señala cuál
+  // se está saliendo. Elegida la obra, los módulos operativos la obedecen para
+  // ir a mirar de cerca. Arranca en TODOS: elegir es un acto consciente.
+  // Almacén es la excepción: es de UNA obra y tiene su propio selector, así
+  // que este se oculta mientras se está ahí.
+  const [obraGlobal, setObraGlobal] = useState('TODOS');
+
   // Dar por leído un aviso no cambia ningún dato de la base, así que React no
   // redibuja solo y la insignia de la pestaña se quedaría encendida hasta el
   // refresco siguiente. Esto la apaga en el momento.
   //
-  // OJO: va AQUÍ ARRIBA con los demás ganchos, nunca más abajo. Debajo hay
-  // cortes que devuelven la pantalla de carga antes de llegar al final, y un
-  // gancho puesto después de un corte se ejecuta unas veces sí y otras no.
-  // React lo detecta y tumba la aplicación entera: pantalla en blanco después
-  // de "cargando datos". Pasó exactamente eso el 18 ago 2026.
-  // MODO INSPECCION DE OBRA (solo gerencia). El tablero y el reporte mensual
-  // NUNCA se filtran: ahi se comparan las cinco obras y es lo que senala cual
-  // se esta saliendo. Elegida la obra, los modulos operativos la obedecen para
-  // ir a mirar de cerca. Arranca en TODOS: elegir es un acto consciente.
-  const [obraGlobal, setObraGlobal] = useState('TODOS');
+  // OJO: estos dos ganchos van AQUÍ ARRIBA con los demás, nunca más abajo.
+  // Debajo hay cortes que devuelven la pantalla de carga antes de llegar al
+  // final, y un gancho puesto después de un corte se ejecuta unas veces sí y
+  // otras no. React lo detecta y tumba la aplicación entera: pantalla en
+  // blanco después de "cargando datos". Pasó exactamente eso el 18 ago 2026.
   const [, redibujar] = useState(0);
   alEnterarse(useCallback(() => redibujar(n => n + 1), []));
 
@@ -850,7 +853,9 @@ export default function App() {
         <div className="font-extrabold text-sm tracking-widest text-yellow-400">
           COPACABANA <span className="text-slate-600 font-medium">/ RQ</span></div>
         <div className="text-slate-400 text-[11px]">{user.nombre}{user.proyecto ? ' · ' + user.proyecto : ''} <span className="text-slate-600">({user.rol})</span></div>
-        {!user.proyecto && user.rol === 'gerente' && (
+        {/* En Almacén no se muestra: esa vista es de UNA obra y tiene su propio
+            selector. Dos controles a la vez, en desacuerdo, confunden. */}
+        {!user.proyecto && user.rol === 'gerente' && tab !== 'alm' && (
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded border ${obraGlobal === 'TODOS'
             ? 'border-slate-700 bg-slate-900' : 'border-yellow-400 bg-yellow-950'}`}>
             <span className={`text-[9px] font-bold uppercase tracking-widest ${obraGlobal === 'TODOS' ? 'text-slate-500' : 'text-yellow-400'}`}>

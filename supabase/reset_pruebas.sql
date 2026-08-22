@@ -27,7 +27,6 @@ truncate table
   public.facturas,
   public.rendiciones,
   public.entregas_caja,
-  public.alertas_levantadas,
   public.salidas,
   public.prestamos,
   public.stock_inicial,
@@ -35,6 +34,13 @@ truncate table
   public.rq_items,
   public.rqs
 restart identity cascade;
+
+-- Las alertas levantadas se borran APARTE, conservando los duplicados
+-- descartados del catálogo (claves 'dup:...'). Esos no son movimiento de
+-- prueba: son curaduría del catálogo REAL hecha por Lucía — cada par que
+-- revisó y marcó "no son duplicados". Borrarlos le haría repetir todo el
+-- trabajo, y el catálogo sobrevive al reset igual que ellos.
+delete from public.alertas_levantadas where clave not like 'dup:%';
 
 -- 2) Materiales creados DURANTE las pruebas (aprobaciones de ensayo).
 --    El catálogo seed se cargó en un solo lote: todo lo posterior a
@@ -89,7 +95,7 @@ delete from public.proveedores where ruc = '20138651917';
 --   union all select 'prestamos',            count(*) from public.prestamos
 --   union all select 'rendiciones',          count(*) from public.rendiciones
 --   union all select 'entregas_caja',        count(*) from public.entregas_caja
---   union all select 'alertas_levantadas',   count(*) from public.alertas_levantadas
+--   union all select 'alertas (solo dup:)',   count(*) from public.alertas_levantadas where clave not like 'dup:%'
 --   union all select 'solicitudes_material', count(*) from public.solicitudes_material
 --   union all select 'stock_inicial',        count(*) from public.stock_inicial
 --   union all select 'materiales (=1740)',   count(*) from public.materiales

@@ -76,6 +76,11 @@ export function Residente({ user, db, api, obraGlobal }) {
   // tumba la vista entera: JavaScript no deja leer una variable antes de
   // su declaración. Pasó exactamente eso el 18 ago 2026.
   const [proyF, setProyF] = useState('TODOS');
+  // Gerencia no gestiona el catalogo: para ella la tabla de solicitudes es
+  // ruido operativo. Se colapsa a una linea con el pendiente, y se abre si la
+  // quiere ver. El residente sigue viendo la suya entera: son SUS solicitudes
+  // y necesita el motivo del rechazo y el codigo que le asignaron.
+  const [verSol, setVerSol] = useState(false);
   // Gerencia elige la obra en la cabecera y los modulos la siguen. Va pegado
   // al estado del filtro, con los demas ganchos: bajarlo tumba la vista.
   useEffect(() => { if (obraGlobal) setProyF(obraGlobal); }, [obraGlobal]);
@@ -181,12 +186,30 @@ export function Residente({ user, db, api, obraGlobal }) {
     i.decision === 'Aprobado' && i.estado !== 'Entregado' && i.fecha && i.fecha < HOY_ISO);
   const rqIncompleto = r => r.items.some(i => i.estado === 'Incompleto');
   const rqPorDecidir = r => r.items.some(i => i.decision === 'Pendiente');
+  // COMPLETO -- cerrado Y con material entregado. Ojo: el PDF formal lleva solo
+  // los items APROBADOS, asi que un RQ con 2 rechazados y 3 entregados esta
+  // completo -- lo que se aprobo, llego.
+  //
+  // RECHAZADOS Y ANULADOS -- cerrado sin que llegara NADA. Como para estar
+  // cerrado todo item tiene que estar Rechazado, Anulado o Entregado, y no hay
+  // ninguno entregado, son todos rechazos o anulaciones. Ese RQ nunca llego a
+  // ser un requerimiento: su PDF saldria con la tabla vacia.
+  // No es un problema de abastecimiento, es una senal sobre el filtro de
+  // Compras: si a un residente le rechazan RQs enteros seguido, o pide mal o
+  // Compras esta siendo demasiado dura. Las dos cosas hay que saberlas.
+  const rqCompleto = r => rqCerrado(r) && r.items.some(i => i.estado === 'Entregado');
+  const rqSinNada = r => rqCerrado(r) && !r.items.some(i => i.estado === 'Entregado');
+  const sinMaterial = misRqs.filter(rqSinNada).length;
   const resumen = [
     { k: 'Total', n: misRqs.length, cls: 'text-slate-200' },
+    { k: 'Completos', n: misRqs.filter(rqCompleto).length, cls: 'text-green-400' },
     { k: 'En curso', n: rqsActivos.length, cls: 'text-sky-400' },
     { k: 'Retrasados', n: misRqs.filter(rqRetrasado).length, cls: 'text-red-400' },
     { k: 'Incompletos', n: misRqs.filter(rqIncompleto).length, cls: 'text-orange-400' },
     { k: 'Por decidir', n: misRqs.filter(rqPorDecidir).length, cls: 'text-yellow-400' },
+    // Solo si lo hay. Con esto Total = Completos + En curso + este, y el panel
+    // nunca da numeros que no cuadran.
+    ...(sinMaterial ? [{ k: 'Rechazados y anulados', n: sinMaterial, cls: 'text-red-300' }] : []),
   ];
 
   return (
@@ -336,9 +359,22 @@ export function Residente({ user, db, api, obraGlobal }) {
         </div>
       )}
 
-      {misSol.length > 0 && (
+      {!esRes && misSol.filter(x => x.estado === 'Pendiente').length > 0 && !verSol && (
+        <button onClick={() => setVerSol(true)}
+          className="w-full text-left bg-slate-900 border border-slate-800 rounded-md px-3 py-2 mb-3 hover:border-slate-600">
+          <span className="font-mono font-bold text-yellow-400">{misSol.filter(x => x.estado === 'Pendiente').length}</span>
+          <span className="text-[10px] font-bold tracking-widest text-slate-500 uppercase ml-2">
+            material(es) nuevo(s) esperando que Compras los apruebe · ver</span>
+        </button>
+      )}
+
+      {misSol.length > 0 && (esRes || verSol) && (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Mis solicitudes de material nuevo</div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">
+              {esRes ? 'Mis solicitudes de material nuevo' : 'Solicitudes de material nuevo · las aprueba Compras'}</div>
+            {!esRes && <button onClick={() => setVerSol(false)} className="ml-auto text-[10px] text-slate-500 hover:text-slate-200">✕ cerrar</button>}
+          </div>
           <table className="w-full text-xs">
             <thead><tr>{['Material', 'Und', 'Familia', 'Estado', 'Motivo / Código asignado'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
             <tbody>
@@ -356,7 +392,7 @@ export function Residente({ user, db, api, obraGlobal }) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-3">
         {resumen.map(x => (
           <div key={x.k} className="bg-slate-900 border border-slate-800 rounded-md px-3 py-2">
             <div className={`text-2xl font-bold font-mono ${x.n > 0 ? x.cls : 'text-slate-600'}`}>{x.n}</div>
