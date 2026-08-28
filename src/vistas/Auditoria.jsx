@@ -363,7 +363,7 @@ export function Auditoria({ user, db, api }) {
           <button onClick={() => generarCierre('conteo')} disabled={!obraCierre} className={btnOk(!!obraCierre)}>⤓ Hoja de conteo ciego (PDF)</button>
         </div>
         <div className="mt-3 text-slate-500 text-[11px]">
-          El <b>cierre valorizado</b> (con cantidades y soles al precio promedio de compra) es para gerencia y contabilidad.
+          El <b>cierre valorizado</b> (con cantidades y soles al precio promedio de compra, <b>con IGV</b>) es para gerencia y contabilidad.
           La <b>hoja de conteo</b> va SIN cantidades: entrégala a la persona de confianza, que cuenta, firma y devuelve — gerencia compara contra el cierre.
           La muestra incluye el 100% de los materiales de mayor valor + una selección aleatoria del resto, mezclados sin distinción.
         </div>

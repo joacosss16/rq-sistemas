@@ -71,7 +71,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
   const recibir = async i => {
     const f = getF(i.id);
     const fc = factorMap[i.cod];
-    const rec = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? fc.factor) || 0) : Number(f.cant);
+    const rec = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? i.factorCaja ?? fc.factor) || 0) : Number(f.cant);
     if (!(rec > 0)) return;
     if (pereceMap[i.cod] && !f.cad) { avisar('⚠ Este material es perecedero: registra la fecha de caducidad de la etiqueta.', 5000); return; }
     const yaRecibido = Number(i.cantRecibida || 0);
@@ -129,6 +129,11 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // Valorizado del almacen: stock x precio promedio pagado. Los materiales sin
   // ninguna compra registrada no tienen precio, asi que el total es PARCIAL y
   // hay que decirlo -- un total que finge estar completo se usa para decidir.
+  // OJO: los precios salen del desglose de la factura, o sea CON IGV. El total
+  // va rotulado como tal. No se divide entre 1.18 a ojo: no todas las compras
+  // llevan IGV y el desglose real (base imponible / IGV) aun no se guarda -- va
+  // con el bloque de SUNAT, post-piloto. Rotularlo es honesto; "corregirlo" con
+  // un 18% supuesto seria falso, y encima invisible.
   const valorizado = stock.reduce((a, x) => a + (precioProm[x.cod] != null ? x.stock * precioProm[x.cod] : 0), 0);
   const sinPrecio = stock.filter(x => x.stock > 0 && precioProm[x.cod] == null).length;
 
@@ -282,7 +287,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
                 {porRecibir.map(i => {
                   const f = getF(i.id);
                   const fc = factorMap[i.cod];
-                  const llega = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? fc.factor) || 0) : Number(f.cant);
+                  const llega = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? i.factorCaja ?? fc.factor) || 0) : Number(f.cant);
                   const rec = Number(i.cantRecibida || 0);
                   const falta = Number(i.cant) - rec;
                   const listo = esAlm && llega > 0 && llega <= falta;
@@ -384,7 +389,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
           <div className="ml-auto text-right">
             <div className="text-xl font-bold font-mono text-green-400">S/ {valorizado.toFixed(2)}</div>
             <div className="text-[9px] text-slate-500 uppercase tracking-widest">
-              valorizado{sinPrecio > 0 ? ` · parcial: ${sinPrecio} sin precio` : ''}</div>
+              valorizado · con IGV{sinPrecio > 0 ? ` · parcial: ${sinPrecio} sin precio` : ''}</div>
           </div>
         </div>
         {stock.length === 0 ? (

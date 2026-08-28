@@ -33,9 +33,16 @@ export function HistorialPrecios({ db }) {
     const ps = compras.map(c => c.precio);
     const min = Math.min(...ps), max = Math.max(...ps);
     const prom = ps.reduce((a, b) => a + b, 0) / ps.length;
-    const ult = compras[0].precio, prim = compras[compras.length - 1].precio;
-    const varPct = prim > 0 ? ((ult - prim) / prim) * 100 : 0;
-    return { min, max, prom, ult, varPct, n: compras.length };
+    const ult = compras[0].precio;
+    // Contra el PROMEDIO: es el punto de referencia que decide si la última
+    // compra fue buena o cara. Antes se comparaba contra la primera compra de
+    // la historia, que con meses de datos es una cifra arbitraria.
+    const varPct = prom > 0 ? ((ult - prom) / prom) * 100 : 0;
+    // Y contra la compra ANTERIOR: si subió de golpe respecto a la última vez,
+    // eso es lo que hay que reclamarle al proveedor hoy.
+    const antPrecio = compras.length > 1 ? compras[1].precio : null;
+    const varAnt = antPrecio > 0 ? ((ult - antPrecio) / antPrecio) * 100 : null;
+    return { min, max, prom, ult, varPct, varAnt, n: compras.length };
   }, [compras]);
 
   // Comparativa por proveedor: quién lo vende más barato
@@ -112,11 +119,14 @@ export function HistorialPrecios({ db }) {
                   ['Más barato', sol(stats.min), 'text-green-400'],
                   ['Más caro', sol(stats.max), 'text-red-400'],
                   ['Promedio', sol(stats.prom), 'text-slate-300'],
-                  ['Variación', (stats.varPct >= 0 ? '▲ +' : '▼ ') + stats.varPct.toFixed(1) + '%',
-                    stats.varPct > 5 ? 'text-red-400' : stats.varPct < -5 ? 'text-green-400' : 'text-slate-400']].map(([l, v, c]) => (
+                  ['La última vs. el promedio', (stats.varPct >= 0 ? '▲ +' : '▼ ') + stats.varPct.toFixed(1) + '%',
+                    stats.varPct > 5 ? 'text-red-400' : stats.varPct < -5 ? 'text-green-400' : 'text-slate-400',
+                    stats.varAnt != null ? `${stats.varAnt >= 0 ? '▲ +' : '▼ '}${stats.varAnt.toFixed(1)}% vs. la compra anterior` : null]]
+                  .map(([l, v, c, extra]) => (
                   <div key={l} className="bg-slate-950 border border-slate-800 rounded p-2">
                     <div className={`text-sm font-bold ${c}`}>{v}</div>
                     <div className="text-[9px] uppercase tracking-wider text-slate-500 mt-0.5">{l}</div>
+                    {extra && <div className="text-[9px] text-slate-500 mt-0.5 normal-case">{extra}</div>}
                   </div>
                 ))}
               </div>

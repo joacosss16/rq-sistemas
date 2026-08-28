@@ -2,7 +2,7 @@
 import { useState, Fragment, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { estadoCaducidad, calcularStocks } from '../stock';
-import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito } from '../pago';
+import { FORMAS_PAGO, PLAZOS_CREDITO, esCredito, vencimientoDe, rucValido } from '../pago';
 import { imprimirRQ } from '../pdf';
 import { PROYECTOS } from '../maestros';
 import { Aviso, AnularBox, AlertaCerrable, FiltroProyecto, FechaInput, inputCls, thCls, btnOk, btnRojo, btnVerde, pillEstado, pendCls } from '../ui';
@@ -16,6 +16,10 @@ import { HistorialPrecios } from './HistorialPrecios';
 // 2. HistorialPrecios se muestra en AMBOS modos (Frank negocia en
 //    mostrador con el, y gerencia tambien lo consulta); PedidoCotizacion solo
 //    para quien compra y cuando NO es facturar.
+
+// Unidades que no admiten decimales: 2.5 tornillos no existen. Las de peso,
+// volumen o longitud sí (2.5 KG de clavos es de todos los días).
+const UND_ENTERA = u => ['UND', 'PZA', 'JUEGO', 'PAR', 'CAJA', 'ROLLO', 'PQT', 'VARILLA', 'BOLSA', 'BALDE', 'GALON', 'MILLAR'].includes((u || '').toUpperCase());
 
 export function Compras({ user, db, api, modo, obraGlobal }) {
   const { rqs, facturas, proveedores, ultimaCompra, mejorPrecio2m = {}, rendiciones = [] } = db;
@@ -63,9 +67,9 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
     .filter(i => !facturarSolo || (i.decision === 'Aprobado' && i.compradoPorId === user.id));
   const esTriage = {
     decidir: i => i.decision === 'Pendiente',
-    porComprar: i => i.decision === 'Aprobado' && i.estado === '—',
+    porComprar: i => i.decision === 'Aprobado' && i.estado === '—' && !i.compraParcial && !i.anulSolMotivo,
     anulPend: i => !!i.anulSolMotivo,
-    facturar: i => i.decision === 'Aprobado' && !i.factura,
+    facturar: i => i.decision === 'Aprobado' && !i.factura && i.estado !== '—',
     // Comprado hace más de 48 h y todavía sin factura: no entra a Pagos
     sinFactura48: i => i.estado === 'Comprado' && !i.factura && dias(HOY_ISO, i.fechaCompra || i.fechaRQ) >= 2,
     // Ya pagado, esperando que el proveedor entregue el documento
@@ -133,6 +137,14 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
   ];
 
   const enviarRechazo = async i => {
+    // El ítem pudo aprobarse mientras esta caja estaba abierta (otro clic, otra
+    // persona, "Aprobar todo el RQ"). Rechazar entonces sería deshacer por la
+    // puerta de atrás algo ya comprado o recibido.
+    if (i.decision !== 'Pendiente') {
+      const r = { ...rechazo }; delete r[i.id]; setRechazo(r);
+      setAviso(`⚠ Ese ítem ya no está pendiente (está ${i.decision}): no se puede rechazar. Si hay que darlo de baja, usa Anular, que deja rastro y pasa por gerencia.`);
+      return;
+    }
     const motivo = (rechazo[i.id] || '').trim();
     if (!motivo) return;
     const ok = await updItem(i, { decision: 'Rechazado', motivo_rechazo: motivo },
@@ -143,6 +155,18 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
   // La anulación la confirma GERENCIA (migración 22): Compras solicita, gerencia decide.
   const esGerente = user.rol === 'gerente';
   const solicitarAnulacion = (i, motivo) => {
+    // Un ítem facturado o ya recibido no se anula: la base lo rechaza, y
+    // pedirlo solo crea una solicitud que gerencia nunca podrá confirmar.
+    if (i.factura) {
+      setAviso('⚠ Ese ítem ya tiene factura: no se puede anular. Si la factura está mal, gerencia la anula primero y entonces el ítem queda libre.');
+      setTimeout(() => setAviso(''), 9000);
+      return;
+    }
+    if (Number(i.cantRecibida) > 0) {
+      setAviso(`⚠ Ese ítem ya tiene ${i.cantRecibida} recibido en almacén: no se anula. Corrige primero la recepción con el almacenero.`);
+      setTimeout(() => setAviso(''), 9000);
+      return;
+    }
     if (esGerente) {
       updItem(i, { decision: 'Anulado', anulacion: { motivo, por: user.nombre, fecha: HOY_ISO }, anulacion_solicitud: null, anulacion_rechazo: null },
         `Ítem "${i.desc}" anulado por ${user.nombre}. Queda registrado en el Tablero con motivo.`);
@@ -250,8 +274,12 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
     if (f.pendiente && !f.efectivo && !(f.banco || '').trim()) falta.push('el banco del pago');
     if (f.pendiente && !f.efectivo && !(f.numOp || '').trim()) falta.push('el N° de operación');
     if (!f.prov.trim()) falta.push('el proveedor');
-    if (!/^\d{11}$/.test(f.ruc)) falta.push('el RUC (11 dígitos)');
+    const vr = rucValido(f.ruc);
+    if (!vr.ok) { setAviso('⚠ ' + vr.motivo); return; }
+    if (!(Number(f.monto) > 0)) { setAviso('⚠ El monto de la factura tiene que ser mayor que cero. Una devolución o un descuento van por nota de crédito, que todavía no está en el sistema — avisa a gerencia.'); return; }
+    if (cubiertos.some(x => Number(f.precios[x.id]) < 0)) { setAviso('⚠ Hay un precio negativo en el desglose. Revisa las cantidades: un precio nunca es negativo.'); return; }
     if (!f.fecha) falta.push('la fecha');
+    else if (f.fecha > HOY_ISO) { setAviso('⚠ La fecha de la factura no puede ser futura. Revisa el año.'); return; }
     if (!(Number(f.monto) > 0)) falta.push('el monto total');
     const sinPrecio = cubiertos.filter(x => !(Number(f.precios[x.id]) > 0));
     if (sinPrecio.length) falta.push(`el precio de ${sinPrecio.length} ítem(s): ${sinPrecio.map(x => x.desc).join(', ')}`);
@@ -268,7 +296,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
     // Compromiso y pendiente reciben serie interna de la base (CRED-#### / PEND-####)
     const interna = f.compromiso || f.pendiente;
     const serie = interna ? 'X' : f.serie.trim().toUpperCase();
-    if (!interna && facturas.some(x => x.serie === serie && x.ruc === f.ruc)) {
+    if (!interna && facturas.some(x => x.serie === serie && x.ruc === f.ruc && !x.anulMotivo)) {
       setAviso(`⚠ La factura ${serie} de ese RUC ya está registrada. Verifica el número.`);
       setTimeout(() => setAviso(''), 6000);
       return;
@@ -309,9 +337,22 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
   const stocks = calcularStocks(db);
   const porComprar = Object.values(flatBase
     .filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—')
+    // Lo que YA se consiguió no se vuelve a mandar comprar. Un ítem con compra
+    // parcial registrada quedaba aquí con la cantidad conseguida y sin marca de
+    // comprado, así que el consolidado sumaba lo conseguido MÁS su saldo y
+    // pedía otra vez el total: se compraba dos veces.
+    .filter(i => !i.compraParcial)
+    // Ni lo que está esperando que gerencia confirme su anulación: mandarlo a
+    // comprar es gastar en lo que se acaba de pedir cancelar.
+    .filter(i => !i.anulSolMotivo)
     .reduce((acc, i) => {
-      if (!acc[i.cod]) acc[i.cod] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porObra: {}, minFecha: i.fecha, tomados: {}, nItems: 0 };
-      const g = acc[i.cod];
+      // Se agrupa por material Y UNIDAD. Antes la clave era solo el código: si
+      // una obra pedía 3 CAJA y otra 36 UND del mismo material, el consolidado
+      // mostraba "39" con la unidad de la primera línea que encontró. Nunca
+      // deben sumarse cantidades de unidades distintas.
+      const k = i.cod + '|' + (i.und || '');
+      if (!acc[k]) acc[k] = { cod: i.cod, desc: i.desc, und: i.und, total: 0, porObra: {}, minFecha: i.fecha, tomados: {}, nItems: 0 };
+      const g = acc[k];
       g.total += Number(i.cant);
       g.nItems += 1;
       g.porObra[i.proyecto] = (g.porObra[i.proyecto] || 0) + Number(i.cant);
@@ -390,13 +431,22 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                     <td className="py-2 px-1.5 text-[10px]">
                       {otras.length === 0 ? <span className="text-slate-600">—</span> : otras.map(x => {
                         const cad = estadoCaducidad(x.cadMin);
-                        const porVencer = cad && (cad.cls.includes('yellow') || cad.cls.includes('red'));
+                        // VENCIDO no es "por vencer": es material que ya no se
+                        // puede usar. Antes caía en el mismo saco y el
+                        // consolidado lo empujaba con más fuerza —"transferir
+                        // antes que comprar"—, mandando a la otra obra material
+                        // inservible; y al llegar por préstamo la caducidad no
+                        // viaja, así que allá aparecía como bueno.
+                        const vencido = cad && cad.k === 'VENCIDO';
+                        const porVencer = !vencido && cad && (cad.cls.includes('yellow') || cad.cls.includes('red'));
                         const esSolicitante = !!g.porObra[x.obra];
                         return (
-                          <div key={x.obra} className={porVencer ? 'text-yellow-400' : 'text-sky-400'}>
-                            {esSolicitante
-                              ? `${x.obra} ya tiene ${x.cant} ${g.und} en su almacén${porVencer ? ` (${cad.k})` : ''} — verificar antes de comprar`
-                              : `${x.obra} tiene ${x.cant} ${g.und}${porVencer ? ` (${cad.k}) — transferir antes que comprar` : ' — considerar préstamo/transferencia'}`}
+                          <div key={x.obra} className={vencido ? 'text-red-400' : porVencer ? 'text-yellow-400' : 'text-sky-400'}>
+                            {vencido
+                              ? `⛔ ${x.obra} tiene ${x.cant} ${g.und} VENCIDO(S) — no transferir; hay que darlos de baja. Comprar nuevo.`
+                              : esSolicitante
+                                ? `${x.obra} ya tiene ${x.cant} ${g.und} en su almacén${porVencer ? ` (${cad.k})` : ''} — verificar antes de comprar`
+                                : `${x.obra} tiene ${x.cant} ${g.und}${porVencer ? ` (${cad.k}) — transferir antes que comprar` : ' — considerar préstamo/transferencia'}`}
                           </div>
                         );
                       })}</td>
@@ -466,7 +516,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
               // `pendiente`, y como al marcarlo el campo de serie desaparece,
               // el botón se quedaba gris para siempre y sin explicar por qué.
               const factOk = ff && (ff.compromiso || ff.pendiente || ff.serie.trim())
-                && ff.prov.trim() && /^\d{11}$/.test(ff.ruc) && ff.fecha && Number(ff.monto) > 0
+                && ff.prov.trim() && rucValido(ff.ruc).ok && ff.fecha && Number(ff.monto) > 0
                 // Ya pagada por banco: el servidor exige banco y N° de operación
                 && (!ff.pendiente || ff.efectivo || ((ff.banco || '').trim() && (ff.numOp || '').trim()))
                 && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
@@ -533,25 +583,30 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                         )}
                       </div>
                     )}
-                    {enRechazo && (
+                    {enRechazo && i.decision === 'Pendiente' && (
                       <div className="w-48">
                         <textarea rows={2} value={rechazo[i.id]} onChange={e => setRechazo({ ...rechazo, [i.id]: e.target.value })}
                           placeholder="¿Por qué se rechazó? (obligatorio)" className={`w-full ${inputCls}`} />
-                        <button onClick={() => enviarRechazo(i)} disabled={!(rechazo[i.id] || '').trim()}
-                          className={`mt-1 w-full px-2 py-1.5 rounded text-[9px] font-bold uppercase ${(rechazo[i.id] || '').trim() ? 'bg-red-950 text-red-400 border border-red-800 hover:bg-red-900' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
-                          Enviar y comunicar al residente</button>
+                        <div className="flex gap-1 mt-1">
+                          <button onClick={() => enviarRechazo(i)} disabled={!(rechazo[i.id] || '').trim()}
+                            className={`flex-1 px-2 py-1.5 rounded text-[9px] font-bold uppercase ${(rechazo[i.id] || '').trim() ? 'bg-red-950 text-red-400 border border-red-800 hover:bg-red-900' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>
+                            Enviar y comunicar al residente</button>
+                          <button onClick={() => { const r = { ...rechazo }; delete r[i.id]; setRechazo(r); }}
+                            title="Cancelar el rechazo y volver a Aprobar / Rechazar"
+                            className="px-2 py-1.5 rounded text-[9px] font-bold bg-slate-800 text-slate-400 border border-slate-700 hover:text-slate-200">✕</button>
+                        </div>
                       </div>
                     )}
                     {i.decision === 'Aprobado' && <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado('Aprobado')}`}>Aprobado</span>}
                   </td>
                   <td className="py-2 px-1.5">
                     {post ? (
-                      i.estado === '—' ? (
+                      i.estado === '—' && !i.factura ? (
                         puedeFacturar
                           ? (parcial[i.id] ? (
                               <div className="p-2 bg-slate-950 border border-orange-800 rounded w-56">
                                 <div className="text-[9px] font-bold uppercase text-orange-400 mb-1">Compra parcial · pedido: {i.cant}</div>
-                                <input type="number" min="1" step="any" value={parcial[i.id].cant}
+                                <input type="number" min={UND_ENTERA(i.und) ? 1 : 0.01} step={UND_ENTERA(i.und) ? 1 : 'any'} value={parcial[i.id].cant}
                                   onChange={e => setParcial({ ...parcial, [i.id]: { ...parcial[i.id], cant: e.target.value } })}
                                   placeholder={`¿Cuánto se consiguió? (menos de ${i.cant})`} className={`w-full mb-1 ${inputCls}`} />
                                 <input value={parcial[i.id].motivo}
@@ -599,6 +654,12 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                           <span className={`px-2 py-0.5 rounded text-[9px] font-bold tracking-wider uppercase ${pillEstado(i.estado)}`}
                             title="Comprado lo marca Compras o el comprador; Entregado e Incompleto los fija el almacén al recibir.">{i.estado}</span>
                           {i.estado === 'Comprado' && i.compradoPor && <div className="text-[9px] text-slate-500 mt-0.5">por {i.compradoPor}</div>}
+                          {i.compraParcial && (
+                            <div className="text-[9px] text-orange-400 mt-0.5 leading-tight"
+                              title="Se consiguió menos de lo pedido; el saldo quedó como un ítem aparte.">
+                              ✂ {i.compraParcial.conseguido} de {i.compraParcial.pedido} · «{i.compraParcial.motivo}»
+                              <span className="text-slate-500"> · {i.compraParcial.por}</span></div>
+                          )}
                           {esTriage.sinFactura48(i) && (
                             <div className="text-[9px] text-red-400 font-bold mt-0.5"
                               title="Comprado hace más de 48 h y todavía sin factura: no ha entrado a Pagos.">
@@ -652,9 +713,9 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                           <datalist id={`fprov-${i.id}`}>{proveedores.map(p => <option key={p[0]} value={p[1]} />)}</datalist>
                           <input value={ff.ruc} onChange={e => setFF(i.id, 'ruc', e.target.value)} onKeyDown={enterSiguiente}
                             disabled={!ff.prov.trim()} placeholder="RUC (11 dígitos)" maxLength={11}
-                            className={`w-full mb-1 ${pendCls(/^\d{11}$/.test(ff.ruc))} font-mono ${!ff.prov.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
-                          {ff.ruc && !/^\d{11}$/.test(ff.ruc) && <div className="text-[9px] text-red-400 mb-1">RUC inválido</div>}
-                          {ff.ruc && /^\d{11}$/.test(ff.ruc) && !proveedores.some(p => p[0] === ff.ruc) && <div className="text-[9px] text-sky-400 mb-1">Proveedor nuevo: se agregará al maestro.</div>}
+                            className={`w-full mb-1 ${pendCls(rucValido(ff.ruc).ok)} font-mono ${!ff.prov.trim() ? 'opacity-60 cursor-not-allowed' : ''}`} />
+                          {ff.ruc && !rucValido(ff.ruc).ok && <div className="text-[9px] text-red-400 mb-1">{rucValido(ff.ruc).motivo}</div>}
+                          {ff.ruc && rucValido(ff.ruc).ok && !proveedores.some(p => p[0] === ff.ruc) && <div className="text-[9px] text-sky-400 mb-1">Proveedor nuevo: se agregará al maestro.</div>}
                           {/* Aviso PREVENTIVO, nunca bloqueante. Si el proveedor junta las
                               entregas del mes en una sola factura, al pagar el segundo
                               compromiso el sistema lo rechaza (serie+RUC no se repiten) y
@@ -663,7 +724,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                               al mismo proveedor con dos facturas reales distintas es lo
                               normal todos los días. */}
                           {(() => {
-                            if (!/^\d{11}$/.test(ff.ruc)) return null;
+                            if (!rucValido(ff.ruc).ok) return null;
                             const vivos = facturas.filter(f => f.tipoDoc === 'Compromiso' && f.estadoPago !== 'Pagada'
                               && !f.anulMotivo && f.ruc === ff.ruc && f.proyecto === i.proyecto);
                             if (!vivos.length) return null;
@@ -676,10 +737,11 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                               </div>
                             );
                           })()}
-                          <FechaInput value={ff.fecha} onChange={e => setFF(i.id, 'fecha', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`} />
+                          <FechaInput value={ff.fecha} max={HOY_ISO} onChange={e => setFF(i.id, 'fecha', e.target.value)} onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`} />
                           <input type="number" min="0.01" step="any" value={ff.monto} onChange={e => setFF(i.id, 'monto', e.target.value)} onKeyDown={enterSiguiente}
-                            disabled={!/^\d{11}$/.test(ff.ruc)} placeholder="Monto TOTAL S/ (inc. IGV)"
-                            className={`w-full mb-1 ${pendCls(Number(ff.monto) > 0)} font-mono ${!/^\d{11}$/.test(ff.ruc) ? 'opacity-60 cursor-not-allowed' : ''}`} />
+                            disabled={!rucValido(ff.ruc).ok}
+                            placeholder={rucValido(ff.ruc).ok ? 'Monto TOTAL S/ (inc. IGV)' : 'Primero el RUC'}
+                            className={`w-full mb-1 font-mono ${rucValido(ff.ruc).ok ? pendCls(Number(ff.monto) > 0) : 'bg-slate-900 border border-slate-800 text-slate-600 rounded px-2 py-1.5 text-xs cursor-not-allowed'}`} />
                           {ff.compromiso ? (
                             <select value={esCredito(ff.forma) ? ff.forma : 'Crédito 30 días'} onChange={e => setFF(i.id, 'forma', e.target.value)}
                               onKeyDown={enterSiguiente} className={`w-full mb-1 ${inputCls}`}>
@@ -863,7 +925,16 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                   <td className="py-2 px-1.5 text-slate-400">{f.proyecto}</td>
                   <td className="py-2 px-1.5 text-slate-300 text-[10px]">{f.items.map(x => `RQ-${String(x.rq).padStart(3, '0')} ${x.desc}`).join(' · ')}</td>
                   <td className="py-2 px-1.5 font-mono text-slate-200 text-right">{f.monto.toFixed(2)}</td>
-                  <td className="py-2 px-1.5 text-slate-400">{f.forma}</td>
+                  <td className="py-2 px-1.5 text-slate-400">{f.forma}
+                    {esCredito(f.forma) && f.estadoPago !== 'Pagada' && (() => {
+                      const ve = vencimientoDe(f);
+                      const d = ve ? dias(ve, HOY_ISO) : null;
+                      if (d == null) return null;
+                      return (
+                        <div className={`text-[9px] mt-0.5 font-bold ${d < 0 ? 'text-red-400' : d <= 3 ? 'text-yellow-400' : 'text-slate-500'}`}>
+                          {d < 0 ? `⚠ vencida hace ${-d} d` : d === 0 ? '⚠ vence HOY' : `vence en ${d} d`} · {fmt(ve)}</div>
+                      );
+                    })()}</td>
                   <td className="py-2 px-1.5">
                     <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(f.estadoPago)}`}>{f.estadoPago}</span>
                     {f.estadoPago === 'Pagada' && <div className="text-[9px] text-slate-500 mt-1">{f.banco} · op. {f.numOp} · {fmt(f.fechaPago)}</div>}

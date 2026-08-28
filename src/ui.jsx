@@ -45,13 +45,32 @@ export const btnOk = ok => `px-3 py-1.5 rounded text-[9px] font-bold uppercase w
 export const btnRojo = "px-2 py-1 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400 border border-red-800 hover:bg-red-900";
 export const btnVerde = "px-2 py-1 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400 border border-green-800 hover:bg-green-900";
 
+// El aviso FLOTA sobre la pantalla, no se pinta en su sitio del documento.
+//
+// El porqué, encontrado probando con el sistema en la mano: los avisos vivían
+// arriba de cada vista, pero los formularios que los disparan están mucho más
+// abajo — el de facturar, el de aprobar un material, el de cotización. Quien
+// tocaba el botón estaba mirando el formulario, el mensaje aparecía fuera de la
+// pantalla, y lo que veía era EXACTAMENTE NADA: ni error, ni confirmación.
+//
+// Pasaba en tres sitios distintos ("factura repetida", "código ya existe",
+// "código de menos de 6 dígitos") y el sistema quedaba como si el botón
+// estuviera roto, cuando la regla había funcionado y el mensaje existía.
+//
+// Flotando se ve siempre, sin importar dónde esté el scroll ni qué formulario
+// sea. Un aviso que no se ve no es un aviso.
 export function Aviso({ msg }) {
   if (!msg) return null;
   const esError = msg.startsWith('⚠');
   return (
-    <div className={`px-3 py-2 rounded text-xs mb-3 border ${esError ? 'bg-red-950 border-red-800 text-red-400' : 'bg-green-950 border-green-800 text-green-400'}`}>
-      {esError ? msg : '✓ ' + msg}
-    </div>
+    <>
+      {/* Reserva el hueco donde antes estaba, para que nada salte al aparecer */}
+      <div className="mb-3" aria-hidden="true" />
+      <div role="status" aria-live="polite"
+        className={`fixed z-50 left-1/2 -translate-x-1/2 top-4 max-w-[92vw] sm:max-w-xl px-4 py-3 rounded-md text-xs border shadow-lg shadow-black/50 ${esError ? 'bg-red-950 border-red-700 text-red-300' : 'bg-green-950 border-green-700 text-green-300'}`}>
+        {esError ? msg : '✓ ' + msg}
+      </div>
+    </>
   );
 }
 

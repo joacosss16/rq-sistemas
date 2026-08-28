@@ -179,7 +179,11 @@ export default function App() {
       // no viaja sola al navegador de los 7 roles sin que nadie se entere.
       fetchAll(() => supabase.from('proyectos').select('codigo,nombre,activo').order('codigo')),
       fetchAll(() => supabase.from('usuarios').select('id,nombre,rol,proyecto_asignado,activo').order('id')),
-      fetchAll(() => supabase.from('materiales').select('*').eq('activo', true).order('codigo')),
+      // TODOS los materiales, tambien los desactivados: los nombres de lo ya
+      // registrado salen de aqui (matMap), y un duplicado confirmado se
+      // desactiva sin que sus RQs, salidas y stock historicos pierdan el
+      // nombre. Los BUSCADORES filtran activos mas abajo.
+      fetchAll(() => supabase.from('materiales').select('*').order('codigo')),
       fetchAll(() => supabase.from('proveedores').select('*').order('razon_social').order('ruc')),
       fetchAll(() => supabase.from('familias').select('*').order('iu')),
       // Cuentas bancarias por obra (migración 32). La tabla está cerrada a
@@ -210,7 +214,11 @@ export default function App() {
     const conError = [prjR, usrR, matR, provR, rqsR, itemR, factR, fitR, salR, preR, solR, famR, siR, cajR, renR].find(r => r.error);
     if (conError) { setCargaError(conError.error.message); return null; }
 
-    const prj = prjR.data, usrs = usrR.data, mats = matR.data, provs = provR.data, fams = famR.data;
+    const prj = prjR.data, usrs = usrR.data, matsTodos = matR.data, provs = provR.data, fams = famR.data;
+    // Activos: lo unico que se ofrece al pedir. Un material desactivado
+    // (duplicado confirmado) desaparece de los buscadores pero conserva su
+    // nombre, factor y marca de perecedero en todo lo historico.
+    const mats = matsTodos.filter(m => m.activo);
     const famMap = {}; fams.forEach(f => { famMap[f.iu] = f.nombre; });
     const nomProy = {}, codProy = {}, bancoDe = {};
     prj.forEach(p => { nomProy[p.codigo] = p.nombre; codProy[p.nombre] = p.codigo; });
@@ -229,7 +237,7 @@ export default function App() {
     usrs.filter(u => u.rol === 'almacen' && u.activo && u.proyecto_asignado).forEach(u => { alm2[nomProy[u.proyecto_asignado]] = u.nombre; });
     setMaestros(proy2, alm2);
 
-    const matMap = {}; mats.forEach(m => { matMap[m.codigo] = m; });
+    const matMap = {}; matsTodos.forEach(m => { matMap[m.codigo] = m; });
     // Unidad de consumo: si el material se compra en caja, la base es und_base.
     // OJO: esto es solo el RESPALDO. Desde la migracion 59 la unidad viaja
     // congelada en cada linea, porque deducirla del catalogo reescribia el
@@ -237,20 +245,42 @@ export default function App() {
     // registrado en '3 UND', sin tocar el numero y sin que nadie lo notara.
     const undDe = m => (m && (m.und_base || m.und)) || '';
     const factorMap = {};
-    mats.forEach(m => { if (m.factor_caja) factorMap[m.codigo] = { factor: Number(m.factor_caja), undCompra: m.und, undBase: m.und_base || 'UND' }; });
+    matsTodos.forEach(m => { if (m.factor_caja) factorMap[m.codigo] = { factor: Number(m.factor_caja), undCompra: m.und, undBase: m.und_base || 'UND' }; });
     const usrMap = {}; usrs.forEach(u => { usrMap[u.id] = u; });
     const provMap = {}; provs.forEach(p => { provMap[p.ruc] = p; });
     const factMap = {}; factR.data.forEach(f => { factMap[f.id] = f; });
     // Precio promedio ponderado por material (del desglose de facturas):
     // base de la valorización del cierre mensual de almacén
     const itemById = {}; itemR.data.forEach(r => { itemById[r.id] = r; });
+    //
+    // TODO SE NORMALIZA A LA UNIDAD BASE antes de promediar. Un mismo material
+    // puede tener compras en CAJA y en UNIDAD -- la unidad viaja congelada en
+    // cada linea desde la migracion 59-- y promediar S/120 la caja con S/10 la
+    // unidad da un numero que no significa nada. El dia que se carguen las
+    // equivalencias de caja, el historial de precios con el que se negocia y el
+    // valorizado del almacen quedaban inservibles sin que nadie lo notara:
+    // seguian mostrando cifras, solo que falsas.
+    const aBase = (codigo, und, cant, precio, factorLinea) => {
+      const f = factorMap[codigo];
+      // Sin factor cargado, o la linea ya viene en la unidad de consumo:
+      // se usa tal cual. Es el caso de casi todo el catalogo hoy.
+      if (!f || !und || und !== f.undCompra) return { cant: Number(cant), precio: Number(precio) };
+      // El factor CONGELADO de la linea manda sobre el del catalogo (migracion
+      // 63): el catalogo dice como se compra hoy, la linea dice como se compro
+      // ese dia. Si mandara el del catalogo, actualizar una equivalencia
+      // recalcularia los precios de todas las compras pasadas.
+      const fac = Number(factorLinea) > 0 ? Number(factorLinea) : f.factor;
+      // La linea esta en la unidad de compra (CAJA): se reparte.
+      return { cant: Number(cant) * fac, precio: Number(precio) / fac };
+    };
     const acumPrecio = {};
     fitR.data.forEach(fi => {
       if (fi.precio_unitario == null) return;
       const it = itemById[fi.rq_item_id]; if (!it) return;
+      const b = aBase(it.codigo, it.und, it.cant, fi.precio_unitario, it.factor_caja);
       const a = (acumPrecio[it.codigo] = acumPrecio[it.codigo] || { m: 0, c: 0 });
-      a.m += Number(fi.precio_unitario) * Number(it.cant);
-      a.c += Number(it.cant);
+      a.m += b.precio * b.cant;
+      a.c += b.cant;
     });
     const precioProm = {};
     Object.entries(acumPrecio).forEach(([k, v]) => { if (v.c > 0) precioProm[k] = v.m / v.c; });
@@ -276,14 +306,22 @@ export default function App() {
       const it = itemById[fi.rq_item_id]; if (!it) return;
       const fx = factMap[fi.factura_id]; if (!fx) return;
       (historialPrecios[it.codigo] = historialPrecios[it.codigo] || []).push({
+        // La unidad de CADA compra: sin ella, dos lineas del mismo material en
+        // unidades distintas se leen como una subida o bajada de precio que
+        // nunca ocurrio.
+        und: it.und || '',
+        n: fx.numero,          // desempate cuando dos facturas son del mismo dia
         precio: Number(fi.precio_unitario), cant: Number(it.cant), fecha: fx.fecha,
         serie: fx.serie, proyecto: nomProy[fx.proyecto] || fx.proyecto,
         ruc: fx.proveedor_ruc,
         prov: provMap[fx.proveedor_ruc] ? provMap[fx.proveedor_ruc].razon_social : fx.proveedor_ruc,
       });
     });
-    // de la compra más reciente a la más antigua
-    Object.values(historialPrecios).forEach(l => l.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0)));
+    // De la compra más reciente a la más antigua, desempatando por número de
+    // factura — el MISMO criterio que `ultimaCompra`, para que las dos digan
+    // siempre lo mismo.
+    Object.values(historialPrecios).forEach(l => l.sort((a, b) =>
+      (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : (b.n || 0) - (a.n || 0))));
 
     // Mejor precio de cada material en los ÚLTIMOS 2 MESES: el piso al que
     // ya se compró, para negociar con el proveedor sin cotizar de nuevo.
@@ -323,6 +361,13 @@ export default function App() {
         canal: r.canal, decision: r.decision, estado: r.estado, motivoRechazo: r.motivo_rechazo || '',
         motivoAnulacion: r.anulacion ? r.anulacion.motivo : '', anuladoPor: r.anulacion ? r.anulacion.por : '',
         fechaAnulacion: r.anulacion ? r.anulacion.fecha : '',
+        // Compra parcial ya registrada sobre este ítem (migración 49/51): lo que
+        // dice `cant` ya se consiguió, no es cosa por comprar. Sin este dato el
+        // consolidado lo sumaba junto a su saldo y mandaba comprar el total otra vez.
+        // Unidades por caja el día que se creó la línea (migración 63). El
+        // catálogo dice cómo se compra HOY; esto, cómo se compró ese día.
+        factorCaja: r.factor_caja ? Number(r.factor_caja) : null,
+        compraParcial: r.compra_parcial || null,
         // anulación pedida por Compras, pendiente del visto bueno de gerencia (migración 22)
         anulSolMotivo: r.anulacion_solicitud ? r.anulacion_solicitud.motivo : '',
         anulSolPor: r.anulacion_solicitud ? r.anulacion_solicitud.por : '',
@@ -394,6 +439,8 @@ export default function App() {
       conciliada: !!f.conciliada, conciliadaPor: usrMap[f.conciliada_por] ? usrMap[f.conciliada_por].nombre : '',
       fechaConciliacion: f.fecha_conciliacion || '',
       fechaPago: f.fecha_pago || '', pagadoPor: usrMap[f.pagado_por] ? usrMap[f.pagado_por].nombre : '',
+      // Rastro del ajuste de importe al convertir un compromiso (migración 65).
+      ajuste: f.ajuste_monto || null,
       items: (itemsDeFactura[f.id] || []).map(id => ({ rq: rqNumDeItem[id], desc: descDeItem[id] })),
     }));
 
@@ -491,7 +538,16 @@ export default function App() {
     const nuevo = {
       rqs, facturas, salidas, prestamos, solicitudes, stockInicial, cajas, tolerancias, rendiciones, bancoDe, entregas, levantadas,
       catalogo: mats.map(m => [m.codigo, m.descripcion, undDe(m), famMap[m.codigo.slice(0, 2)] || '', m.factor_caja ? Number(m.factor_caja) : null, m.factor_caja ? m.und : null, !!m.perecedero]),
-      pereceMap: Object.fromEntries(mats.filter(m => m.perecedero).map(m => [m.codigo, true])),
+      pereceMap: Object.fromEntries(matsTodos.filter(m => m.perecedero).map(m => [m.codigo, true])),
+      // TODOS los codigos alguna vez asignados, incluidos los de materiales
+      // desactivados. El correlativo y la validacion de unicidad se calculan
+      // con ESTO, nunca con `catalogo` (que solo trae activos): si un codigo
+      // desactivado volviera a asignarse, el material nuevo heredaria los RQs,
+      // salidas y stock del viejo. Un codigo quemado no vuelve.
+      codigosUsados: matsTodos.map(m => m.codigo),
+      // Nombres de TODO, para poder mostrar lo desactivado en la lista de
+      // duplicados ya resueltos sin que quede un codigo pelado.
+      nombreDe: Object.fromEntries(matsTodos.map(m => [m.codigo, m.descripcion])),
       precioProm, ultimaCompra, historialPrecios, mejorPrecio2m,
       proveedores: provs.map(p => [p.ruc, p.razon_social]),
       familias: fams.map(f => [f.iu, f.nombre]),
@@ -594,7 +650,9 @@ export default function App() {
         if (error) {
           const m = error.message || '';
           if (m.includes('uq_factura') || error.code === '23505') {
-            return { error: { message: `La factura ${serie} de ese RUC ya está registrada.` } };
+            return { error: { message: serie && serie !== 'X'
+              ? `La factura ${serie} de ese RUC ya está registrada y sigue vigente. Si la anterior estaba mal, gerencia la anula y entonces sí se puede volver a registrar con este mismo número.`
+              : 'Ese número ya está registrado para ese RUC.' } };
           }
           return { error: { message: m.replace(/^.*?:\s*/, '') } };
         }
@@ -613,13 +671,16 @@ export default function App() {
       }, ['facturas']),
       anularFactura: (id, motivo) => wrap(async () =>
         await supabase.rpc('anular_factura', { p_id: id, p_motivo: motivo }), ['facturas', 'factura_items']),
-      pagarFactura: (id, { medio, banco, op, fecha, serieReal }) => wrap(async () => {
+      pagarFactura: (id, { medio, banco, op, fecha, serieReal, montoReal }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         const r = await supabase.from('facturas').update({
           estado_pago: 'Pagada', medio_pago: medio, banco, numero_operacion: op,
           fecha_pago: fecha, pagado_por: u.id,
           // compromiso → factura real: la serie llega con el comprobante al pagar
           ...(serieReal ? { serie: serieReal.trim().toUpperCase(), tipo_doc: 'Factura' } : {}),
+          // Y si la factura real llegó por otro importe, el monto (migración 65).
+          // El rastro del ajuste lo estampa el servidor, no esta línea.
+          ...(serieReal && Number(montoReal) > 0 ? { monto: Number(montoReal) } : {}),
         }).eq('id', id);
         // El numero de la serie se perdio de este mensaje el 11 ago 2026 al
         // reescribir esta capa por rendimiento: decia "La factura  de ese RUC",
@@ -751,8 +812,8 @@ export default function App() {
       // Pedido por cotización (enchapes): crea cada material 97xxxx + el pedido aprobado
       crearPedidoCotizacion: ({ proyecto, cotizacionRef, arquitecto, fecha, lineas }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
-        const cat = dbRef.current.catalogo;
-        let cod97 = Math.max(970100, ...cat.filter(m => String(m[0]).startsWith('97')).map(m => Number(m[0])));
+        const usados = dbRef.current.codigosUsados || [];
+        let cod97 = Math.max(970100, ...usados.filter(c => String(c).startsWith('97')).map(Number));
         const mats = [];
         for (const l of lineas) {
           cod97 += 1;
@@ -788,6 +849,15 @@ export default function App() {
         }), ['rqs', 'rq_items']),
       setPerecedero: (codigo, valor) => wrap(async () =>
         await supabase.from('materiales').update({ perecedero: valor }).eq('codigo', codigo), [], true),
+      // Duplicados del catálogo (migración 60). Las tres son funciones del
+      // servidor: desactivar el material y dejar el rastro son UNA decisión,
+      // y media decisión no puede quedar en pie.
+      resolverDuplicado: (ganador, perdedor) => wrap(async () =>
+        await supabase.rpc('resolver_duplicado', { p_ganador: ganador, p_perdedor: perdedor }), ['alertas_levantadas'], true),
+      descartarDuplicado: (c1, c2) => wrap(async () =>
+        await supabase.rpc('descartar_duplicado', { p_cod1: c1, p_cod2: c2 }), ['alertas_levantadas'], true),
+      reabrirDuplicado: clave => wrap(async () =>
+        await supabase.rpc('reabrir_duplicado', { p_clave: clave }), ['alertas_levantadas'], true),
       conciliarFactura: (id, valor) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('facturas').update(valor
@@ -842,6 +912,63 @@ export default function App() {
   const anulRecientes = anuladosRes.length && !avisoLeido('anulados:' + anuladosRes.map(i => i.id).join(','))
     ? anuladosRes.length : 0;
 
+  // ── LO QUE ESPERA EN CADA PESTAÑA ──────────────────────────────
+  //
+  // El sistema no manda correos ni mensajes: solo avisa a quien ya está
+  // mirando. Estos números son ese aviso — al entrar, cada persona ve dónde
+  // tiene trabajo sin recorrer pestaña por pestaña.
+  //
+  // Cada cuenta es de LO QUE ESA PERSONA TIENE QUE HACER, no de todo lo que
+  // hay: al residente le esperan sus firmas, a Lucía sus decisiones, al
+  // almacenero sus recepciones. Un número que cuenta trabajo ajeno se aprende
+  // a ignorar en dos días, y entonces no avisa de nada.
+  //
+  // Gerencia es el caso aparte: sus vistas son de vigilancia, no de trabajo
+  // (así se rediseñaron el 26 ago), así que no lleva números — salvo donde de
+  // verdad la esperan a ella: confirmar anulaciones y las diferencias de caja.
+  const pendientesPorTab = (() => {
+    if (!db) return {};
+    const r = user.rol, mio = user.proyecto;
+    const items = db.rqs.flatMap(x => x.items.map(i => ({ ...i, proyecto: x.proyecto })));
+    const c = {};
+
+    if (r === 'compras') {
+      c.com = items.filter(i => i.decision === 'Pendiente').length;
+      c.cat = db.solicitudes.filter(x => x.estado === 'Pendiente').length;
+    }
+    if (r === 'residente') {
+      c.apr = pendAprob;              // salidas y préstamos esperando su firma
+      c.res = anulRecientes;          // ítems suyos anulados, hasta darse por enterado
+    }
+    if (r === 'almacen') {
+      // Lo que tiene que recibir: comprado y aún no entregado.
+      c.alm = items.filter(i => i.proyecto === mio && i.decision === 'Aprobado'
+        && (i.estado === 'Comprado' || i.estado === 'Incompleto')).length;
+    }
+    if (r === 'comprador') {
+      c.dia = items.filter(i => i.decision === 'Aprobado' && !i.factura && i.estado === '—').length;
+      // Lo que él compró y sigue sin factura: su rendición no cierra sin eso.
+      c.fac = items.filter(i => i.decision === 'Aprobado' && !i.factura
+        && i.estado !== '—' && i.compradoPorId === user.id).length;
+      c.ren = db.rendiciones.filter(x => x.estado === 'Observada').length;
+    }
+    if (r === 'pagos' || r === 'administracion') {
+      c.pag = db.facturas.filter(f => !f.anulMotivo && f.estadoPago !== 'Pagada').length;
+      c.ren = db.rendiciones.filter(x => x.estado === 'Abierta' || x.estado === 'Observada').length;
+    }
+    if (r === 'gerente') {
+      // Solo lo que de verdad la espera a ella, no la vigilancia general.
+      c.com = items.filter(i => i.anulSolMotivo).length;              // anulaciones por confirmar
+      c.ren = db.rendiciones.filter(x => x.estado === 'Con diferencia').length;
+    }
+    return c;
+  })();
+
+  // Rojo = alguien está parado esperando, o hay dinero en juego. Amarillo =
+  // trabajo pendiente normal. La diferencia importa: si todo fuera rojo,
+  // ninguna urgencia se distinguiría de la cola de siempre.
+  const TABS_ROJAS = { res: true, apr: true, ren: true };
+
   return (
     <div className="bg-slate-950 min-h-screen text-slate-100" style={{ fontFamily: 'system-ui, sans-serif' }}>
       {!ES_PRODUCCION && (
@@ -866,8 +993,8 @@ export default function App() {
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="flex gap-0.5 bg-slate-800 p-1 rounded">
             {tabs.map(([k, l]) => {
-              const cuenta = k === 'apr' ? pendAprob : k === 'res' ? anulRecientes : 0;
-              const rojo = k === 'res' && anulRecientes > 0;   // anulaciones: aviso en rojo
+              const cuenta = pendientesPorTab[k] || 0;
+              const rojo = cuenta > 0 && !!TABS_ROJAS[k];
               const alerta = cuenta > 0 && tab !== k;
               return (
               <button key={k} onClick={() => setTab(k)}

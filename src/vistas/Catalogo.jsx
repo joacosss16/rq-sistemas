@@ -10,7 +10,7 @@ import { buscarEnCatalogo } from '../busqueda';
 import { Aviso, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde } from '../ui';
 
 export function Catalogo({ user, db, api }) {
-  const { catalogo, solicitudes, familias, levantadas = {} } = db;
+  const { catalogo, solicitudes, familias, levantadas = {}, codigosUsados = [], nombreDe = {} } = db;
   const puedeAprobar = user.rol === 'compras';
   const [edit, setEdit] = useState({});   // n -> { desc, und, famIu, cod }
   const [rech, setRech] = useState({});
@@ -21,10 +21,13 @@ export function Catalogo({ user, db, api }) {
   const pend = solicitudes.filter(s => s.estado === 'Pendiente');
   const unds = useMemo(() => [...new Set(catalogo.map(m => m[2]))].sort(), [catalogo]);
 
-  // Correlativo por familia: máximo código de la familia + 1
+  // Correlativo por familia: máximo código de la familia + 1.
+  // Sobre codigosUsados (TODOS, incluidos los desactivados), no sobre el
+  // catálogo activo: al desactivar un duplicado, su código quedaría libre y
+  // el siguiente material nuevo lo heredaría junto con todo su historial.
   const sugerirCodigo = famIu => {
     if (!famIu) return '';
-    const delaFam = catalogo.filter(m => m[0].startsWith(famIu));
+    const delaFam = codigosUsados.filter(c => c.startsWith(famIu)).map(c => [c]);
     if (delaFam.length) {
       const max = Math.max(...delaFam.map(m => Number(m[0])));
       return String(max + 1).padStart(6, '0');
@@ -49,6 +52,10 @@ export function Catalogo({ user, db, api }) {
   // El parecido se mide por palabras compartidas dentro de la MISMA familia:
   // dos descripciones que comparten el 80% de sus palabras son sospechosas.
   const [verDup, setVerDup] = useState(false);
+  const [resolviendo, setResolviendo] = useState(null);   // clave del par eligiendo cual se queda
+  // Un clic a la vez. Sin esto, tocar los dos códigos seguidos desactivaba
+  // los DOS materiales y el registro solo recordaba uno.
+  const [enCurso, setEnCurso] = useState(false);
   const palabrasDe = t => new Set(String(t).toUpperCase().replace(/[^A-Z0-9ÑÁÉÍÓÚ ]/g, ' ').split(/\s+/).filter(w => w.length > 1));
   const parecidos = (a, b) => {
     const A = palabrasDe(a), B = palabrasDe(b);
@@ -77,17 +84,30 @@ export function Catalogo({ user, db, api }) {
     .filter(([k]) => k.startsWith('dup:'))
     .map(([k, v]) => {
       const [, c1, c2] = k.split(':');
-      const d = c => (catalogo.find(m => m[0] === c) || [c, c])[1];
-      return { clave: k, c1, c2, d1: d(c1), d2: d(c2), por: v.por, fecha: v.fecha };
+      const d = c => nombreDe[c] || c;   // nombreDe incluye los desactivados
+      return { clave: k, c1, c2, d1: d(c1), d2: d(c2), por: v.por, fecha: v.fecha, nota: v.nota || '' };
     });
+  const esDuplicado = async (m1, m2, ganador) => {
+    if (enCurso) return;
+    setEnCurso(true);
+    try {
+      const perdedor = ganador[0] === m1[0] ? m2 : m1;
+      // Una sola llamada: el servidor desactiva y registra en la misma
+      // transacción. O quedan las dos cosas, o no queda ninguna.
+      const r = await api.resolverDuplicado(ganador[0], perdedor[0]);
+      if (r.error) { setAviso('⚠ ' + r.error); return; }
+      setResolviendo(null);
+      setAviso(`Listo: ${perdedor[0]} desactivado. Ya no se puede pedir; todo lo registrado con él conserva su nombre. De ahora en adelante se usa ${ganador[0]}.`);
+    } finally { setEnCurso(false); }
+  };
   const noSonDuplicados = async (m1, m2) => {
-    const r = await api.levantarAlerta({
-      clave: claveDup(m1[0], m2[0]), tipo: 'Duplicado descartado',
-      detalle: `${m1[0]} ${m1[1]} ≠ ${m2[0]} ${m2[1]}`,
-      nota: 'Revisado: no son el mismo material',
-    });
-    if (r.error) { setAviso('⚠ ' + r.error); return; }
-    setAviso(`Par descartado. No se vuelve a mostrar a nadie; se puede reabrir desde la lista de descartados.`);
+    if (enCurso) return;
+    setEnCurso(true);
+    try {
+      const r = await api.descartarDuplicado(m1[0], m2[0]);
+      if (r.error) { setAviso('⚠ ' + r.error); return; }
+      setAviso(`Par descartado. No se vuelve a mostrar a nadie; se puede reabrir desde la lista de revisados.`);
+    } finally { setEnCurso(false); }
   };
   // Lo mismo, para avisar ANTES de aprobar una solicitud: el duplicado se
   // evita aqui o no se evita nunca.
@@ -124,7 +144,7 @@ export function Catalogo({ user, db, api }) {
     if (!e.desc.trim()) { setAviso('⚠ La descripción no puede quedar vacía.'); return; }
     if (!/^\d{6}$/.test(cod)) { setAviso('⚠ El código debe tener exactamente 6 dígitos.'); return; }
     if (!cod.startsWith(e.famIu)) { setAviso(`⚠ El código ${cod} no corresponde a la familia ${e.famIu} (debe empezar con ${e.famIu}).`); return; }
-    if (catalogo.some(m => m[0] === cod)) { setAviso('⚠ Ese código ya existe en el catálogo.'); return; }
+    if (codigosUsados.includes(cod)) { setAviso('⚠ Ese código ya existe en el catálogo (o pertenece a un material desactivado). Los códigos no se reciclan.'); return; }
     const r = await api.aprobarSolicitud(s, { codigo: cod, desc: e.desc.trim().toUpperCase(), und: e.und, famIu: e.famIu, perecedero: !!e.perecedero });
     if (r.error) { setAviso('⚠ ' + r.error); return; }
     const e2 = { ...edit }; delete e2[s.n]; setEdit(e2);
@@ -295,11 +315,13 @@ export function Catalogo({ user, db, api }) {
         </div>
       )}
 
-      {duplicados.length > 0 && (
+      {(duplicados.length > 0 || dupDescartados.length > 0) && (
         <div className="bg-slate-900 border border-orange-900 rounded-md p-4 mb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-[11px] font-bold tracking-widest text-orange-400 uppercase">
-              ⚠ Posibles duplicados · {duplicados.length} par(es)</div>
+            <div className={`text-[11px] font-bold tracking-widest uppercase ${duplicados.length ? 'text-orange-400' : 'text-green-500'}`}>
+              {duplicados.length
+                ? `⚠ Posibles duplicados · ${duplicados.length} par(es)`
+                : `✓ Duplicados · todos revisados (${dupDescartados.length})`}</div>
             <button onClick={() => setVerDup(v => !v)}
               className="ml-auto text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200">
               {verDup ? '✕ cerrar' : 'ver'}</button>
@@ -310,7 +332,7 @@ export function Catalogo({ user, db, api }) {
               (se compra dos veces en vez de negociar por volumen), el historial de precios se parte
               en dos, y el stock aparece dividido.</div>
           )}
-          {verDup && (
+          {verDup && duplicados.length > 0 && (
             <table className="w-full text-xs mt-3">
               <thead><tr>{['Código', 'Material', 'Código', 'Se parece a', 'Und', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
@@ -322,34 +344,61 @@ export function Catalogo({ user, db, api }) {
                     <td className="py-1.5 px-1.5 text-slate-200">{m2[1]}</td>
                     <td className="py-1.5 px-1.5 text-slate-500">{m1[2]}{m1[2] !== m2[2] ? ` / ${m2[2]}` : ''}</td>
                     <td className="py-1.5 px-1.5">
-                      {puedeAprobar && (
-                        <button onClick={() => noSonDuplicados(m1, m2)}
-                          className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-green-700 hover:text-green-400 whitespace-nowrap">
-                          No son duplicados</button>
-                      )}
+                      {puedeAprobar && (resolviendo === claveDup(m1[0], m2[0]) ? (
+                        <div className="w-44">
+                          <div className="text-[9px] font-bold uppercase text-orange-400 mb-1">¿Cuál código se queda?</div>
+                          <div className="flex gap-1 flex-wrap">
+                            <button onClick={() => esDuplicado(m1, m2, m1)} disabled={enCurso}
+                              className="px-2 py-1 rounded text-[9px] font-mono font-bold bg-slate-800 text-green-400 border border-green-800 hover:bg-green-950">{m1[0]}</button>
+                            <button onClick={() => esDuplicado(m1, m2, m2)} disabled={enCurso}
+                              className="px-2 py-1 rounded text-[9px] font-mono font-bold bg-slate-800 text-green-400 border border-green-800 hover:bg-green-950">{m2[0]}</button>
+                            <button onClick={() => setResolviendo(null)} className="px-1.5 text-slate-500">✕</button>
+                          </div>
+                          <div className="text-[9px] text-slate-500 mt-1 leading-tight">El otro se desactiva: nadie podrá pedirlo más. Lo histórico no se toca.</div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-1 flex-wrap">
+                          <button onClick={() => setResolviendo(claveDup(m1[0], m2[0]))}
+                            className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-orange-400 border border-orange-900 hover:border-orange-700 whitespace-nowrap">
+                            Es duplicado</button>
+                          <button onClick={() => noSonDuplicados(m1, m2)} disabled={enCurso}
+                            className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-300 border border-slate-700 hover:border-green-700 hover:text-green-400 whitespace-nowrap">
+                            No lo son</button>
+                        </div>
+                      ))}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {verDup && (
+          {verDup && duplicados.length > 0 && (
             <div className="text-[10px] text-slate-500 mt-2">
-              Si un par es el mismo material, dejen de usar uno de los dos códigos en pedidos nuevos y
-              avisen a gerencia — unificar lo ya registrado se decide caso por caso, no se borra nada.
-              Si NO lo son, el botón lo descarta para todos.</div>
+              <b>Es duplicado</b>: elige qué código se queda; el otro se desactiva y nadie podrá pedirlo
+              más. Lo ya registrado con él conserva su nombre, y el stock que haya en almacén se puede
+              seguir sacando. <b>No lo son</b>: el par se descarta y no vuelve a aparecer.
+              Las dos decisiones se pueden deshacer abajo.</div>
           )}
-          {verDup && dupDescartados.length > 0 && (
+          {(verDup || duplicados.length === 0) && dupDescartados.length > 0 && (
             <div className="mt-3 border-t border-slate-800 pt-2">
               <div className="text-[9px] font-bold tracking-widest text-slate-500 uppercase mb-1">
-                Descartados · {dupDescartados.length} — revisados y no eran duplicados</div>
+                Revisados · {dupDescartados.length}</div>
               {dupDescartados.map(d => (
                 <div key={d.clave} className="flex items-center gap-2 text-[10px] text-slate-500 py-0.5">
                   <span className="font-mono">{d.c1}</span> {d.d1} <span className="text-slate-700">≠</span>
                   <span className="font-mono">{d.c2}</span> {d.d2}
+                  <span className={d.nota.startsWith('Se desactivó') ? 'text-orange-400' : 'text-green-500'}>· {d.nota || 'no son duplicados'}</span>
                   <span className="text-slate-600">· {d.por}</span>
                   {puedeAprobar && (
-                    <button onClick={async () => { const r = await api.reabrirAlerta(d.clave); if (r.error) setAviso('⚠ ' + r.error); }}
+                    <button onClick={async () => {
+                      // El servidor decide: si el par se había confirmado,
+                      // reactiva el código desactivado; si se había descartado,
+                      // solo devuelve el par a la lista.
+                      if (enCurso) return;
+                      setEnCurso(true);
+                      try { const r = await api.reabrirDuplicado(d.clave); if (r.error) setAviso('⚠ ' + r.error); }
+                      finally { setEnCurso(false); }
+                    }}
                       className="text-slate-500 hover:text-yellow-400 underline underline-offset-2">reabrir</button>
                   )}
                 </div>

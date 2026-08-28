@@ -118,7 +118,7 @@ export function Pagos({ user, db, api, obraGlobal }) {
 
   const vencimiento = vencimientoDe;
 
-  const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO, serieReal: '' };
+  const getP = id => fPago[id] || { medio: 'Transferencia', op: '', fecha: HOY_ISO, serieReal: '', montoReal: '' };
   const setP = (id, k, v) => setFPago({ ...fPago, [id]: { ...getP(id), [k]: v } });
 
   const pagar = async f => {
@@ -130,12 +130,16 @@ export function Pagos({ user, db, api, obraGlobal }) {
     const r = await api.pagarFactura(f.id, {
       medio: p.medio, banco: SIN_BANCO(p.medio) ? null : banco, op: p.op.trim(), fecha: p.fecha,
       serieReal: esComp ? p.serieReal.trim() : null,
+      montoReal: esComp ? p.montoReal : null,
     });
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 7000); return; }
     const f2 = { ...fPago }; delete f2[f.id]; setFPago(f2);
     const detalle = SIN_BANCO(p.medio) ? `${p.medio} ${p.op}` : `${p.medio} · ${banco} · ${p.op}`;
     setAviso(esComp
-      ? `Compromiso ${f.serie} pagado y convertido en factura ${p.serieReal.trim().toUpperCase()} (${detalle}).`
+      ? `Compromiso ${f.serie} pagado y convertido en factura ${p.serieReal.trim().toUpperCase()} (${detalle})${
+          Number(p.montoReal) > 0 && Math.abs(Number(p.montoReal) - f.monto) > 0.005
+            ? `. El importe se ajustó de S/ ${f.monto.toFixed(2)} a S/ ${Number(p.montoReal).toFixed(2)} y quedó registrado`
+            : ''}.`
       : `Factura ${f.serie} saldada (${detalle}).`);
     setTimeout(() => setAviso(''), 5000);
   };
@@ -299,6 +303,18 @@ export function Pagos({ user, db, api, obraGlobal }) {
                             <div className="text-[8px] font-bold uppercase text-yellow-400 mb-0.5">Sin factura · exige el comprobante al pagar</div>
                             <input value={p.serieReal || ''} onChange={e => setP(f.id, 'serieReal', e.target.value)} disabled={!puede}
                               placeholder="Serie real: F001-000123" className={`w-full ${pendCls(!!(p.serieReal || '').trim())} font-mono`} />
+                            {/* La factura real puede llegar por otro importe: un flete que no
+                                estaba, un redondeo, un precio que se movió. Antes no había
+                                dónde ponerlo y la deuda del sistema y la del proveedor
+                                quedaban distintas para siempre (migración 65). */}
+                            <input type="number" step="0.01" min="0.01" value={p.montoReal || ''}
+                              onChange={e => setP(f.id, 'montoReal', e.target.value)} disabled={!puede}
+                              placeholder={`Monto real (se comprometió ${f.monto.toFixed(2)})`}
+                              className={`w-full mt-1 ${inputCls} font-mono`} />
+                            {Number(p.montoReal) > 0 && Math.abs(Number(p.montoReal) - f.monto) > 0.005 && (
+                              <div className={`text-[9px] mt-0.5 font-bold ${Number(p.montoReal) > f.monto ? 'text-red-400' : 'text-green-400'}`}>
+                                {Number(p.montoReal) > f.monto ? '▲' : '▼'} S/ {Math.abs(Number(p.montoReal) - f.monto).toFixed(2)} respecto a lo comprometido · queda registrado con tu nombre</div>
+                            )}
                           </div>
                         )}</td>
                       <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>

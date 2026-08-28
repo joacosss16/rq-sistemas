@@ -29,7 +29,7 @@ export function estadoCaducidad(fecha) {
 // Compras para sugerir transferencias antes de comprar.
 export function calcularStocks(db) {
   const map = {};
-  const ent = (o, c) => { map[o] = map[o] || {}; return (map[o][c] = map[o][c] || { cant: 0, cadMin: null }); };
+  const ent = (o, c) => { map[o] = map[o] || {}; return (map[o][c] = map[o][c] || { cant: 0, cadMin: null, lotes: [] }); };
   db.stockInicial.forEach(si => { ent(si.proyecto, si.cod).cant += si.cant; });
   db.rqs.forEach(r => r.items.forEach(i => {
     if (i.decision !== 'Aprobado') return;
@@ -37,7 +37,13 @@ export function calcularStocks(db) {
     if (rec > 0) {
       const e = ent(r.proyecto, i.cod);
       e.cant += rec;
-      if (i.fechaCaducidad && (!e.cadMin || i.fechaCaducidad < e.cadMin)) e.cadMin = i.fechaCaducidad;
+      // Cada recepción con caducidad se guarda como LOTE, con su fecha de
+      // llegada. La caducidad definitiva se calcula al final, cuando ya se sabe
+      // cuánto queda: antes se tomaba el mínimo histórico de TODAS las
+      // recepciones, así que un lote vencido y consumido hace meses seguía
+      // marcando el material como vencido para siempre. Una alarma que no se
+      // apaga nunca es una alarma que se deja de mirar.
+      if (i.fechaCaducidad) e.lotes.push({ cad: i.fechaCaducidad, cant: rec, llego: i.fechaEntrega || i.fecha || '' });
     }
   }));
   db.salidas.forEach(s => { if (!s.anulada && s.aprobacion === 'Aprobada') ent(s.proyecto, s.cod).cant -= (s.cant - (s.reingresada || 0)); });
@@ -46,6 +52,23 @@ export function calcularStocks(db) {
     ent(p.origen, p.cod).cant -= p.cant;
     ent(p.destino, p.cod).cant += p.cant;
   });
+  // La caducidad de lo que QUEDA, no de lo que alguna vez entró. Sin control de
+  // lotes en el almacén, la única suposición razonable es que se consume por
+  // orden de llegada (lo primero que entra, lo primero que sale): se descuenta
+  // lo ya consumido de los lotes más antiguos y la caducidad sale del más
+  // próximo de los que siguen en pie.
+  Object.values(map).forEach(porMat => Object.values(porMat).forEach(e => {
+    if (!e.lotes.length) return;
+    const enLotes = e.lotes.reduce((a, l) => a + l.cant, 0);
+    let consumido = Math.max(0, enLotes - Math.max(0, e.cant));
+    const vivos = [];
+    e.lotes.slice().sort((a, b) => (a.llego < b.llego ? -1 : a.llego > b.llego ? 1 : 0)).forEach(l => {
+      if (consumido >= l.cant) { consumido -= l.cant; return; }   // este lote ya se fue entero
+      vivos.push({ ...l, cant: l.cant - consumido });
+      consumido = 0;
+    });
+    e.cadMin = vivos.reduce((min, l) => (!min || l.cad < min ? l.cad : min), null);
+  }));
   return map;
 }
 

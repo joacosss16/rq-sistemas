@@ -133,7 +133,7 @@ export function imprimirCierre({ obra, corte, filas, salidasMes, prestamosActivo
   <h1>CIERRE MENSUAL DE ALMACÉN — VALORIZADO</h1>
   ${sinPrecio > 0 ? `<div class="nota"><b>${sinPrecio} material(es) sin precio de compra registrado</b> (aparecen como "sin valorizar"): el total es parcial hasta contar con sus precios.</div>` : ''}
   <table class="t">
-    <thead><tr><th>Código</th><th>Material</th><th>Und</th><th class="r">Stock</th><th class="r">Precio prom. S/</th><th class="r">Valor S/</th></tr></thead>
+    <thead><tr><th>Código</th><th>Material</th><th>Und</th><th class="r">Stock</th><th class="r">Precio prom. S/<br><small>(con IGV)</small></th><th class="r">Valor S/</th></tr></thead>
     <tbody>
       ${filas.map(f => `<tr>
         <td class="mono c">${escHtml(f.cod)}</td><td>${escHtml(f.desc)}</td><td class="c">${escHtml(f.und)}</td>
@@ -141,7 +141,7 @@ export function imprimirCierre({ obra, corte, filas, salidasMes, prestamosActivo
         <td class="r mono">${f.precio != null ? f.precio.toFixed(2) : '—'}</td>
         <td class="r mono">${f.valor != null ? f.valor.toFixed(2) : 'sin valorizar'}</td>
       </tr>`).join('')}
-      <tr class="tot"><td colspan="5" class="r">VALOR TOTAL DEL ALMACÉN</td><td class="r mono">S/ ${totValor.toFixed(2)}</td></tr>
+      <tr class="tot"><td colspan="5" class="r">VALOR TOTAL DEL ALMACÉN (precios con IGV)</td><td class="r mono">S/ ${totValor.toFixed(2)}</td></tr>
     </tbody>
   </table>
   <div class="nota">Movimientos del mes: <b>${salidasMes.n}</b> salida(s) por <b>${salidasMes.cant}</b> unidades · Préstamos activos: <b>${prestamosActivos}</b>. Stock = inicial + recibido − salidas ± préstamos (foto al corte).</div>

@@ -3,15 +3,15 @@ import { useState } from 'react';
 import { fmt, diasHoy } from '../fechas';
 import { Aviso, inputCls, thCls, btnOk } from '../ui';
 
-// OJO: registrarParcial llama a avisar(), que NO existe en este ambito.
-// Es un error REAL que ya estaba antes de la mudanza (defecto 2 de la
-// lista de pendientes): registrar una compra parcial desde esta vista
-// revienta hoy mismo. Viaja tal cual -- la mudanza no arregla nada.
-
 export function ComprasDelDia({ db, api }) {
   const { rqs, mejorPrecio2m = {} } = db;
   const EN_LETRAS = { 2: 'dos', 3: 'tres', 4: 'cuatro', 5: 'cinco' };
   const [aviso, setAviso] = useState('');
+  // Un solo avisador para toda la vista. Antes cada función repetía el
+  // setTimeout a mano y `registrarParcial` llamaba a un `avisar()` que no
+  // existía aquí: el caso más común del día de Frank —conseguir 8 de 10—
+  // reventaba la pantalla entera, con el efectivo ya gastado.
+  const avisar = (m, ms = 4000) => { setAviso(m); setTimeout(() => setAviso(''), ms); };
 
   const marcarComprado = async it => {
     const r = await api.updItem(it.id, { estado: 'Comprado' });

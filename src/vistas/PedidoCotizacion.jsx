@@ -21,9 +21,19 @@ export function PedidoCotizacion({ user, db, api }) {
   const delL = i => setLineas(lineas.filter((_, j) => j !== i));
 
   const lineasOk = lineas.filter(l => l.desc.trim() && Number(l.cant) > 0 && l.destino.trim());
+  // Una linea EMPEZADA (tiene algo escrito) pero incompleta no se descarta
+  // callando: o se termina o se quita. Antes se ignoraba en silencio y el
+  // pedido salia con menos enchapes de los que el arquitecto pidio.
+  const lineasAMedias = lineas.filter(l =>
+    (l.desc.trim() || Number(l.cant) > 0 || l.destino.trim()) &&
+    !(l.desc.trim() && Number(l.cant) > 0 && l.destino.trim()));
   const listo = cab.proyecto && cab.ref.trim() && cab.arq.trim() && cab.fecha >= HOY_ISO && lineasOk.length > 0;
 
   const enviar = async () => {
+    if (lineasAMedias.length > 0) {
+      avisar(`⚠ Hay ${lineasAMedias.length} línea(s) a medio llenar. Complétalas (descripción, cantidad y destino) o quítalas con la ✕ — si no, se perderían sin aviso.`, 9000);
+      return;
+    }
     if (!listo) return;
     const r = await api.crearPedidoCotizacion({
       proyecto: cab.proyecto, cotizacionRef: cab.ref, arquitecto: cab.arq, fecha: cab.fecha,
@@ -51,7 +61,7 @@ export function PedidoCotizacion({ user, db, api }) {
         <div className="mt-3">
           <div className="grid md:grid-cols-4 gap-2 mb-3">
             <div><label className={lblCls}>Obra</label><FiltroProyecto value={cab.proyecto} onChange={v => setCab({ ...cab, proyecto: v })} /></div>
-            <div><label className={lblCls}>N° de cotización *</label><input value={cab.ref} onChange={e => setCab({ ...cab, ref: e.target.value })} placeholder="COT-2503-011" className={`w-full ${inputCls} font-mono`} /></div>
+            <div><label className={lblCls}>N° de cotización *</label><input value={cab.ref} onChange={e => setCab({ ...cab, ref: e.target.value })} placeholder="Escribe el N°, ej. COT-2503-011" className={`w-full ${inputCls} font-mono`} /></div>
             <div><label className={lblCls}>Arquitecto que solicita *</label><input value={cab.arq} onChange={e => setCab({ ...cab, arq: e.target.value })} placeholder="Nombre del arquitecto" className={`w-full ${inputCls}`} /></div>
             <div><label className={lblCls}>Fecha necesitada *</label><FechaInput value={cab.fecha} min={HOY_ISO} onChange={e => setCab({ ...cab, fecha: e.target.value })} className={`w-full ${inputCls}`} /></div>
           </div>

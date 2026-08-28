@@ -31,3 +31,36 @@ export function vencimientoDe(f) {
 export const MEDIOS_PAGO = ['Transferencia', 'Cheque', 'Tarjeta', 'Nota de crédito'];
 export const ETIQUETA_NRO = { Transferencia: 'N° operación', Cheque: 'N° de cheque', Tarjeta: 'N° de voucher', 'Nota de crédito': 'Serie de la nota' };
 export const SIN_BANCO = m => m === 'Nota de crédito';
+
+// ── RUC: 11 dígitos NO alcanza ──────────────────────────────────
+//
+// La validación de "exactamente 11 dígitos" atrapa que falte o sobre un
+// número, pero NO atrapa el error que de verdad ocurre: el dedazo. Si el RUC
+// es 20100047218 y se teclea 20100047219, son 11 dígitos y pasa — y el sistema
+// da de alta un proveedor fantasma con ese RUC, al que después se le emiten
+// facturas que Contabilidad no puede cruzar con nada.
+//
+// El RUC peruano lleva dígito verificador: el último número sale de los otros
+// diez por módulo 11. Si uno está mal, la cuenta no cuadra. Y los dos primeros
+// dígitos dicen qué tipo de contribuyente es: 10 y 15 persona natural, 17
+// sucesión indivisa, 20 persona jurídica. Cualquier otro par no existe.
+//
+// Comprobado contra el RUC real que ya está en la base (20138651917,
+// SANICENTER): la cuenta da 7, que es su último dígito.
+export const TIPOS_RUC = ['10', '15', '17', '20'];
+
+export function rucValido(ruc) {
+  const r = String(ruc || '').trim();
+  if (!/^\d{11}$/.test(r)) return { ok: false, motivo: 'El RUC tiene que ser de 11 dígitos, ni uno más ni uno menos.' };
+  if (!TIPOS_RUC.includes(r.slice(0, 2))) {
+    return { ok: false, motivo: `Un RUC empieza por 10, 15, 17 o 20 (este empieza por ${r.slice(0, 2)}).` };
+  }
+  const pesos = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+  const suma = pesos.reduce((a, p, i) => a + Number(r[i]) * p, 0);
+  const resto = 11 - (suma % 11);
+  const dv = resto === 10 ? 0 : resto === 11 ? 1 : resto;
+  if (dv !== Number(r[10])) {
+    return { ok: false, motivo: 'Ese RUC no existe: el último dígito no corresponde. Revisa si hay un número cambiado.' };
+  }
+  return { ok: true, motivo: '' };
+}
