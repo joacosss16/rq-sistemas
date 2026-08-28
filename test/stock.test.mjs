@@ -104,7 +104,6 @@ prueba('el préstamo activo mueve stock; el resuelto o rechazado no', () => {
   db.prestamos.push(
     { estado: 'Prestado',   origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 3 },
     { estado: 'Transferido', origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 1 },
-    { estado: 'Solicitado', origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 99 }, // sin doble aprobación no toca stock
     { estado: 'Devuelto',   origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 99 },
     { estado: 'Rechazado',  origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 99 },
     { estado: 'Anulado',    origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 99 },
@@ -112,6 +111,20 @@ prueba('el préstamo activo mueve stock; el resuelto o rechazado no', () => {
   const s = calcularStocks(db);
   igual(s.MAIA['010101'].cant, 10 - 3 - 1, 'origen pierde 4');
   igual(s.LUZ['010101'].cant, 2 + 3 + 1, 'destino gana 4');
+});
+
+// REGLA NUEVA (migración 73). Antes esta prueba afirmaba que un préstamo
+// Solicitado "sin doble aprobación no toca stock", y era verdad... y era un
+// agujero: mientras esperaba las firmas, el mismo material se podía prometer
+// otra vez o sacarlo por una salida normal. El error reventaba al final, al
+// firmar el segundo residente, cuando el material ya no estaba.
+prueba('un préstamo SOLICITADO reserva en el origen, pero no llega al destino', () => {
+  const db = base();
+  db.stockInicial.push({ proyecto: 'MAIA', cod: '010101', cant: 10 }, { proyecto: 'LUZ', cod: '010101', cant: 2 });
+  db.prestamos.push({ estado: 'Solicitado', origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 4 });
+  const s = calcularStocks(db);
+  igual(s.MAIA['010101'].cant, 10 - 4, 'el origen lo reserva desde que se solicita');
+  igual(s.LUZ['010101'].cant, 2, 'el destino NO lo suma: todavía no ha llegado');
 });
 
 prueba('la caducidad guardada es la MÁS PRÓXIMA de lo recibido', () => {

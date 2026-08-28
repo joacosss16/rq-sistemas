@@ -48,6 +48,10 @@ export function calcularStocks(db) {
   }));
   db.salidas.forEach(s => { if (!s.anulada && s.aprobacion === 'Aprobada') ent(s.proyecto, s.cod).cant -= (s.cant - (s.reingresada || 0)); });
   db.prestamos.forEach(p => {
+    // Un préstamo SOLICITADO ya reserva en el origen (migración 73): es
+    // material comprometido aunque todavía no haya salido, y sin la reserva se
+    // podía prometer dos veces. NO suma al destino: allá todavía no llegó.
+    if (p.estado === 'Solicitado') { ent(p.origen, p.cod).cant -= p.cant; return; }
     if (!['Prestado', 'Transferido'].includes(p.estado)) return;
     ent(p.origen, p.cod).cant -= p.cant;
     ent(p.destino, p.cod).cant += p.cant;
