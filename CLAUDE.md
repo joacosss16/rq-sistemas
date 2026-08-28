@@ -25,18 +25,64 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 ## Estado actual
 - **App multi-usuario en producción**: Vite + React + Tailwind + Supabase (`src/App.jsx`), desplegada en Vercel (https://rq-sistemas.vercel.app) desde el repo GitHub `joacosss16/rq-sistemas`. Login con Supabase Auth, datos compartidos vía Postgres + RLS. Migraciones en `supabase/migrations/`.
 - `prototipo/sistema_rq.html`: prototipo standalone original (localStorage, mono-usuario). Se conserva como referencia; probado con 140+ corridas automatizadas (jsdom).
-- **Código separado en módulos** (ago 2026): `src/App.jsx` pasó de 5,651 a ~850 líneas. Las 16 vistas viven en `src/vistas/` y la lógica compartida en ocho módulos propios (ver Estructura del repo). Ni una regla de negocio cambió en la mudanza.
-- Alcance CONGELADO: la app replica el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
+- **Código separado en módulos** (ago 2026): `src/App.jsx` pasó de 5,651 a ~1,030 líneas (era la app entera; hoy es la capa de datos, la cabecera y el montaje de vistas). Las 16 vistas viven en `src/vistas/` y la lógica compartida en ocho módulos propios (ver Estructura del repo). Ni una regla de negocio cambió en la mudanza.
+- Alcance acotado hasta terminar el piloto: **no se agregan funciones nuevas**,
+  solo se arregla y se endurece lo que existe. Lo que ha entrado desde agosto
+  no son funciones sino cierres de agujeros (ver las migraciones 49–68) y
+  ayudas para ver mejor lo que ya había: contadores de vigilancia, avisos en
+  las pestañas, la detección de duplicados del catálogo. Todo lo demás
+  —flete, cajas, órdenes de servicio, Almacén Central— está **diseñado y
+  apuntado, sin construir**.
 - Diferencias deliberadas con el prototipo: solo los residentes crean RQs (RLS); **Compras y el comprador (Frank) registran facturas** — Frank las suyas en efectivo, contra su rendición; solo Compras aprueba materiales nuevos; "Reiniciar datos" se hace con `supabase/reset_pruebas.sql`; **gerencia mira, no registra**.
 - **MÉTODO DE TRABAJO (27 ago 2026): se cierra módulo por módulo.** Se ataca (código + el dueño probándolo a mano con Claude in Chrome), se arregla, se CONGELA, y se pasa al siguiente. Una mejora de un módulo ya congelado —o de uno que aún no toca— se **apunta y se pospone**. Orden seguido: Residente → Gerencia → Compras → Almacén → Pagos.
 - **No tocar la vista del residente sin avisar al dueño antes** (regla suya del 27 ago), aunque esté descongelada.
 - Catálogo completo cargado: tabla `familias` (58, IU de 2 dígitos) + 1,740 materiales desde `datos/codificacion_de_almacen.xlsx` (hoja "Materiales 3.0"); la familia de un material se deriva de los 2 primeros dígitos del código. Compras puede editar solicitudes de material nuevo (descripción, unidad, familia) antes de aprobar; código correlativo por familia.
-- Pendiente: seed de proveedores (255) desde CONTROL_RQ_LUZ.xlsx.
+- Pendiente: seed de proveedores (255) desde CONTROL_RQ_LUZ.xlsx — **el archivo aún no está en `datos/`**.
+
+## Cómo se corre y cómo se despliega
+
+```bash
+npm install          # una vez
+npm run dev          # desarrollo, en localhost:5173
+npm run build        # compila a dist/
+npm run preview      # sirve lo compilado en localhost:4173 (para probar de verdad)
+npm test             # 60 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
+```
+
+**Las migraciones NO se corren solas.** Hay que abrir el archivo
+`supabase/migrations/<la que toque>.sql`, copiar **todo** su contenido y
+pegarlo en el **editor SQL de Supabase**. Están escritas para poder repetirse
+sin daño, y cada una lleva al pie las consultas de comprobación de antes y
+después. Correrlas **en orden**.
+
+**El despliegue es automático**: un `push` a `main` publica en Vercel
+(https://rq-sistemas.vercel.app). Por eso el trabajo a medias se queda en la
+rama, y a producción solo va lo probado.
+
+**Ojo con la base**: hay UNA sola. Lo que se corre en Supabase afecta tanto a
+`localhost` como a producción — el código puede estar sin desplegar, la base
+nunca. Al correr una migración, las reglas nuevas rigen para todos de
+inmediato.
+
+**Variables de entorno** (`.env.local`, ver `src/supabaseClient.js`):
+`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` y `VITE_ENTORNO`. Esa última
+decide el banner: mientras no diga `produccion`, la aplicación muestra arriba
+la franja **"ENTORNO DE PRUEBAS · ESTOS NO SON LOS DATOS REALES"**. Al
+arrancar el piloto con datos reales hay que cambiarla, o el equipo trabajará
+creyendo que está practicando.
 
 ## Modelo de negocio del sistema
 
 ### Catálogo
-1,740 materiales (145 en el prototipo como muestra), 56 familias. Código de 6 dígitos: IU(2) + GRUPO(2) + correlativo(2). Solo el dueño del catálogo (Arana) aprueba materiales nuevos; los residentes los solicitan desde su vista. Código sugerido automático por familia; validación de 6 dígitos únicos. El catálogo completo está en `datos/NUEVO_RQ.xlsx`, hoja "Materiales 3.0".
+1,740 materiales (145 en el prototipo como muestra) y **58 familias** en la
+tabla `familias`. Código de 6 dígitos: IU(2) + GRUPO(2) + correlativo(2). Solo
+el dueño del catálogo (Arana) aprueba materiales nuevos; los residentes los
+solicitan desde su vista. Código sugerido automático por familia; validación de
+6 dígitos únicos. **Un código nunca se recicla**: el correlativo mira todos los
+asignados alguna vez, incluidos los de materiales desactivados. La fuente es
+`datos/codificacion_de_almacen.xlsx`, hoja "Materiales 3.0" (es el único
+archivo que hay en `datos/`; `NUEVO_RQ.xlsx` y `CONTROL_RQ_LUZ.xlsx` se
+mencionan en varios sitios pero **todavía no están copiados**).
 
 ### Canales de RQ (automático por fecha necesitada mínima vs hoy)
 - **URGENTE**: < 2 días → justificación obligatoria ("¿por qué no se previó?")
@@ -222,21 +268,29 @@ rq-sistema-proyecto/
 │   ├── ui.jsx           ← Aviso, AnularBox, inputs y estilos compartidos
 │   ├── maestros.js      ← PROYECTOS y ALMACENEROS (se publican al cargar)
 │   └── busqueda.js      ← búsqueda del catálogo, ordenada por relevancia
+├── index.html · vite.config.js · tailwind.config.js · postcss.config.js
+├── vercel.json          ← configuración del despliegue
 ├── prototipo/
 │   ├── sistema_rq.html  ← prototipo original standalone (referencia)
 │   └── sistema_rq.jsx   ← su fuente React
-├── pruebas/             ← 60 pruebas; `npm test` las corre todas
+├── test/                ← 60 pruebas de la lógica pura; `npm test` las corre
+│   └── caja · fechas · stock · pago · busqueda (.test.mjs)
 ├── docs/
 │   ├── 01_contexto_negocio.md · 02_modelo_datos.md
 │   ├── 03_casos_especiales.md · 04_roadmap_supabase.md
+│   ├── 05_que_hacer_si_falla.md         ← qué hacer si el sistema falla
 │   ├── 06_pruebas_antes_del_piloto.md   ← el guion de pruebas A–F
+│   ├── 07_prueba_de_hoy.md · 08_donde_estamos_de_verdad.md
 │   ├── 09_sire_rce_viabilidad.md · 10_sire_donde_estamos.md
-│   ├── 11_ataque_residente.md · 12_indicadores_para_compras.md
-│   └── (informes de estado y de ataques por módulo)
-├── datos/               ← NUEVO_RQ.xlsx (catálogo), CONTROL_RQ_LUZ.xlsx (proveedores)
+│   └── 11_ataque_residente.md · 12_indicadores_para_compras.md
+├── datos/
+│   └── codificacion_de_almacen.xlsx  ← el catálogo real (1,740 materiales).
+│                          FALTA copiar CONTROL_RQ_LUZ.xlsx (255 proveedores)
 └── supabase/
-    ├── migrations/      ← 68 migraciones, en orden; son la fuente de verdad
-    │                      de las reglas de negocio
+    ├── migrations/      ← 67 archivos numerados del 1 al 68 (el 33 no existe:
+    │                      se descartó antes de correrse). Son la fuente de
+    │                      verdad de las reglas de negocio.
+    ├── CORRER_ESTO_*.sql ← varias migraciones juntas, para pegar de una vez
     └── reset_pruebas.sql ← borra datos de prueba antes de arrancar
 ```
 
