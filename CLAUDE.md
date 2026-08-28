@@ -15,6 +15,8 @@ Sistema digital de requerimientos de materiales (RQ) para Grupo Copacabana: grup
 
 **Toda obra tiene SIEMPRE un residente y un almacenero** (regla del negocio, confirmada por el dueño el 12 ago 2026). Las guardas de aprobación se apoyan en eso: quien aprueba una salida o su lado de un préstamo es el residente de esa obra. Una obra sin residente dado de alta deja sus salidas y préstamos sin poder aprobarse — hay que crear los usuarios que faltan antes de arrancar.
 
+**EL PILOTO ARRANCA CON DOS OBRAS: MAIA + DANAUS** (decisión del dueño, 27 ago 2026). Eso reduce lo que hay que preparar a dos bancos (2502, 2503), dos cajas chicas y las cuentas de esas dos obras. **BLOQUEANTE ABIERTO: DANAUS no tiene almacenero dado de alta** — comprobado en el sistema el 27 ago. Sin él, esa obra no puede registrar recepciones ni salidas, y es la mitad del piloto.
+
 Personas clave: Lucía Arana (logística/compras centralizada, dueña del catálogo), Mónica Del Castillo (administración), Yheyson Ccoiccosi (contabilidad), Rodrigo Curo (BIM).
 
 ## Problema que resuelve
@@ -23,8 +25,11 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 ## Estado actual
 - **App multi-usuario en producción**: Vite + React + Tailwind + Supabase (`src/App.jsx`), desplegada en Vercel (https://rq-sistemas.vercel.app) desde el repo GitHub `joacosss16/rq-sistemas`. Login con Supabase Auth, datos compartidos vía Postgres + RLS. Migraciones en `supabase/migrations/`.
 - `prototipo/sistema_rq.html`: prototipo standalone original (localStorage, mono-usuario). Se conserva como referencia; probado con 140+ corridas automatizadas (jsdom).
+- **Código separado en módulos** (ago 2026): `src/App.jsx` pasó de 5,651 a ~850 líneas. Las 16 vistas viven en `src/vistas/` y la lógica compartida en ocho módulos propios (ver Estructura del repo). Ni una regla de negocio cambió en la mudanza.
 - Alcance CONGELADO: la app replica el prototipo tal cual, sin funciones nuevas, hasta terminar el piloto.
-- Diferencias deliberadas con el prototipo: solo los residentes crean RQs (RLS); solo Compras registra facturas y aprueba materiales; "Reiniciar datos" se hace con `supabase/reset_pruebas.sql`; gerencia ve todo en modo consulta donde no tiene permiso de escritura.
+- Diferencias deliberadas con el prototipo: solo los residentes crean RQs (RLS); **Compras y el comprador (Frank) registran facturas** — Frank las suyas en efectivo, contra su rendición; solo Compras aprueba materiales nuevos; "Reiniciar datos" se hace con `supabase/reset_pruebas.sql`; **gerencia mira, no registra**.
+- **MÉTODO DE TRABAJO (27 ago 2026): se cierra módulo por módulo.** Se ataca (código + el dueño probándolo a mano con Claude in Chrome), se arregla, se CONGELA, y se pasa al siguiente. Una mejora de un módulo ya congelado —o de uno que aún no toca— se **apunta y se pospone**. Orden seguido: Residente → Gerencia → Compras → Almacén → Pagos.
+- **No tocar la vista del residente sin avisar al dueño antes** (regla suya del 27 ago), aunque esté descongelada.
 - Catálogo completo cargado: tabla `familias` (58, IU de 2 dígitos) + 1,740 materiales desde `datos/codificacion_de_almacen.xlsx` (hoja "Materiales 3.0"); la familia de un material se deriva de los 2 primeros dígitos del código. Compras puede editar solicitudes de material nuevo (descripción, unidad, familia) antes de aprobar; código correlativo por familia.
 - Pendiente: seed de proveedores (255) desde CONTROL_RQ_LUZ.xlsx.
 
@@ -73,11 +78,47 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
 - Holgura = fechaNecesitada − fechaEntrega (negativa = llegó tarde, en rojo)
 - Saldo en = fechaEntregaSaldo − fechaEntrega
 
+## Decisiones del dueño que no estaban escritas (ago 2026)
+
+- **Gerencia mira, no registra.** Criterio con el que se rediseñaron sus ocho
+  vistas prestadas (26 ago): se queda lo que informa, se quita lo que
+  registra. Cada vista prestada abre con contadores de vigilancia y guarda el
+  detalle tras un clic. Sus formularios se retiraron: gerencia no recibe
+  material, no factura, no paga. La suplencia por vacaciones se resolverá
+  aparte, post-piloto (cuentas de emergencia).
+- **El sistema NO manda notificaciones.** Ni correo ni WhatsApp: solo avisa a
+  quien ya está mirando. Cada pestaña lleva el número de **lo que le toca a
+  esa persona** —no de todo lo que hay—, en rojo si alguien está parado
+  esperando. Durante el piloto lo suple una rutina acordada: Lucía abre el
+  sistema a primera hora y después de almuerzo; lo urgente se avisa por
+  WhatsApp **con el número de RQ, no con el PDF**. Correo automático, semana 2.
+- **El flete: Lucía registra, Frank paga.** La agencia cobra al recoger; a
+  Lucía le llega la boleta y ella anuncia el monto, Frank paga en efectivo y
+  lo rinde. La diferencia entre lo anunciado y lo pagado es control cruzado
+  gratis. **Descartada una caja chica aparte para flete**: el efectivo de
+  Frank es un solo bolsillo y el arqueo se volvería ficción; lo que se quiere
+  saber se resuelve marcando el gasto, no partiendo el efectivo.
+- **Cajas y unidades** (aprobado, post-piloto): el stock vive SIEMPRE en
+  unidades sueltas; el residente elegirá pedir en UND o CAJA viendo la
+  equivalencia al lado; Lucía podrá cargarla al aprobar; **el sobrante se
+  queda en el almacén de la obra**.
+- **Los enchapes van en M²**, unidad fija, para evitar el desorden de tres
+  unidades. OJO: hoy se crean en la familia **97, que en el catálogo real es
+  ACTIVOS FIJOS** (reflectores, megáfonos). El sitio correcto es la familia
+  **24 · CERÁMICA Y PORCELANATO**. Pendiente de decidir si van siempre a 24 o
+  a familia libre.
+- **SUNAT / SIRE**: el sistema ya guarda casi todo el Registro de Compras
+  (serie, RUC, razón social, fecha, monto, forma de pago, medio, N° de
+  operación y obra). Faltan el desglose de IGV, el tipo de comprobante, la
+  fecha de vencimiento y la detracción. **El valorizado del almacén sale CON
+  IGV** y así está rotulado en pantalla, en el PDF del cierre y en Auditoría.
+  Ver `docs/09_sire_rce_viabilidad.md` y `10_sire_donde_estamos.md`.
+
 ## Decisiones tomadas (NO reabrir)
 - ERP solo después de definir procesos. Este sistema ES la definición del proceso de compras.
 - Almacén de excedentes → se convierte en Almacén Central de Tránsito.
 - Logística centralizada en Arana.
-- Tres tipos de RQ con sus plazos (General ≤3 días, Urgente 1-6 horas, Especial Lima 1-4 semanas).
+- Tres tipos de RQ con sus plazos. OJO: los nombres cambiaron — hoy son **URGENTE / GENERAL / ANTICIPADO** ("Especial Lima" se renombró en la migración 21) y el canal lo **deriva el sistema** de la fecha necesitada, ya no lo declara el navegador.
 - Alcance congelado hasta terminar piloto: 1 obra, 2 residentes, 2 semanas.
 
 ## Casos especiales pendientes (por fase)
@@ -105,26 +146,128 @@ El sistema ya guarda, sin habérselo propuesto, casi todo lo que exige el Regist
 ## Esquema Supabase propuesto (siguiente tarea)
 Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.
 
+## Reglas que se bajaron a la base (migraciones 49–68, ago 2026)
+
+Todas nacieron de un fallo encontrado atacando el sistema o usándolo de verdad.
+Están en `supabase/migrations/` con su porqué escrito completo; aquí solo lo
+que cambia cómo trabaja la gente.
+
+**Dinero**
+- **Compras no maneja efectivo** (52). A Lucía no se le asigna caja chica —
+  corrección del dueño. Si registrara un pago en efectivo se le abriría una
+  rendición a su nombre que nadie cerraría.
+- **Un compromiso conserva su plazo de crédito** (52): antes todos nacían
+  vencidos el mismo día.
+- **Una factura anulada libera su número** (64). Antes lo quemaba para
+  siempre, así que la corrección oficial —gerencia anula, se registra de
+  nuevo— era imposible: el papel del proveedor tiene un solo número.
+- **La factura real puede llegar por otro importe** (65) y **el ajuste reparte
+  el desglose en proporción** (68). El 65 solo abrió la puerta y afirmó que el
+  cuadre se validaba solo; era falso —el trigger de cuadre vive sobre las
+  líneas, no sobre la factura— y dejaba el desglose descuadrado en silencio.
+- **El arqueo de caja chica lo calcula la base** (67). Antes el navegador
+  mandaba la diferencia Y el veredicto (`estado: excede ? ...`), o sea que
+  quien decidía si la caja cuadraba era la pantalla que estaba siendo
+  controlada. Ahora solo viaja lo que administración cuenta.
+
+**Inventario y catálogo**
+- **La unidad viaja congelada en cada línea** (59) y **el factor de caja
+  también** (63). El catálogo dice cómo se compra HOY; la línea, cómo se
+  compró ESE DÍA. Sin esto, cargar una equivalencia de caja reescribía el
+  pasado: un "3 CAJA" ya registrado pasaba a "3 UND" sin tocar el número.
+- **Un código desactivado no se puede pedir** (60) — pero su stock físico se
+  sigue sacando y su historia conserva el nombre. Los duplicados los cura
+  Lucía; gerencia solo mira.
+- **Los códigos no se reciclan**: el correlativo y la validación de unicidad
+  miran todos los códigos jamás asignados, no solo los activos.
+
+**Decisiones y firmas**
+- **Los ítems nacen Pendientes** (57): un residente no puede crear una línea ya
+  aprobada, recibida o firmada.
+- **Una decisión no se deshace** (62). Rechazar era la puerta trasera de
+  anular: se podía rechazar algo ya comprado, facturado o recibido, y el
+  material desaparecía del stock con las bolsas en la obra.
+- **La compra parcial cierra lo conseguido** (61): lo comprado queda Comprado
+  y solo el saldo vuelve a la cola. Antes el consolidado pedía el total otra
+  vez y se compraba dos veces.
+- **Las firmas las pone el servidor** (41, 55, 66): quién anuló, quién pagó,
+  quién pidió una anulación. Un dato que el cliente escribe no es una firma.
+
+**Tiempo**
+- **La base vive en hora de Perú** (58). Estaba en UTC: a partir de las 19:00
+  el sistema ya creía que era mañana, y eso además desactivaba la guarda que
+  impide registrar entregas con fecha futura.
+
 ## Estructura del repo
 ```
 rq-sistema-proyecto/
 ├── CLAUDE.md            ← este archivo (contexto maestro)
 ├── README.md            ← guía de uso rápida
-├── index.html           ← copia del prototipo en raíz (para GitHub Pages)
+├── src/                 ← LA APLICACIÓN (Vite + React)
+│   ├── App.jsx          ← capa de datos, api.*, cabecera y montaje de vistas
+│   ├── main.jsx · index.css · supabaseClient.js
+│   ├── vistas/          ← una por pantalla (16)
+│   │   ├── Login.jsx · Residente.jsx · AlmacenResidente.jsx
+│   │   ├── Compras.jsx · PedidoCotizacion.jsx · HistorialPrecios.jsx
+│   │   ├── Catalogo.jsx · HistorialMateriales.jsx
+│   │   ├── Almacen.jsx · AprobacionesResidente.jsx
+│   │   ├── ComprasDelDia.jsx      ← la de Frank (comprador)
+│   │   ├── Pagos.jsx · Rendiciones.jsx
+│   │   └── Auditoria.jsx · Tablero.jsx · ReporteMensual.jsx
+│   ├── stock.js         ← la aritmética del stock y el semáforo de caducidad
+│   ├── caja.js          ← el cuadre de caja chica (probado aparte)
+│   ├── pago.js          ← formas de pago, vencimientos y validación de RUC
+│   ├── fechas.js        ← HOY_ISO, fmt, días (todo en hora de Perú)
+│   ├── pdf.js           ← RQ, cierre de almacén, conteo ciego
+│   ├── ui.jsx           ← Aviso, AnularBox, inputs y estilos compartidos
+│   ├── maestros.js      ← PROYECTOS y ALMACENEROS (se publican al cargar)
+│   └── busqueda.js      ← búsqueda del catálogo, ordenada por relevancia
 ├── prototipo/
-│   ├── sistema_rq.html  ← app funcional (doble clic para abrir)
-│   └── sistema_rq.jsx   ← fuente React
+│   ├── sistema_rq.html  ← prototipo original standalone (referencia)
+│   └── sistema_rq.jsx   ← su fuente React
+├── pruebas/             ← 60 pruebas; `npm test` las corre todas
 ├── docs/
-│   ├── 01_contexto_negocio.md
-│   ├── 02_modelo_datos.md
-│   ├── 03_casos_especiales.md
-│   └── 04_roadmap_supabase.md
-├── datos/               ← COPIAR AQUÍ: NUEVO_RQ.xlsx, CONTROL_RQ_LUZ.xlsx (catálogo 1,740 + proveedores 255)
-└── supabase/            ← aquí vivirán migraciones SQL y el proyecto nuevo
+│   ├── 01_contexto_negocio.md · 02_modelo_datos.md
+│   ├── 03_casos_especiales.md · 04_roadmap_supabase.md
+│   ├── 06_pruebas_antes_del_piloto.md   ← el guion de pruebas A–F
+│   ├── 09_sire_rce_viabilidad.md · 10_sire_donde_estamos.md
+│   ├── 11_ataque_residente.md · 12_indicadores_para_compras.md
+│   └── (informes de estado y de ataques por módulo)
+├── datos/               ← NUEVO_RQ.xlsx (catálogo), CONTROL_RQ_LUZ.xlsx (proveedores)
+└── supabase/
+    ├── migrations/      ← 68 migraciones, en orden; son la fuente de verdad
+    │                      de las reglas de negocio
+    └── reset_pruebas.sql ← borra datos de prueba antes de arrancar
 ```
+
+**Dónde vive cada cosa, y por qué importa:** las reglas que protegen dinero e
+inventario viven en `supabase/migrations/`, no en la pantalla. La pantalla
+facilita y avisa; **la base exige**. Cada vez que se descubre una regla que
+solo vivía en el navegador —el canal declarado, las líneas que nacían
+aprobadas, la firma de una anulación, el arqueo de caja— se baja a la base,
+porque el navegador corre en la máquina del usuario y se puede esquivar.
 
 ## Reglas para trabajar en este repo
 - Idioma: español en UI, commits y docs.
+- **Antes de reemplazar algo, leer la versión anterior línea por línea.** Dos
+  veces se rompió producción por código correcto en el sitio equivocado: unos
+  ganchos de React después de un `return` temprano (pantalla en blanco para
+  todos) y una constante usada antes de declararla (vista vacía para
+  gerencia). Compilaba y las pruebas pasaban en los dos casos.
+- **Abrir la aplicación en el navegador antes de dar algo por hecho.** Que
+  compile y pasen las pruebas no significa que funcione: los tres botones que
+  "no hacían nada" en Compras salieron de una prueba a mano, no del código —
+  el mensaje existía, pero se pintaba fuera de la pantalla.
+- **Al escribir una migración, comprobar el nombre real de la función que se
+  reemplaza.** Un `create or replace` con el nombre equivocado crea una
+  función huérfana: la regla vieja sigue mandando y nada avisa.
+- **Cada migración se ataca antes de correrla.** Las que se dieron por buenas
+  sin atacar traían fallos graves: la 60 bloqueaba la compra parcial de Frank
+  con el efectivo ya gastado, la 61 declaraba cerrado un agujero que seguía
+  abierto, la 65 afirmaba una validación que no existía.
+- **Pocos agentes.** Revisar uno mismo por defecto; los ataques masivos agotan
+  la cuota de la cuenta y repiten hallazgos. Lo más valioso ha salido del
+  dueño probando el sistema a mano.
 - No agregar funciones fuera del alcance congelado sin aprobación explícita del dueño.
 - Toda regla de negocio nueva debe probarse (el prototipo se validó con un harness jsdom: 20 tests dirigidos + 120 corridas aleatorias).
 - El HTML standalone se compila así: babel (preset-react, runtime classic, React UMD global) + tailwindcss v3 escaneando el fuente; todo se empaqueta inline en un solo HTML. No usar CDNs en runtime (debe funcionar offline).

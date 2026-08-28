@@ -72,14 +72,24 @@ export function Rendiciones({ user, db, api, obraGlobal }) {
   ];
   const mostradas = verArchivadas ? lista : pendientes;
 
+  // Los números de la pantalla son para que Mónica VEA lo que va a pasar; los
+  // que valen son los que devuelve el servidor, que recalcula todo con los
+  // datos de la base. Si por lo que sea no coinciden, manda el servidor y se
+  // avisa: significa que algo se movió entre que abrió la pantalla y cerró.
   const cerrarArqueo = async (r, contado, diferencia, excede, motivo) => {
-    const res = await api.cerrarConArqueo(r.id, { contado, diferencia, excede, motivo, nombre: user.nombre });
+    const res = await api.cerrarConArqueo(r.id, { contado, motivo });
     if (res.error) { setAviso('⚠ ' + res.error); return; }
+    const s = res.data || {};
+    const difReal = s.diferencia != null ? Number(s.diferencia) : diferencia;
+    const excedeReal = s.excede != null ? !!s.excede : excede;
     const a2 = { ...arqueo }; delete a2[r.id]; setArqueo(a2);
     const m2 = { ...difMot }; delete m2[r.id]; setDifMot(m2);
-    setAviso(excede
-      ? `Diferencia de S/ ${Math.abs(diferencia).toFixed(2)} en ${r.proyecto}: enviada a gerencia. Pagos no repone hasta que la resuelvan.`
-      : `Rendición de ${r.proyecto} cerrada y aprobada${Math.abs(diferencia) >= 0.005 ? ` (diferencia de S/ ${Math.abs(diferencia).toFixed(2)}, dentro de la tolerancia)` : ' — la caja cuadra exacto'}.`);
+    const cambio = Math.abs(difReal - diferencia) >= 0.005
+      ? ` (el sistema recalculó la diferencia: la pantalla decía S/ ${Math.abs(diferencia).toFixed(2)} y los movimientos del día dan S/ ${Math.abs(difReal).toFixed(2)})`
+      : '';
+    setAviso(excedeReal
+      ? `Diferencia de S/ ${Math.abs(difReal).toFixed(2)} en ${r.proyecto}: enviada a gerencia. Pagos no repone hasta que la resuelvan${cambio}.`
+      : `Rendición de ${r.proyecto} cerrada y aprobada${Math.abs(difReal) >= 0.005 ? ` (diferencia de S/ ${Math.abs(difReal).toFixed(2)}, dentro de la tolerancia)` : ' — la caja cuadra exacto'}${cambio}.`);
   };
 
   const resolverDif = async r => {

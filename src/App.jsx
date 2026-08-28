@@ -706,16 +706,15 @@ export default function App() {
       }, ["rendiciones"]),
       // Arqueo: cierra la rendición con el efectivo contado. Si la diferencia
       // supera la tolerancia de la obra, queda "Con diferencia" para gerencia.
-      cerrarConArqueo: (id, { contado, diferencia, excede, motivo, nombre }) => wrap(async () => {
-        const u = (await supabase.auth.getUser()).data.user;
-        const patch = {
-          efectivo_contado: contado, diferencia,
-          dif_motivo: motivo || null,
-          estado: excede ? 'Con diferencia' : 'Aprobada',
-        };
-        if (!excede) { patch.aprobado_por = u.id; patch.fecha_aprobacion = HOY_ISO; }
-        return await supabase.from('rendiciones').update(patch).eq('id', id);
-      }, ["rendiciones"]),
+      // Al servidor viaja SOLO lo que administración aporta de verdad: cuánto
+      // contó y, si hay diferencia, a qué se debe. La diferencia, si excede la
+      // tolerancia y el estado los calcula la base (migración 67) — antes los
+      // mandaba esta línea, así que quien decidía si la caja cuadraba era la
+      // misma pantalla que estaba siendo controlada.
+      cerrarConArqueo: (id, { contado, motivo }) => wrap(async () =>
+        await supabase.rpc('cerrar_con_arqueo', {
+          p_rendicion: id, p_contado: Number(contado), p_motivo: motivo || null,
+        }), ["rendiciones"]),
       // Gerencia resuelve la diferencia: recién ahí Pagos puede reponer
       resolverDiferencia: (id, { decision, nota, nombre }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;

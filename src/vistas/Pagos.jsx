@@ -312,8 +312,11 @@ export function Pagos({ user, db, api, obraGlobal }) {
                               placeholder={`Monto real (se comprometió ${f.monto.toFixed(2)})`}
                               className={`w-full mt-1 ${inputCls} font-mono`} />
                             {Number(p.montoReal) > 0 && Math.abs(Number(p.montoReal) - f.monto) > 0.005 && (
-                              <div className={`text-[9px] mt-0.5 font-bold ${Number(p.montoReal) > f.monto ? 'text-red-400' : 'text-green-400'}`}>
-                                {Number(p.montoReal) > f.monto ? '▲' : '▼'} S/ {Math.abs(Number(p.montoReal) - f.monto).toFixed(2)} respecto a lo comprometido · queda registrado con tu nombre</div>
+                              <div className={`text-[9px] mt-0.5 leading-tight font-bold ${Number(p.montoReal) > f.monto ? 'text-red-400' : 'text-green-400'}`}>
+                                {Number(p.montoReal) > f.monto ? '▲' : '▼'} S/ {Math.abs(Number(p.montoReal) - f.monto).toFixed(2)} respecto a lo comprometido · queda registrado con tu nombre
+                                <div className="text-slate-400 font-normal mt-0.5">
+                                  El precio de cada material se ajusta en la misma proporción ({(Number(p.montoReal) / f.monto * 100 - 100 >= 0 ? '+' : '')}{(Number(p.montoReal) / f.monto * 100 - 100).toFixed(1)}%).</div>
+                              </div>
                             )}
                           </div>
                         )}</td>
