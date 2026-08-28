@@ -82,12 +82,18 @@ export function Almacen({ user, db, api, obraGlobal }) {
     }
     const r = await api.recibir(i, rec, f.obs.trim(), pereceMap[i.cod] ? f.cad : null);
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
-    const total = yaRecibido + rec;
-    const completo = total >= pedido;
+    // Los números los devuelve el servidor, que es el único que sabe cuánto
+    // había de verdad: si alguien más recibió mientras esta pantalla estaba
+    // abierta, aquí aparece el total real y no el que esta vista suponía.
+    const d = r.data || {};
+    const total = d.total != null ? Number(d.total) : yaRecibido + rec;
+    const completo = d.completo != null ? !!d.completo : total >= pedido;
+    const otro = d.yaHabia != null && Number(d.yaHabia) !== yaRecibido
+      ? ` (ojo: alguien más ya había registrado ${d.yaHabia}, tu pantalla estaba desactualizada)` : '';
     const f2 = { ...form }; delete f2[i.id]; setForm(f2);
     avisar(completo
-      ? `Recepción completa de "${i.desc}" registrada (${total}/${pedido}).`
-      : `Recepción parcial de "${i.desc}": ${total}/${pedido}. Marcado como Incompleto en Compras y Almacén. Saldo pendiente: ${pedido - total}.`);
+      ? `Recepción completa de "${i.desc}" registrada (${total}/${pedido})${otro}.`
+      : `Recepción parcial de "${i.desc}": ${total}/${pedido}. Marcado como Incompleto en Compras y Almacén. Saldo pendiente: ${pedido - total}${otro}.`, otro ? 9000 : 5000);
   };
 
   const salidasProy = salidas.filter(s => s.proyecto === proy);

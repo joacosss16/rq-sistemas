@@ -757,19 +757,23 @@ export default function App() {
       anularEntrega: (id, motivo) => wrap(async () =>
         await supabase.from('entregas_caja').update({ anulacion: { motivo } }).eq('id', id),
         ['entregas_caja']),
-      recibir: (item, rec, obs, cad) => wrap(async () => {
-        const total = Number(item.cantRecibida || 0) + rec;
-        const esSaldo = item.estado === 'Incompleto';
-        const patch = { cant_recibida: total };
-        // La fecha de entrega es la del PRIMER lote que ingresa (no editable a mano);
-        // la del saldo se estampa en la recepción del saldo.
-        if (esSaldo) patch.fecha_entrega_saldo = HOY_ISO;
-        else patch.fecha_entrega = HOY_ISO;
-        if (obs) patch.obs_almacen = item.obsAlmacen ? item.obsAlmacen + ' · ' + obs : obs;
-        // perecedero: se conserva la caducidad más próxima entre recepciones
-        if (cad) patch.fecha_caducidad = (item.fechaCaducidad && item.fechaCaducidad < cad) ? item.fechaCaducidad : cad;
-        return await supabase.from('rq_items').update(patch).eq('id', item.id);
-      }, ['rq_items']),
+      // Corregir una entrega de un día YA CERRADO: solo gerencia, y reabre la
+      // jornada en la misma operación para que se vuelva a contar el efectivo
+      // (migración 72). Antes el sistema decía "coordina con gerencia" y
+      // gerencia no tenía con qué: era un callejón sin salida.
+      corregirEntregaDiaCerrado: (id, motivo) => wrap(async () =>
+        await supabase.rpc('corregir_entrega_de_dia_cerrado', { p_entrega: id, p_motivo: motivo }),
+        ['entregas_caja', 'rendiciones']),
+      // Viaja LO QUE LLEGÓ, no el total. La suma, las fechas y la observación
+      // las hace la base bloqueando la fila (migración 71): antes esta función
+      // calculaba el total con el número que tenía en memoria, así que dos
+      // personas recibiendo el mismo ítem se pisaban y la primera recepción
+      // desaparecía sin error ni rastro.
+      recibir: (item, rec, obs, cad) => wrap(async () =>
+        await supabase.rpc('recibir_material', {
+          p_item: item.id, p_cant: Number(rec),
+          p_obs: obs || null, p_caducidad: cad || null,
+        }), ['rq_items']),
       // Corregir una cantidad mal digitada (migración 35). Solo se manda el
       // motivo: quién y cuándo los estampa la base, para que el rastro no se
       // pueda falsear. El historial no se pisa, se le agrega una entrada.

@@ -160,6 +160,16 @@ export function Pagos({ user, db, api, obraGlobal }) {
     setTimeout(() => setAviso(''), 5000);
   };
 
+  // El día ya está cerrado: solo gerencia, y reabre la jornada para volver a
+  // contar. Antes esto no existía y el sistema mandaba a "coordinar con
+  // gerencia" sin darle a gerencia ninguna forma de hacerlo.
+  const corregirDiaCerrado = async (e, motivo) => {
+    const r = await api.corregirEntregaDiaCerrado(e.id, motivo);
+    if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 9000); return; }
+    setAviso(`Entrega de S/ ${e.monto.toFixed(2)} anulada y jornada del ${fmt(e.fecha)} REABIERTA. Hay que volver a contar el efectivo de ese día y cerrarla de nuevo.`);
+    setTimeout(() => setAviso(''), 12000);
+  };
+
 
   return (
     <div>
@@ -242,7 +252,12 @@ export function Pagos({ user, db, api, obraGlobal }) {
                       {e.anulMotivo && <div className="text-[9px] text-red-400 no-underline">Anulada: {e.anulMotivo} ({e.anulPor})</div>}</td>
                     <td className="py-2 px-1.5 no-underline">
                       {e.anulMotivo ? null
-                        : cerrada ? <span className="text-[9px] text-slate-500 whitespace-nowrap" title="La rendicion de ese dia ya se cerro: anular esta entrega cambiaria un arqueo aprobado.">dia cuadrado</span>
+                        : cerrada ? (user.rol === 'gerente'
+                            ? <div className="w-40">
+                                <div className="text-[8px] text-slate-500 leading-tight mb-1">Día ya cuadrado. Corregir reabre la jornada.</div>
+                                <AnularBox label="Corregir (reabre)" onConfirm={m => corregirDiaCerrado(e, m)} />
+                              </div>
+                            : <span className="text-[9px] text-slate-500 whitespace-nowrap" title="La rendición de ese día ya se cerró. Si esta entrega está mal, gerencia puede corregirla: reabre la jornada para volver a contar.">día cuadrado</span>)
                         : puede ? <AnularBox label="Anular" onConfirm={m => anularEnt(e, m)} />
                         : null}</td>
                   </tr>
