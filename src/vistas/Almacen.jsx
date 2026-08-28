@@ -227,6 +227,16 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // otra obra ahora mismo y no hay que confundir con faltante. Lo devuelto y lo
   // transferido ya no mueve nada, asi que se archiva detras del clic.
   const presActivos = presProy.filter(p => p.estado === 'Prestado');
+  // Prestados cuyo destino ya NO tiene el material: son los que antes se
+  // habrían cerrado con "Transferir al costo", que está fuera durante el
+  // piloto (migración 74). Se quedan abiertos a propósito —reflejan una deuda
+  // entre dos obras que la contabilidad todavía no puede liquidar— pero hay
+  // que poder verlos, o se acumulan sin que nadie se entere.
+  const presPorLiquidar = presActivos.filter(p => {
+    if (p.destino !== proy) return false;        // solo se juzga el propio almacén
+    const st = stock.find(x => x.cod === p.cod);
+    return st && Number(st.stock) < Number(p.cant);
+  });
   const [verPres, setVerPres] = useState(false);
   // La lista de "por recibir" es la mesa del almacenero: para gerencia son
   // decenas de filas que dicen lo mismo. El DATO si sirve -- material comprado
@@ -490,6 +500,12 @@ export function Almacen({ user, db, api, obraGlobal }) {
                 activo(s) · {verPres ? '✕ cerrar' : 'ver'}</span>
             </button>
           )}
+          {presPorLiquidar.length > 0 && (
+            <div className="w-full text-[10px] text-orange-400 leading-tight mt-1"
+              title="El material prestado ya se consumió en la obra de destino, así que no se puede devolver. Antes se cerraba transfiriendo el costo; durante el piloto eso no se hace porque las obras son de empresas distintas y hace falta una factura entre ellas.">
+              ⚠ {presPorLiquidar.length} préstamo(s) con el material ya consumido en destino: quedan
+              abiertos hasta que se liquide entre las empresas. No se pierden — se resuelven todos juntos.</div>
+          )}
         </div>
         {!soloVigila && (<>
         <div className="grid md:grid-cols-4 gap-2 mb-3">
@@ -528,10 +544,20 @@ export function Almacen({ user, db, api, obraGlobal }) {
                     <td className="py-2 px-1.5">
                       {esAlm && p.estado === 'Prestado' && (
                         <div>
+                          <div className="text-[9px] text-slate-500 leading-tight mb-1">
+                            Si la otra obra ya consumió el material, avisa a gerencia: durante el
+                            piloto no se transfiere el costo (hace falta factura entre empresas).</div>
                           <div className="flex gap-1">
                             <button onClick={() => setPres(p, 'Devuelto')} className={btnVerde}>Devuelto</button>
-                            <button onClick={() => setPres(p, 'Transferido')}
-                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-sky-950 text-sky-400 border border-sky-800 hover:bg-sky-900">Transferir al costo</button>
+                            {/* "Transferir al costo" queda FUERA durante el piloto (decisión del
+                                dueño, 28 ago 2026): las obras pertenecen a razones sociales
+                                distintas, y mover el costo de una empresa a otra sin emitir la
+                                factura entre ellas no es un asiento contable válido. Se explica
+                                en lugar de esconderlo: el almacenero tiene que saber qué hacer
+                                el día que el material prestado ya se haya consumido. */}
+                            <span className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed"
+                              title="Durante el piloto no se transfiere el costo: cada obra es de una empresa distinta y hace falta una factura entre ellas. Si el material ya se consumió, avisa a gerencia y deja el préstamo abierto.">
+                              Transferir al costo · no disponible</span>
                           </div>
                           <AnularBox onConfirm={m => anularPrestamo(p, m)} />
                         </div>
