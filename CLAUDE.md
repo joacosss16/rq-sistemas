@@ -28,7 +28,7 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 - **Código separado en módulos** (ago 2026): `src/App.jsx` pasó de 5,651 a ~1,030 líneas (era la app entera; hoy es la capa de datos, la cabecera y el montaje de vistas). Las 16 vistas viven en `src/vistas/` y la lógica compartida en ocho módulos propios (ver Estructura del repo). Ni una regla de negocio cambió en la mudanza.
 - Alcance acotado hasta terminar el piloto: **no se agregan funciones nuevas**,
   solo se arregla y se endurece lo que existe. Lo que ha entrado desde agosto
-  no son funciones sino cierres de agujeros (ver las migraciones 49–68) y
+  no son funciones sino cierres de agujeros (ver las migraciones 49–74) y
   ayudas para ver mejor lo que ya había: contadores de vigilancia, avisos en
   las pestañas, la detección de duplicados del catálogo. Todo lo demás
   —flete, cajas, órdenes de servicio, Almacén Central— está **diseñado y
@@ -46,7 +46,7 @@ npm install          # una vez
 npm run dev          # desarrollo, en localhost:5173
 npm run build        # compila a dist/
 npm run preview      # sirve lo compilado en localhost:4173 (para probar de verdad)
-npm test             # 60 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
+npm test             # 61 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
 ```
 
 **Las migraciones NO se corren solas.** Hay que abrir el archivo
@@ -124,6 +124,45 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
 - Holgura = fechaNecesitada − fechaEntrega (negativa = llegó tarde, en rojo)
 - Saldo en = fechaEntregaSaldo − fechaEntrega
 
+## LO QUE SIGUE ABIERTO (28 ago 2026)
+
+**Fallos conocidos y sin arreglar.** No son todos los que hubo: son los que
+quedan después de cerrar los 22 de Almacén y Pagos.
+
+- **Un RQ puede quedar fantasma**: la cabecera se crea antes que las líneas y
+  no hay transacción, así que si una línea se rechaza queda un RQ numerado y
+  vacío. Empeoró con la migración 60, que añadió un motivo más de rechazo. Es
+  el arreglo pendiente más grande: mover la creación entera a una función del
+  servidor.
+- **La salida de material vencido solo se bloquea en pantalla.**
+- **La caducidad no viaja con un préstamo**: material por vencer llega al
+  destino figurando como bueno.
+- **El almacenero ve "S/ 0.00 valorizado"** porque su rol no puede leer
+  `factura_items`.
+- **"Entrega a tiempo %" mejora cuanto peor va**: solo cuenta lo entregado, así
+  que un material que nunca llega no empeora el indicador.
+- **Frank escribe el banco a mano** al facturar (consecuencia de la migración
+  32: ya no ve qué banco usa cada obra). Dispara alertas falsas en Auditoría, y
+  hasta que ese campo sea una lista fija, la guarda de la migración 70 no se
+  puede extender al alta de facturas.
+- **El sistema no guarda la cuenta bancaria de los proveedores**: al transferir
+  hay que buscarla fuera. Es por donde se cuela el fraude de suplantación —el
+  correo que dice "cambiamos de cuenta"— porque no hay contra qué compararla.
+  Semana 2, junto con la carga de los 255 proveedores.
+
+**Dos decisiones del dueño, pendientes:**
+- El cierre de un préstamo es **de una sola firma**: "Transferir al costo"
+  decide a qué empresa aterriza el costo y lo firma un solo almacenero, cuando
+  la entrada exigió a los dos residentes. (Hoy irrelevante: transferir está
+  deshabilitado.)
+- La **fecha de pago** acepta 2030 o 1990: falta ponerle tope, como se hizo con
+  la fecha de factura.
+
+**Estado de los módulos** (método de cierre uno por uno):
+Residente atacado · Gerencia rediseñada · **Compras: arreglado, pendiente de la
+verificación final del dueño para congelarlo** · Almacén y Pagos: atacados y
+arreglados, sin verificación en pantalla todavía.
+
 ## Decisiones del dueño que no estaban escritas (ago 2026)
 
 - **Gerencia mira, no registra.** Criterio con el que se rediseñaron sus ocho
@@ -192,7 +231,7 @@ El sistema ya guarda, sin habérselo propuesto, casi todo lo que exige el Regist
 ## Esquema Supabase propuesto (siguiente tarea)
 Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.
 
-## Reglas que se bajaron a la base (migraciones 49–68, ago 2026)
+## Reglas que se bajaron a la base (migraciones 49–74, ago 2026)
 
 Todas nacieron de un fallo encontrado atacando el sistema o usándolo de verdad.
 Están en `supabase/migrations/` con su porqué escrito completo; aquí solo lo
@@ -239,6 +278,48 @@ que cambia cómo trabaja la gente.
 - **Las firmas las pone el servidor** (41, 55, 66): quién anuló, quién pagó,
   quién pidió una anulación. Un dato que el cliente escribe no es una firma.
 
+**Del 28 de agosto: los 22 agujeros de Almacén y Pagos**
+Salieron de dos ataques adversariales y se cerraron todos el mismo día. Casi
+todos eran la misma enfermedad ya curada en Compras —una transición sin guarda,
+o una firma que escribía el navegador— y **ninguno era alcanzable desde la
+pantalla**: todos hablándole directo a la base con una sesión iniciada.
+
+- **El arqueo de caja chica lo calcula la base** (67). Era el agujero más serio
+  que quedaba: el navegador mandaba la diferencia Y el veredicto
+  (`estado: excede ? ...`), o sea que **quien decidía si la caja cuadraba era la
+  misma pantalla que estaba siendo controlada**. Ahora solo viaja lo que
+  administración cuenta. Y la caja chica es lo único donde el dinero se mueve
+  sin banco de por medio: una transferencia se concilia contra el extracto, el
+  efectivo solo tiene este arqueo.
+- **En almacén, lo hecho no se deshace** (69): no se des-anula una salida —lo
+  que borraba el motivo y la firma y volvía a descontar stock—, no se re-decide
+  una ya resuelta, el reingreso no retrocede, y un préstamo entregado no vuelve
+  atrás.
+- **La firma del pago, también al CREAR** (70). La migración 55 lo cerró solo
+  para el UPDATE: se podía fabricar de cero una factura ya nacida 'Pagada'
+  atribuida a otra persona. Ahí mismo: el banco tiene que ser el de la obra, una
+  jornada aprobada no se reabre, y **una entrega no se registra dos veces** —el
+  doble clic con la red lenta de la obra dejaba un faltante que se lo comía Frank.
+- **La recepción suma en el servidor** (71). La pantalla mandaba el TOTAL
+  calculado con lo que tenía en memoria, así que dos personas recibiendo el
+  mismo ítem se pisaban y **la primera recepción desaparecía sin error ni
+  rastro**. Ahora viaja el incremento y suma la base, bloqueando la fila.
+- **Gerencia puede corregir una entrega de un día cerrado** (72). Era un
+  callejón: el sistema decía "coordina con gerencia" y gerencia no tenía con
+  qué. Ahora la anula con motivo y **se reabre la jornada** para volver a contar.
+- **Mónica ve el banco de su obra** (73) — bloqueante que apareció verificando
+  lo demás: la migración 32 cerró `proyectos_banco` y la 47 le dio a
+  administración el permiso de pagar, sin darle el dato. Ahí mismo: un préstamo
+  **Solicitado reserva** el material en el origen (antes se podía prometer dos
+  veces), y "el destino ya consumió" pasa a mirar el **stock físico** —antes
+  contaba salidas sin aprobar y bloqueaba devoluciones legítimas—.
+- **Sin transferir al costo durante el piloto** (74, decisión del dueño): las
+  obras son de razones sociales distintas y mover el costo sin factura entre
+  ellas no es un asiento válido. Si el destino ya consumió el material, el
+  préstamo **queda abierto** —refleja una deuda real sin liquidar— y sale en un
+  contador para que no se acumulen invisibles. Se rehabilita borrando un solo
+  trigger.
+
 **Tiempo**
 - **La base vive en hora de Perú** (58). Estaba en UTC: a partir de las 19:00
   el sistema ya creía que era mañana, y eso además desactivaba la guarda que
@@ -273,7 +354,7 @@ rq-sistema-proyecto/
 ├── prototipo/
 │   ├── sistema_rq.html  ← prototipo original standalone (referencia)
 │   └── sistema_rq.jsx   ← su fuente React
-├── test/                ← 60 pruebas de la lógica pura; `npm test` las corre
+├── test/                ← 61 pruebas de la lógica pura; `npm test` las corre
 │   └── caja · fechas · stock · pago · busqueda (.test.mjs)
 ├── docs/
 │   ├── 01_contexto_negocio.md · 02_modelo_datos.md
@@ -287,7 +368,7 @@ rq-sistema-proyecto/
 │   └── codificacion_de_almacen.xlsx  ← el catálogo real (1,740 materiales).
 │                          FALTA copiar CONTROL_RQ_LUZ.xlsx (255 proveedores)
 └── supabase/
-    ├── migrations/      ← 67 archivos numerados del 1 al 68 (el 33 no existe:
+    ├── migrations/      ← 73 archivos numerados del 1 al 74 (el 33 no existe:
     │                      se descartó antes de correrse). Son la fuente de
     │                      verdad de las reglas de negocio.
     ├── CORRER_ESTO_*.sql ← varias migraciones juntas, para pegar de una vez
@@ -300,6 +381,49 @@ facilita y avisa; **la base exige**. Cada vez que se descubre una regla que
 solo vivía en el navegador —el canal declarado, las líneas que nacían
 aprobadas, la firma de una anulación, el arqueo de caja— se baja a la base,
 porque el navegador corre en la máquina del usuario y se puede esquivar.
+
+## EL PLAN DE LANZAMIENTO (acordado con el dueño el 28 ago 2026)
+
+En este orden, y **cada paso tiene que terminar antes de empezar el
+siguiente**. El dueño lo planteó así y es el que manda:
+
+1. **Cerrar los módulos uno por uno.** Verificación en pantalla (el dueño con
+   Claude in Chrome) → arreglar lo que salga → **congelar** → siguiente.
+2. **Una pasada global** al final: ataque al código y prueba a mano, sobre el
+   sistema entero.
+3. **Borrar los datos de prueba** (`supabase/reset_pruebas.sql`).
+4. **Probar cada caso y cada ramificación** sobre el sistema limpio.
+5. **Reset otra vez**, para borrar lo que generó esa prueba.
+6. **AHORA sí, cargar los datos reales.** Este orden importa: el reset borra
+   `stock_inicial`, así que el inventario cargado antes se perdería.
+7. `VITE_ENTORNO = produccion` en Vercel + Redeploy. **Es lo último que se
+   toca**: si se cambia antes de borrar las pruebas, el equipo verá
+   movimientos inventados como si fueran reales; y si no se cambia, trabajarán
+   con dinero de verdad leyendo "esto no son los datos reales".
+8. **Anunciar y lanzar.**
+
+**QUÉ SOBREVIVE AL RESET, y por eso se puede cargar antes** (comprobado contra
+el guion): los **255 proveedores** (solo borra el de prueba, RUC 20138651917),
+las **equivalencias de caja** (viven en el catálogo), y la **curaduría de
+duplicados** de Lucía.
+
+**QUÉ NO SOBREVIVE:** el **inventario inicial**. Decisión del dueño: se carga
+después de anunciar el piloto. Tiene sentido más allá de lo técnico — es la
+foto de lo que hay en cada almacén ESE día, y tomada con una semana de
+antelación ya está desactualizada.
+
+**CONSECUENCIA A TENER PRESENTE:** mientras no esté el inventario, el stock
+arranca en CERO y los almaceneros **no pueden registrar salidas** — el sistema
+dirá que no hay stock, y tendrá razón. O se carga el mismo día del arranque
+antes de que entre nadie, o se arranca solo con el flujo de compras y se les
+avisa, o pensarán que el sistema está roto.
+
+**LO QUE FALTA ANTES DEL ARRANQUE, aparte de lo anterior:**
+- **El almacenero de DANAUS** — sin él, esa obra no recibe ni saca material.
+- Supabase **Pro** con recuperación a punto en el tiempo.
+- Los **bancos reales** en `proyectos_banco` (2502 y 2503 para el piloto).
+- Cuentas de correo reales por persona, y el usuario del rol `pagos`.
+- Los **manuales por rol**.
 
 ## Reglas para trabajar en este repo
 - Idioma: español en UI, commits y docs.
