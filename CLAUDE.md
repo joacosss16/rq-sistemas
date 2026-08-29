@@ -28,7 +28,7 @@ Antes: RQs como PDFs sueltos por WhatsApp, sin trazabilidad, catálogo desactual
 - **Código separado en módulos** (ago 2026): `src/App.jsx` pasó de 5,651 a ~1,030 líneas (era la app entera; hoy es la capa de datos, la cabecera y el montaje de vistas). Las 16 vistas viven en `src/vistas/` y la lógica compartida en ocho módulos propios (ver Estructura del repo). Ni una regla de negocio cambió en la mudanza.
 - Alcance acotado hasta terminar el piloto: **no se agregan funciones nuevas**,
   solo se arregla y se endurece lo que existe. Lo que ha entrado desde agosto
-  no son funciones sino cierres de agujeros (ver las migraciones 49–74) y
+  no son funciones sino cierres de agujeros (ver las migraciones 49–76) y
   ayudas para ver mejor lo que ya había: contadores de vigilancia, avisos en
   las pestañas, la detección de duplicados del catálogo. Todo lo demás
   —flete, cajas, órdenes de servicio, Almacén Central— está **diseñado y
@@ -46,7 +46,7 @@ npm install          # una vez
 npm run dev          # desarrollo, en localhost:5173
 npm run build        # compila a dist/
 npm run preview      # sirve lo compilado en localhost:4173 (para probar de verdad)
-npm test             # 61 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
+npm test             # 62 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
 ```
 
 **Las migraciones NO se corren solas.** Hay que abrir el archivo
@@ -158,10 +158,23 @@ quedan después de cerrar los 22 de Almacén y Pagos.
 - La **fecha de pago** acepta 2030 o 1990: falta ponerle tope, como se hizo con
   la fecha de factura.
 
-**Estado de los módulos** (método de cierre uno por uno):
-Residente atacado · Gerencia rediseñada · **Compras: arreglado, pendiente de la
-verificación final del dueño para congelarlo** · Almacén y Pagos: atacados y
-arreglados, sin verificación en pantalla todavía.
+**Estado de los módulos** (método de cierre uno por uno), al 28 ago:
+- **Compras — CERRADO.** Atacado por código (28 hallazgos) y probado a mano por
+  el dueño en tres rondas. Todo arreglado, incluido lo último: el contador de
+  facturas por pagar contaba las anuladas.
+- **Residente — arreglado**, a falta de dos comprobaciones que necesitan datos:
+  que el número de "Aprobaciones" salga cuando hay firmas pendientes, y el
+  aviso de ítems anulados. Se cubren al probar Almacén.
+- **Gerencia — rediseñada y verificada**; los tres menores de su informe,
+  arreglados.
+- **Almacén y Pagos — atacados y arreglados por código, SIN probar en
+  pantalla.** Es lo siguiente.
+
+**Lo que la prueba a mano confirmó y el código no veía:** que una factura
+anulada libera su número (la corrección oficial por fin funciona), que los RQ
+íntegramente rechazados eran **inalcanzables** —existía el botón para cerrar los
+archivados y ninguno para abrirlos—, y que la partida no se validaba contra la
+obra (hay RQs de MAIA con partidas de otras obras y con basura numérica).
 
 ## Decisiones del dueño que no estaban escritas (ago 2026)
 
@@ -231,7 +244,7 @@ El sistema ya guarda, sin habérselo propuesto, casi todo lo que exige el Regist
 ## Esquema Supabase propuesto (siguiente tarea)
 Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.
 
-## Reglas que se bajaron a la base (migraciones 49–74, ago 2026)
+## Reglas que se bajaron a la base (migraciones 49–76, ago 2026)
 
 Todas nacieron de un fallo encontrado atacando el sistema o usándolo de verdad.
 Están en `supabase/migrations/` con su porqué escrito completo; aquí solo lo
@@ -320,6 +333,37 @@ pantalla**: todos hablándole directo a la base con una sesión iniciada.
   contador para que no se acumulen invisibles. Se rehabilita borrando un solo
   trigger.
 
+**La tarde del 28: reparar lo roto ese mismo día**
+Una revisión adversarial al trabajo de la jornada encontró **20 hallazgos, todos
+confirmados**, y la mayoría era daño propio hecho horas antes. La causa no fue
+descuido en cada migración —cada una se revisó— sino **el ritmo: ocho
+migraciones en un día, ninguna revisada contra las otras**.
+
+- **La migración 72 borró tres guardas** de la entrega de efectivo: se reescribió
+  copiando la versión 38 cuando ya la habían mejorado la 45, la 46 y la 48. La
+  peor pérdida: **que la entrega abra la jornada**. Sin eso, el dinero entregado
+  un día sin compras no tiene dónde constar que se devolvió. Es exactamente el
+  error contra el que existe la regla de la casa, cometido el mismo día en que
+  se amplió. **Reparado en la 75.**
+- **El ajuste del compromiso quedó muerto**: la función de reparto no era
+  `security definer`, no podía escribir, y el guardián de cuadre abortaba el
+  pago. Las migraciones 65 y 68 existían para eso y no servían para nada,
+  mientras la pantalla prometía en un cartel que los precios se ajustarían.
+- Y además: la nota de crédito bloqueada, dos entregas de efectivo del mismo
+  monto imposibles, el botón de corrección de administración muerto, la
+  recepción sin filtro por obra, y el stock quedando negativo al aprobar una
+  salida. **Todo en la 75.**
+- **El RQ fantasma dejó de ser teórico** (76): la prueba del residente lo
+  produjo con dos clics en Enviar. Ahora un RQ nace entero o no nace, el doble
+  clic devuelve el mismo número, y los vacíos que había se borraron.
+
+**Y `calcularStocks` devuelve ahora DOS números**, porque no eran lo mismo y se
+usaban indistintamente:
+- `cant` = de cuánto se puede **disponer** (descuenta reservas)
+- `fisico` = lo que está **en el estante** (las reservas siguen ahí)
+El conteo ciego y el cierre valorizado usan el físico: a nadie se le puede pedir
+que cuente material que sí está.
+
 **Tiempo**
 - **La base vive en hora de Perú** (58). Estaba en UTC: a partir de las 19:00
   el sistema ya creía que era mañana, y eso además desactivaba la guarda que
@@ -354,7 +398,7 @@ rq-sistema-proyecto/
 ├── prototipo/
 │   ├── sistema_rq.html  ← prototipo original standalone (referencia)
 │   └── sistema_rq.jsx   ← su fuente React
-├── test/                ← 61 pruebas de la lógica pura; `npm test` las corre
+├── test/                ← 62 pruebas de la lógica pura; `npm test` las corre
 │   └── caja · fechas · stock · pago · busqueda (.test.mjs)
 ├── docs/
 │   ├── 01_contexto_negocio.md · 02_modelo_datos.md
@@ -368,7 +412,7 @@ rq-sistema-proyecto/
 │   └── codificacion_de_almacen.xlsx  ← el catálogo real (1,740 materiales).
 │                          FALTA copiar CONTROL_RQ_LUZ.xlsx (255 proveedores)
 └── supabase/
-    ├── migrations/      ← 73 archivos numerados del 1 al 74 (el 33 no existe:
+    ├── migrations/      ← 75 archivos numerados del 1 al 76 (el 33 no existe:
     │                      se descartó antes de correrse). Son la fuente de
     │                      verdad de las reglas de negocio.
     ├── CORRER_ESTO_*.sql ← varias migraciones juntas, para pegar de una vez
