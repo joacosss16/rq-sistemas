@@ -111,6 +111,13 @@ export function Residente({ user, db, api, obraGlobal }) {
   // Orden de llenado exigido: 1) partida → 2) nivel → 3) fecha → (4) justificación si urgente.
   // El campo pendiente se pinta amarillo y el siguiente queda bloqueado.
   const partidaOk = cab.partida.trim().length > 0;
+  // La partida es de ESTA obra. Si el residente escribe el código de otra, se
+  // avisa: no es un error de escritura, es un costo que se va a imputar mal.
+  const partidaDeOtraObra = (() => {
+    const p = cab.partida.trim();
+    const m = p.match(/^(\d{4})[.\-\s]/);
+    return m && codIni && m[1] !== codIni ? m[1] : null;
+  })();
   const nivelOk = !!cab.piso;
   const fechaOk = !!cab.fecha && cab.fecha >= HOY_ISO;
   const justOk = !urgente || !!just.trim();
@@ -126,8 +133,11 @@ export function Residente({ user, db, api, obraGlobal }) {
     const r = await api.crearRq({ cab, items, just: just.trim(), canal: ch.k });
     setEnviando(false);
     if (r.error) { setAviso('⚠ ' + r.error); return; }
+    const d = r.data || {};
     setItems([]); setJust('');
-    setAviso(`RQ-${String(r.numero).padStart(3, '0')} enviado. Compras ya lo puede ver. El PDF estará disponible cuando Compras decida todos los ítems.`);
+    setAviso(d.repetido
+      ? `Ese requerimiento ya se había enviado: es el RQ-${String(d.numero).padStart(3, '0')}. No se creó otro.`
+      : `RQ-${String(d.numero).padStart(3, '0')} enviado. Compras ya lo puede ver. El PDF estará disponible cuando Compras decida todos los ítems.`);
     setTimeout(() => setAviso(''), 7000);
   };
 
@@ -252,9 +262,22 @@ export function Residente({ user, db, api, obraGlobal }) {
           <div><label className={lblCls}>Proyecto (asignado a tu usuario)</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{codIni} · {user.proyecto}</div></div>
           <div><label className={lblCls}>1. Partida *</label>
-            <input value={cab.partida} onChange={e => setC('partida', e.target.value)}
+            <input value={cab.partida}
+              onChange={e => {
+                let v = e.target.value;
+                // Al empezar a escribir en vacío, se pone el código de la obra
+                // delante: es lo que lleva toda partida y nadie tiene por qué
+                // teclearlo cada vez.
+                if (codIni && !cab.partida && v && /^\d/.test(v) && !v.startsWith(codIni)) v = codIni + '.' + v;
+                setC('partida', v);
+              }}
               placeholder={codIni ? `Ej: ${codIni}.02.02` : 'Partida'}
-              onKeyDown={saltarA(refNivel)} className={`w-full ${pendCls(partidaOk)}`} /></div>
+              onKeyDown={saltarA(refNivel)} className={`w-full ${pendCls(partidaOk)}`} />
+            {partidaDeOtraObra && (
+              <div className="text-[9px] text-yellow-400 mt-0.5 leading-tight">
+                ⚠ Esa partida empieza por {partidaDeOtraObra} y esta obra es {codIni}. Si es a
+                propósito, adelante; si no, el costo se va a imputar a otra obra.</div>
+            )}</div>
           <div><label className={lblCls}>Residente de obra *</label>
             <div className={`${inputCls} bg-slate-800 text-slate-300`}>{user.nombre}</div></div>
           <div><label className={lblCls}>2. Nivel donde se utilizará *</label>
@@ -415,10 +438,20 @@ export function Residente({ user, db, api, obraGlobal }) {
             ))}
           </div>
         </div>
+        {!verArchivados && rqsArchivados.length > 0 && (
+          <div className="flex items-center gap-2 mb-2 pb-2 border-b border-slate-800">
+            <span className="text-[10px] text-slate-500">
+              {rqsArchivados.length} requerimiento(s) ya cerrados — entregados, rechazados o anulados.
+              {sinMaterial > 0 && ` ${sinMaterial} se cerraron sin material: ahí está el motivo.`}</span>
+            <button onClick={() => setVerArchivados(true)}
+              className="ml-auto px-2.5 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700 hover:text-yellow-400 hover:border-yellow-400 whitespace-nowrap">
+              📁 Ver archivados</button>
+          </div>
+        )}
         {misRqs.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Aún no has enviado requerimientos.</div>
         ) : mostrados.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Todo atendido ✓ — tus requerimientos completos están en Archivados, abajo.</div>
+          <div className="text-center py-6 text-slate-500 text-sm">Todo atendido ✓ — tus requerimientos cerrados están en «Ver archivados», arriba.</div>
         ) : mostrados.map(r => {
           const decidido = r.items.length > 0 && r.items.every(i => i.decision !== 'Pendiente');
           const hayAprobados = r.items.some(i => i.decision === 'Aprobado');

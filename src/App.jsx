@@ -620,21 +620,21 @@ export default function App() {
       } catch (e) { return { error: e.message || String(e) }; }
     };
     return {
-      crearRq: ({ cab, items, just, canal }) => wrap(async () => {
-        const u = (await supabase.auth.getUser()).data.user;
-        const { data: rq, error } = await supabase.from('rqs').insert({
-          proyecto: cod(cab.proyecto), partida: cab.partida, residente_id: u.id,
-          almacen_resp: cab.almacen, piso: cab.piso, canal, justificacion: just || null, creado_por: u.id,
-        }).select().single();
-        if (error) return { error };
-        const rows = items.map(i => ({
-          rq_id: rq.id, codigo: i.cod, cant: Number(i.cant), fecha_necesitada: cab.fecha,
-          destino: i.destino.trim(), color: i.color.trim() || null, obs: i.obs.trim() || null,
-        }));
-        const { error: e2 } = await supabase.from('rq_items').insert(rows);
-        if (e2) return { error: e2 };
-        return { numero: rq.numero };
-      }, ['rqs', 'rq_items']),
+      // UNA sola operación del servidor (migración 76): la cabecera y las
+      // líneas van juntas. Antes eran dos escrituras sueltas, y si la segunda
+      // fallaba —o si el residente hacía dos clics— quedaba una cabecera
+      // numerada y VACÍA que Compras veía como un requerimiento urgente que no
+      // pide nada. Pasó de verdad: el RQ-372.
+      crearRq: ({ cab, items, just, canal }) => wrap(async () =>
+        await supabase.rpc('crear_rq', {
+          p_proyecto: cod(cab.proyecto), p_partida: cab.partida,
+          p_almacen: cab.almacen, p_piso: cab.piso, p_canal: canal,
+          p_justificacion: just || null, p_fecha: cab.fecha,
+          p_items: items.map(i => ({
+            cod: i.cod, cant: Number(i.cant), destino: i.destino.trim(),
+            color: i.color.trim() || null, obs: i.obs.trim() || null,
+          })),
+        }), ['rqs', 'rq_items']),
       updItem: (id, patch) => wrap(async () => await supabase.from('rq_items').update(patch).eq('id', id), ['rq_items']),
       // Una sola transacción en la base (migraciones 28/30): proveedor +
       // rendición + factura + líneas. Si algo falla no queda nada a medias.

@@ -333,9 +333,14 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
   const factProy = facturas
     .filter(f => !facturarSolo || f.registradoPorId === user.id)
     .filter(f => proy === 'TODOS' || f.proyecto === proy);
-  const factPendientes = factProy.filter(f => f.estadoPago !== 'Pagada');
+  // Las ANULADAS no esperan pago: están muertas. Contarlas inflaba el número
+  // que lee Compras —y crecía con cada anulación— mientras Pagos ya las
+  // excluía, así que las dos pantallas decían cosas distintas del mismo dato.
+  // Se siguen VIENDO en la lista, tachadas: el rastro no se esconde.
+  const factPendientes = factProy.filter(f => f.estadoPago !== 'Pagada' && !f.anulMotivo);
   const factPagadas = factProy.filter(f => f.estadoPago === 'Pagada');
-  const factMostradas = verPagadas ? factProy : factPendientes;
+  const factAnuladas = factProy.filter(f => f.anulMotivo);
+  const factMostradas = verPagadas ? factProy : [...factPendientes, ...factAnuladas];
 
   // Consolidado por comprar: ítems aprobados sin gestionar (sin factura y
   // sin estado logístico), agrupados por material entre todas las obras.
@@ -932,7 +937,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                   <td className="py-2 px-1.5 font-mono text-slate-200">{f.serie}
                     {f.tipoDoc === 'Compromiso' && <div className="text-[8px] font-bold uppercase text-yellow-400">Sin factura · la emite al pagar</div>}
                     {f.tipoDoc === 'Pendiente' && <div className="text-[8px] font-bold uppercase text-sky-400">Pagada · factura por llegar</div>}
-                    {f.anulMotivo && <div className="text-[8px] text-red-400 no-underline">Anulada: {f.anulMotivo} ({f.anulPor})</div>}</td>
+                    {f.anulMotivo && <div className="text-[8px] text-red-400 no-underline">Anulada{f.anulFecha ? ` el ${fmt(f.anulFecha)}` : ''}: {f.anulMotivo} ({f.anulPor})</div>}</td>
                   <td className="py-2 px-1.5 text-slate-400">{fmt(f.fecha)}</td>
                   <td className="py-2 px-1.5 text-slate-300">{f.prov}</td>
                   <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{f.ruc}</td>

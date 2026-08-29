@@ -347,7 +347,12 @@ export function Pagos({ user, db, api, obraGlobal }) {
                         <select value={p.medio} onChange={e => setP(f.id, 'medio', e.target.value)} disabled={!puede} className={inputCls}>
                           {MEDIOS_PAGO.map(b => <option key={b}>{b}</option>)}</select></td>
                       <td className="py-2 px-1.5"><input value={p.op} onChange={e => setP(f.id, 'op', e.target.value)} disabled={!puede} placeholder={ETIQUETA_NRO[p.medio] || 'N°'} className={`w-24 ${inputCls} font-mono`} /></td>
-                      <td className="py-2 px-1.5"><FechaInput value={p.fecha} onChange={e => setP(f.id, 'fecha', e.target.value)} className={`w-32 ${inputCls}`} /></td>
+                      {/* En la vista de consulta se bloquea como todo lo demás: un campo
+                          que se deja escribir pero no guardar promete algo que no va a pasar.
+                          Y con tope hoy: una fecha de pago no puede ser futura. */}
+                      <td className="py-2 px-1.5"><FechaInput value={p.fecha} max={HOY_ISO} disabled={!puede}
+                        onChange={e => setP(f.id, 'fecha', e.target.value)}
+                        className={`w-32 ${inputCls} ${!puede ? 'opacity-50 cursor-not-allowed' : ''}`} /></td>
                       <td className="py-2 px-1.5"><button onClick={() => pagar(f)} disabled={!listo} className={btnOk(!!listo)}>Registrar pago</button></td>
                     </tr>
                   );
