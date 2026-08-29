@@ -25,13 +25,17 @@ export function Auditoria({ user, db, api }) {
     if (!obraCierre) return;
     const stocks = calcularStocks(db)[obraCierre] || {};
     const matInfo = Object.fromEntries(db.catalogo.map(m => [m[0], { desc: m[1], und: m[2] }]));
+    // FÍSICO, no disponible: el conteo ciego le pide a alguien que cuente lo
+    // que hay en el estante, y una salida esperando la firma del residente
+    // sigue ahí. El cierre valorizado, igual: el almacén vale lo que tiene.
     const filas = Object.entries(stocks)
-      .filter(([, v]) => v.cant > 0)
+      .filter(([, v]) => (v.fisico != null ? v.fisico : v.cant) > 0)
       .map(([cod, v]) => {
         const precio = precioProm[cod] != null ? precioProm[cod] : null;
+        const cant = v.fisico != null ? v.fisico : v.cant;
         return {
           cod, desc: (matInfo[cod] || {}).desc || cod, und: (matInfo[cod] || {}).und || '',
-          cant: v.cant, precio, valor: precio != null ? v.cant * precio : null,
+          cant, precio, valor: precio != null ? cant * precio : null,
         };
       });
     if (!filas.length) { alert(`${obraCierre} no tiene stock para cerrar.`); return; }

@@ -86,16 +86,35 @@ prueba('inicial + recibido suman; lo no aprobado no existe', () => {
   igual(calcularStocks(db).MAIA['010101'].cant, 15, '5 inicial + 10 recibido');
 });
 
-prueba('la salida solo descuenta APROBADA y no anulada; la reingresada vuelve', () => {
+// CORREGIDO el 28 ago 2026. Esta prueba afirmaba que una salida PENDIENTE no
+// descontaba... y la BASE sí la descontaba desde siempre (`public.stock()`
+// filtra por `aprobacion in ('Pendiente','Aprobada')`). O sea que la pantalla
+// y la base contaban distinto, y la prueba fijaba el lado equivocado.
+//
+// Ahora hay dos números, y cada uno tiene su trabajo:
+//   `cant`   = de cuánto se puede DISPONER (lo reservado no cuenta)
+//   `fisico` = lo que está EN EL ESTANTE (lo reservado sigue ahí)
+prueba('la salida aprobada baja de los dos; la pendiente solo del disponible', () => {
   const db = base();
   db.stockInicial.push({ proyecto: 'MAIA', cod: '010101', cant: 20 });
   db.salidas.push(
     { proyecto: 'MAIA', cod: '010101', cant: 5, anulada: false, aprobacion: 'Aprobada' },
     { proyecto: 'MAIA', cod: '010101', cant: 7, anulada: true,  aprobacion: 'Aprobada' },   // anulada restaura
-    { proyecto: 'MAIA', cod: '010101', cant: 4, anulada: false, aprobacion: 'Pendiente' },  // pendiente NO descuenta
+    { proyecto: 'MAIA', cod: '010101', cant: 4, anulada: false, aprobacion: 'Pendiente' },  // reserva
     { proyecto: 'MAIA', cod: '010101', cant: 6, anulada: false, aprobacion: 'Aprobada', reingresada: 2 }, // uso incorrecto: 2 volvieron
   );
-  igual(calcularStocks(db).MAIA['010101'].cant, 20 - 5 - (6 - 2), 'solo descuentan la de 5 y la de 6−2');
+  const s = calcularStocks(db).MAIA['010101'];
+  igual(s.cant,   20 - 5 - (6 - 2) - 4, 'el disponible descuenta también la reservada');
+  igual(s.fisico, 20 - 5 - (6 - 2),     'el físico NO: esas 4 siguen en el estante');
+});
+
+prueba('un préstamo Solicitado reserva pero no sale del estante', () => {
+  const db = base();
+  db.stockInicial.push({ proyecto: 'MAIA', cod: '010101', cant: 10 });
+  db.prestamos.push({ estado: 'Solicitado', origen: 'MAIA', destino: 'LUZ', cod: '010101', cant: 4 });
+  const s = calcularStocks(db).MAIA['010101'];
+  igual(s.cant,   10 - 4, 'comprometido: no se puede disponer de él');
+  igual(s.fisico, 10,     'pero sigue físicamente en MAIA');
 });
 
 prueba('el préstamo activo mueve stock; el resuelto o rechazado no', () => {

@@ -254,6 +254,11 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
   const [parcial, setParcial] = useState({});
   const registrarParcial = async i => {
     const f = parcial[i.id];
+    if (UND_ENTERA(i.und) && !Number.isInteger(Number(f.cant))) {
+      setAviso(`⚠ ${i.und} no admite decimales: no existen ${f.cant} ${i.und.toLowerCase()}. Escribe una cantidad entera.`);
+      setTimeout(() => setAviso(''), 8000);
+      return;
+    }
     const r = await api.compraParcial(i, f.cant, f.motivo, f.cerrar);
     if (r.error) { setAviso('⚠ ' + r.error); setTimeout(() => setAviso(''), 9000); return; }
     const p2 = { ...parcial }; delete p2[i.id]; setParcial(p2);
@@ -280,7 +285,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
     if (cubiertos.some(x => Number(f.precios[x.id]) < 0)) { setAviso('⚠ Hay un precio negativo en el desglose. Revisa las cantidades: un precio nunca es negativo.'); return; }
     if (!f.fecha) falta.push('la fecha');
     else if (f.fecha > HOY_ISO) { setAviso('⚠ La fecha de la factura no puede ser futura. Revisa el año.'); return; }
-    if (!(Number(f.monto) > 0)) falta.push('el monto total');
+    if (!f.monto && f.monto !== 0) falta.push('el monto total');
     const sinPrecio = cubiertos.filter(x => !(Number(f.precios[x.id]) > 0));
     if (sinPrecio.length) falta.push(`el precio de ${sinPrecio.length} ítem(s): ${sinPrecio.map(x => x.desc).join(', ')}`);
     if (falta.length) {
@@ -516,7 +521,7 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
               // `pendiente`, y como al marcarlo el campo de serie desaparece,
               // el botón se quedaba gris para siempre y sin explicar por qué.
               const factOk = ff && (ff.compromiso || ff.pendiente || ff.serie.trim())
-                && ff.prov.trim() && rucValido(ff.ruc).ok && ff.fecha && Number(ff.monto) > 0
+                && ff.prov.trim() && rucValido(ff.ruc).ok && ff.fecha && Number(ff.monto) !== 0 && !Number.isNaN(Number(ff.monto))
                 // Ya pagada por banco: el servidor exige banco y N° de operación
                 && (!ff.pendiente || ff.efectivo || ((ff.banco || '').trim() && (ff.numOp || '').trim()))
                 && cubiertosFF.every(x => Number(ff.precios[x.id]) > 0) && cuadra;
@@ -882,7 +887,16 @@ export function Compras({ user, db, api, modo, obraGlobal }) {
                             <div className="text-[9px] text-yellow-400 leading-tight mb-1">
                               Gerencia rechazó anular: {i.anulRechMotivo} ({i.anulRechPor})</div>
                           )}
-                          <AnularBox label={esGerente ? 'Anular' : 'Solicitar anulación'} onConfirm={m => solicitarAnulacion(i, m)} />
+                          {i.factura ? (
+                            <span className="text-[9px] text-slate-500 leading-tight"
+                              title="Para anular este ítem, gerencia tiene que anular antes su factura; entonces el ítem queda libre.">
+                              Ya facturado — para anularlo, gerencia anula antes la factura</span>
+                          ) : Number(i.cantRecibida) > 0 ? (
+                            <span className="text-[9px] text-slate-500 leading-tight">
+                              Ya recibido ({i.cantRecibida} {i.und}) — corrige primero la recepción con el almacén</span>
+                          ) : (
+                            <AnularBox label={esGerente ? 'Anular' : 'Solicitar anulación'} onConfirm={m => solicitarAnulacion(i, m)} />
+                          )}
                         </div>
                       )
                     )}
