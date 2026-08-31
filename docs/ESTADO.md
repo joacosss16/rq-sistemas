@@ -13,8 +13,19 @@ maestro no envejezca con él.
 - **App multi-usuario en producción**: Vercel (https://rq-sistemas.vercel.app),
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
 - **77 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
-  La 77 (quién contó el efectivo) se corrió el 30 ago; el código que la
-  acompaña está en la rama `arqueo-y-reset`, SIN mergear a main todavía.
+  La 77 (quién contó el efectivo) se corrió el 30 ago.
+- **La rama `arqueo-y-reset` tiene 5 commits SIN mergear a main**: el código
+  de la 77 (la alerta del arqueo y las dos firmas en pantalla), el reset que
+  ahora borra catálogo/proveedores/bancos, el guardián
+  `verificar_datos_reales.sql`, la reorganización de CLAUDE.md y los hooks.
+  Mergear cuando el dueño lo decida — un push a main publica en Vercel.
+  Mientras tanto la base va por delante del código en modo seguro: la firma
+  nueva del arqueo se guarda, solo que la pantalla aún no la muestra.
+- **Tres hooks instalados** (30 ago, en `.claude/hooks/`, versionados): al
+  escribir una migración se avisa qué migraciones anteriores definen la misma
+  función y cuál es la versión viva, y se exige el bloque de comprobación;
+  editar `Residente.jsx` salta como pregunta de permiso al dueño; y todo
+  `git commit` corre antes las pruebas y la compilación.
 - **Alcance acotado hasta terminar el piloto: no se agregan funciones nuevas**,
   solo se arregla y endurece lo que existe. Todo lo demás —flete, cajas,
   órdenes de servicio, Almacén Central— está diseñado y apuntado, sin construir.
