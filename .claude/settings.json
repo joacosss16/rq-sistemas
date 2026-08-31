@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/revisar_migracion.py",
+            "timeout": 30,
+            "statusMessage": "Revisando la migración contra las anteriores…"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/avisar_residente.py",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/probar_antes_de_commit.py",
+            "timeout": 240,
+            "statusMessage": "Corriendo pruebas y compilación antes del commit…"
+          }
+        ]
+      }
+    ]
+  }
+}
