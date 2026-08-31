@@ -8,6 +8,29 @@ import { Aviso, AnularBox, FiltroProyecto, FechaInput, inputCls, lblCls, thCls, 
 // La lista de motivos de uso incorrecto viaja con la vista: nadie mas la usa.
 const MOTIVOS_USO = ['No se completó el trabajo', 'Se encontró botado', 'Uso inadecuado', 'Otro'];
 
+// Cuantas filas se pintan de golpe en las tablas largas. Con las 309 salidas
+// que tenia MAIA en pruebas, pintarlas todas -- cada una con sus inputs y sus
+// botones -- congelaba la pestana del navegador durante decenas de segundos.
+// 50 entra de sobra en cualquier pantalla y el resto esta a un clic.
+const TOPE_FILAS = 50;
+
+// Pie comun de las tablas recortadas. Decir cuantas hay es lo que impide que
+// un tope se lea como "no hay mas": un corte silencioso es peor que la lentitud.
+function PieTope({ mostradas, total, abierto, onToggle }) {
+  if (total <= mostradas && !abierto) return null;
+  return (
+    <div className="mt-2 text-center">
+      <button onClick={onToggle}
+        className="px-3 py-1 rounded text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-300 border border-slate-700 hover:border-slate-500">
+        {abierto ? `✕ mostrar solo las ${TOPE_FILAS} más recientes` : `ver las ${total} · ahora se muestran ${mostradas}`}
+      </button>
+      {abierto && total > TOPE_FILAS && (
+        <div className="text-[9px] text-yellow-500 mt-1">Con muchas filas la pantalla puede tardar en responder.</div>
+      )}
+    </div>
+  );
+}
+
 export function Almacen({ user, db, api, obraGlobal }) {
   const { rqs, salidas, prestamos, stockInicial, factorMap, pereceMap, precioProm = {} } = db;
   const esAlm = user.rol === 'almacen';
@@ -27,17 +50,46 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // Manda solo el de esta pantalla. Tener dos controles encendidos y en
   // desacuerdo era exactamente lo que confundia (18 ago 2026).
   const mandaLaCabecera = false;
+  // La vista era UNA sola columna con cinco tablas apiladas: para llegar a las
+  // salidas había que pasar por delante de todo el stock. Ahora cada tarea
+  // tiene su pestaña. Va aquí arriba, con el resto de los ganchos: un useState
+  // más abajo, después de cualquier return, deja la pantalla en blanco para
+  // todos -- ya pasó una vez en este proyecto.
+  const [pestana, setPestana] = useState('recepcion');
+  // Los préstamos ya cerrados se archivan detrás de un clic (ver más abajo).
+  // El gancho vive aquí arriba con los demás, no junto a su tabla.
+  const [verCerrados, setVerCerrados] = useState(false);
+  const [verArchivadas, setVerArchivadas] = useState(false);
+  // TOPE DE FILAS. Con 309 salidas en la bandeja, cada una con sus inputs y
+  // botones, el navegador se CONGELA: pantalla negra varios segundos y, dos
+  // veces en la prueba del 31 ago, el renderer sin responder durante 30s. No
+  // hay error de JavaScript — es puro trabajo de pintado bloqueando el hilo.
+  // Se recorta a las más recientes y el resto va detrás de un clic, que es el
+  // patrón de la casa. No se pierde nada: el pie dice cuántas hay.
+  const [sinTope, setSinTope] = useState({});
+  // La ventana efímera de confirmación del reingreso: { n, cant }.
+  const [confirmReing, setConfirmReing] = useState(null);
   const [fSal, setFSal] = useState({});
   const [verif, setVerif] = useState({});
   const [fReing, setFReing] = useState({});
   const [fPres, setFPres] = useState({ cod: '', cant: '', destino: '', autoriza: '' });
 
-  const avisar = (msg, ms = 5000) => { setAviso(msg); setTimeout(() => setAviso(''), ms); };
+  // 12 segundos, no 5. En la prueba del 31 ago el mensaje desaparecía antes de
+  // que diera tiempo a leerlo, y quien probaba concluyó —con razón— que "no hay
+  // confirmación". Es el mismo malentendido que hizo parecer muertos a tres
+  // botones de Compras: el aviso existía, pero nadie llegaba a verlo. Estos
+  // mensajes dicen cosas que importan ("alguien más ya había devuelto 1"), así
+  // que el coste de que sobre tiempo es cero y el de que falte, alto.
+  const avisar = (msg, ms = 12000) => { setAviso(msg); setTimeout(() => setAviso(''), ms); };
 
   const porRecibir = rqs.flatMap(r => r.items
     .filter(i => i.decision === 'Aprobado' && i.estado !== 'Entregado')
     .map(i => ({ ...i, rq: r.n, fechaRQ: r.fechaRQ, canalRq: r.canal, residente: r.residente, proyecto: r.proyecto })))
     .filter(i => i.proyecto === proy);
+  // Misma razón que en las salidas: 82 filas con inputs ya se notan, y la lista
+  // crece sola. Lo urgente primero — la fecha en que se necesita el material.
+  const porRecibirOrden = porRecibir.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  const porRecibirMostrar = sinTope.recepcion ? porRecibirOrden : porRecibirOrden.slice(0, TOPE_FILAS);
 
   const getF = id => form[id] || { cant: '', obs: '' };
   const setF = (id, k, v) => setForm({ ...form, [id]: { ...getF(id), [k]: v } });
@@ -200,16 +252,62 @@ export function Almacen({ user, db, api, obraGlobal }) {
     const v2 = { ...verif }; delete v2[sa.n]; setVerif(v2);
   };
 
-  const reingresar = async sa => {
-    const f = fReing[sa.n] || {};
-    const cant = Number(f.cant);
+  // ---- La bandeja de verificación ----
+  // Una salida está RESUELTA cuando ya no le pide nada a nadie. Lo que queda
+  // fuera de esta lista es el trabajo del almacenero, y es lo único que debe
+  // ver: la tabla enseñaba todo el historial para siempre, así que había que
+  // buscar la tarea de hoy entre lo verificado hace dos meses.
+  //
+  // El caso que obligó a la migración 79: "uso incorrecto, volvieron 3 de 10".
+  // ¿Los 7 vuelven o se perdieron? Nadie lo decía nunca, así que esa fila se
+  // quedaba a la vista para siempre. Ahora se pregunta, y `reingresoCerrado`
+  // guarda la respuesta.
+  const salidaResuelta = sa =>
+    sa.anulada
+    || sa.aprobacion === 'Rechazada'
+    || sa.uso === 'Correcto'
+    || (sa.uso === 'Incorrecto' && (sa.reingresoCerrado || Number(sa.reingresada) >= Number(sa.cant)));
+  const salBandeja = salidasProy.filter(s => !salidaResuelta(s));
+  const salArchivadas = salidasProy.filter(salidaResuelta);
+  // Lo más reciente arriba: el almacenero verifica lo de hoy, no lo de marzo.
+  // Antes salían en el orden en que llegaron de la base, así que su trabajo del
+  // día quedaba al final de trescientas filas.
+  const salOrden = (verArchivadas ? salidasProy : salBandeja).slice().sort((a, b) => b.n - a.n);
+  const salMostrar = sinTope.salidas ? salOrden : salOrden.slice(0, TOPE_FILAS);
+
+  // La hora de cada acción (migración 79) es un dato de AUDITORÍA, y solo la ve
+  // GERENCIA (decisión del dueño, 31 ago 2026). Sirve para saber si el almacén
+  // verifica al recibir el parte o tres semanas después — que es justo lo que
+  // distingue un control de un trámite. Al almacenero no le aporta nada: él
+  // sabe cuándo lo hizo, y además es el vigilado, no el vigilante. En su
+  // pantalla sería una columna más de ruido en una tabla que ya va apretada.
+  // Lo anterior a la 79 no tiene hora, y se dice en vez de inventar una.
+  const horaTxt = iso => iso ? new Date(iso).toLocaleString('es-PE') : 'sin hora registrada';
+
+  const reingresar = async (sa, cant, cerrar) => {
     const disponible = Number(sa.cant) - Number(sa.reingresada || 0);
-    if (!(cant > 0) || cant > disponible) return;
-    const total = Number(sa.reingresada || 0) + cant;
-    const r = await api.updSalida(sa.id, { cant_reingresada: total, reingreso: { cant: total, por: user.nombre, fecha: HOY_ISO } });
+    if (!(cant >= 0) || cant > disponible) return;
+    // Viaja lo que VUELVE, no el total: la suma la hace la base bloqueando la
+    // fila (migración 78). Y la firma ya no se manda desde aquí — la estampa
+    // el servidor, igual que la de la anulación.
+    const r = await api.reingresar(sa, cant, cerrar);
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    // Los números los devuelve el servidor, que es el único que sabe cuánto
+    // había vuelto de verdad: si alguien más reingresó mientras esta pantalla
+    // estaba abierta, aquí sale el total real y no el que esta vista suponía.
+    const d = r.data || {};
+    const yaHabia = Number(sa.reingresada || 0);
+    const total = d.total != null ? Number(d.total) : yaHabia + cant;
+    const otro = d.yaHabia != null && Number(d.yaHabia) !== yaHabia
+      ? ` (ojo: alguien más ya había devuelto ${d.yaHabia}, tu pantalla estaba desactualizada)` : '';
     const f2 = { ...fReing }; delete f2[sa.n]; setFReing(f2);
-    avisar(`Reingreso: ${cant} ${sa.und} de "${sa.desc}" devueltos a stock. La salida queda con su registro de uso incorrecto.`);
+    setConfirmReing(null);
+    const cerrada = d.cerrado != null ? d.cerrado : cerrar;
+    avisar(cant === 0
+      ? `HT ${sa.hoja}: registrado que no volverá material de "${sa.desc}". Sale de la lista por verificar; queda en el archivo con la hora.`
+      : `Reingreso: ${cant} ${sa.und} de "${sa.desc}" devueltos a stock (${total} de ${sa.cant}).${cerrada
+          ? ` HT ${sa.hoja} cerrada — sale de la lista por verificar.`
+          : ' Sigue en la lista: dijiste que puede volver más.'}${otro}`, otro ? 9000 : 6000);
   };
 
   const matPres = stock.find(s => s.cod === fPres.cod);
@@ -237,23 +335,60 @@ export function Almacen({ user, db, api, obraGlobal }) {
     const st = stock.find(x => x.cod === p.cod);
     return st && Number(st.stock) < Number(p.cant);
   });
-  const [verPres, setVerPres] = useState(false);
-  // La lista de "por recibir" es la mesa del almacenero: para gerencia son
-  // decenas de filas que dicen lo mismo. El DATO si sirve -- material comprado
-  // que no ha llegado -- asi que se queda como contador y la tabla se archiva
-  // detras del clic. Mismo trato que los prestamos y las solicitudes.
-  const [verRecibir, setVerRecibir] = useState(false);
-  const presMostrar = soloVigila ? (verPres ? presProy : presActivos) : presProy;
+  // Un préstamo CERRADO ya no pide nada a nadie: devuelto, transferido,
+  // rechazado o anulado. Se archiva detrás de un clic para que la tabla sea la
+  // lista de lo que sigue vivo y no un historial donde hay que buscar.
+  //
+  // Antes esto solo lo tenía gerencia, y filtraba por 'Prestado' — lo que
+  // escondía los 'Solicitado', que son justo los que se quedan atascados
+  // reservando material. Ahora el corte es abierto/cerrado y vale para todos,
+  // almacenero incluido. Nada se pierde: el contador dice cuántos hay y el
+  // botón los trae.
+  const CERRADOS = ['Devuelto', 'Transferido', 'Rechazado', 'Anulado'];
+  const presAbiertos = presProy.filter(p => !CERRADOS.includes(p.estado));
+  const presCerrados = presProy.filter(p => CERRADOS.includes(p.estado));
+  const presMostrar = verCerrados ? presProy : presAbiertos;
 
   const setPres = async (p, estado) => {
     const r = await api.updPrestamo(p.id, { estado });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
   };
   const anularPrestamo = async (p, motivo) => {
+    const solicitado = p.estado === 'Solicitado';
     const r = await api.updPrestamo(p.id, { estado: 'Anulado', anulacion: { motivo, por: user.nombre, fecha: HOY_ISO } });
     if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
-    avisar(`Préstamo #${p.n} anulado — stock restaurado en ambos almacenes.`);
+    // El mensaje no puede ser el mismo: un prestamo que nunca se activo no
+    // "restaura stock en ambos almacenes" -- solo libera la reserva del origen,
+    // porque al destino no llego nunca nada.
+    avisar(solicitado
+      ? `Préstamo #${p.n} anulado — nunca llegó a moverse. El material vuelve a estar disponible en ${p.origen}.`
+      : `Préstamo #${p.n} anulado — stock restaurado en ambos almacenes.`);
   };
+
+  // Las pestañas, en el orden que pidió el dueño (31 ago 2026). Cada una lleva
+  // su número, como el resto del sistema: el sistema no manda avisos, así que
+  // el número es lo único que le dice a quien está mirando que algo le espera.
+  // `urge` lo pinta en rojo -- se reserva para lo que tiene a alguien parado o
+  // para un descuadre real, no para "hay cosas".
+  const porVerificar = salBandeja.filter(s => !s.anulada && s.aprobacion === 'Aprobada').length;
+  // EL AVISO DE LAS 16:00 (pedido del dueño, 31 ago 2026).
+  //
+  // NO es una notificación: el sistema no manda ninguna, y esa decisión sigue
+  // en pie. Una notificación del navegador solo llegaría si el almacenero
+  // tuviera el sistema abierto justo a esa hora, y a las cuatro de la tarde
+  // está en el almacén, no delante de la pantalla — o sea, el día que
+  // importara, no llegaría. Esto es lo contrario: el aviso le ESPERA. Cuando
+  // abra, a las 16:05 o a las 19:00, lo primero que ve es lo que le falta.
+  const HORA_AVISO = 16;
+  const esTarde = new Date().getHours() >= HORA_AVISO;
+  const avisoTarde = esAlm && esTarde && porVerificar > 0;
+  const presEsperando = presProy.filter(p => p.estado === 'Solicitado').length;
+  const PESTANAS = [
+    { k: 'recepcion', t: 'Recepción',  n: porRecibir.length,             urge: false, nota: 'comprado sin llegar' },
+    { k: 'salidas',   t: 'Salidas',    n: porVerificar,                  urge: false, nota: 'sin verificar el uso' },
+    { k: 'stock',     t: 'Stock',      n: negativos + cadVencidos,       urge: true,  nota: 'negativos y vencidos' },
+    { k: 'prestamos', t: 'Préstamos',  n: presEsperando + presPorLiquidar.length, urge: true, nota: 'esperando firma o por liquidar' },
+  ];
 
   return (
     <div>
@@ -269,28 +404,57 @@ export function Almacen({ user, db, api, obraGlobal }) {
         </div>
       )}
 
+      {/* Cabecera FIJA: la obra, el almacenero y el aviso mandan en todas las
+          pestañas. El aviso sobre todo -- si viviera dentro de una pestaña, un
+          mensaje disparado desde otra se pintaría donde nadie lo ve, que es
+          exactamente lo que hizo parecer muertos a tres botones de Compras. */}
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">{soloVigila ? 'Almacén de obra' : 'Almacén de obra · recepción de materiales'}</div>
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Almacén de obra</div>
           <div className="ml-auto flex items-center gap-2">
             {esAlm || mandaLaCabecera
               ? <span className="text-slate-300 text-[11px] font-semibold">{(PROYECTOS.find(p => p[1] === proy) || [''])[0]} · {proy}
                   {mandaLaCabecera && <span className="text-slate-500 font-normal"> · elegida arriba</span>}</span>
               : <FiltroProyecto value={proy} onChange={setProy} />}
             {ALMACENEROS[proy] && <span className="text-slate-400 text-[11px]">Almacenero: {ALMACENEROS[proy]}</span>}
-            {soloVigila && porRecibir.length > 0 && (
-              <button onClick={() => setVerRecibir(v => !v)}
-                className="px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500">
-                <span className="font-mono font-bold text-sky-400">{porRecibir.length}</span>
-                <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
-                  por recibir · {verRecibir ? '✕ cerrar' : 'ver'}</span>
-              </button>
-            )}
           </div>
         </div>
         {!esAlm && <div className="text-slate-500 text-[11px] mb-3">Vista de consulta: las recepciones, salidas y préstamos los registra el almacenero de cada obra.</div>}
-        <Aviso msg={aviso} />
-        {soloVigila && !verRecibir ? null : porRecibir.length === 0 ? (
+        <div className="flex gap-1 flex-wrap border-t border-slate-800 pt-3">
+          {PESTANAS.map(p => (
+            <button key={p.k} onClick={() => setPestana(p.k)} title={p.nota}
+              className={`px-3 py-1.5 rounded text-[10px] font-bold uppercase tracking-widest border ${pestana === p.k
+                ? 'bg-slate-800 text-slate-100 border-slate-600'
+                : 'bg-slate-950 text-slate-500 border-slate-800 hover:border-slate-600 hover:text-slate-300'}`}>
+              {p.t}
+              {p.n > 0 && <span className={`ml-1.5 font-mono ${p.urge ? 'text-red-400' : 'text-sky-400'}`}>{p.n}</span>}
+            </button>
+          ))}
+        </div>
+        {avisoTarde && (
+          <div className="mt-3 border border-yellow-700 bg-yellow-950/40 rounded px-3 py-2">
+            <div className="text-[11px] font-bold tracking-widest text-yellow-400 uppercase">
+              ⏰ Antes de cerrar el día
+            </div>
+            <div className="text-[11px] text-slate-300 mt-0.5">
+              Te faltan verificar <b className="text-yellow-400 font-mono">{porVerificar}</b> salida(s):
+              hay que decir si el material se usó bien o mal.
+              {pestana !== 'salidas' && (
+                <button onClick={() => setPestana('salidas')}
+                  className="ml-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-slate-800 text-yellow-400 border border-yellow-700 hover:bg-slate-700">
+                  Ir a Salidas
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        <div className="mt-3"><Aviso msg={aviso} /></div>
+      </div>
+
+      {pestana === 'recepcion' && (
+      <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
+        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Recepción de materiales · {proy}</div>
+        {porRecibir.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Nada por recibir en {proy}. Los ítems aparecen aquí cuando Compras los aprueba.</div>
         ) : (
           <div className="overflow-x-auto">
@@ -300,7 +464,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
                 : ['RQ', 'Descripción', 'Pedido', 'Recibido', 'Falta', 'Estado', 'Cant. que llega', 'Observaciones', '']
               ).map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {porRecibir.map(i => {
+                {porRecibirMostrar.map(i => {
                   const f = getF(i.id);
                   const fc = factorMap[i.cod];
                   const llega = fc ? (Number(f.cajas) || 0) * (Number(f.upc ?? i.factorCaja ?? fc.factor) || 0) : Number(f.cant);
@@ -350,13 +514,17 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
+        <PieTope mostradas={porRecibirMostrar.length} total={porRecibir.length}
+          abierto={!!sinTope.recepcion} onToggle={() => setSinTope(s => ({ ...s, recepcion: !s.recepcion }))} />
         <div className="mt-3 text-slate-500 text-[11px]">Si la cantidad recibida es menor a la pedida, el ítem pasa a Incompleto automáticamente (visible en Compras y Almacén); al llegar el saldo se registra otra recepción y pasa a Entregado.</div>
       </div>
+      )}
 
       {/* Corregir una cantidad mal digitada. Va en su propio bloque porque
           alcanza también a lo ya Entregado, que sale de la tabla de arriba:
-          justo el caso de digitar 40 donde iba 4 y completar el pedido. */}
-      {!soloVigila && recibidasRecientes.length > 0 && (
+          justo el caso de digitar 40 donde iba 4 y completar el pedido.
+          Acompaña a la recepción en su pestaña: es la misma tarea. */}
+      {pestana === 'recepcion' && !soloVigila && recibidasRecientes.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-1">Recepciones de los últimos {DIAS_CORREGIR} días · corregir</div>
           <div className="text-[11px] text-slate-500 mb-3">Si te equivocaste al digitar una cantidad, corrígela aquí. Se te pedirá el motivo y queda registrado con tu nombre y la fecha: no se borra nada.</div>
@@ -399,14 +567,27 @@ export function Almacen({ user, db, api, obraGlobal }) {
         </div>
       )}
 
+      {pestana === 'stock' && (<>
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-baseline gap-3 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Stock del almacén · {proy}</div>
-          <div className="ml-auto text-right">
-            <div className="text-xl font-bold font-mono text-green-400">S/ {valorizado.toFixed(2)}</div>
-            <div className="text-[9px] text-slate-500 uppercase tracking-widest">
-              valorizado · con IGV{sinPrecio > 0 ? ` · parcial: ${sinPrecio} sin precio` : ''}</div>
-          </div>
+          {/* El valorizado NO se le muestra al almacenero (decision del dueno,
+              30 ago 2026). Su rol no puede leer factura_items -- la RLS de la
+              migracion 13 mantiene el dinero fuera del alcance de almacen y
+              residente, y eso esta bien-- asi que `precioProm` le llega vacio y
+              el numero le salia siempre "S/ 0.00 ... parcial: N sin precio".
+              Un cero que no significa cero: parece que el almacen no vale nada.
+              De las dos salidas posibles --abrir el acceso al dinero a dos roles
+              mas, o quitar el numero-- el dueno eligio quitarlo: el almacenero
+              no necesita saber cuanto vale su stock para hacer su trabajo.
+              Gerencia SI lo ve, y para ella el numero es real. */}
+          {soloVigila && (
+            <div className="ml-auto text-right">
+              <div className="text-xl font-bold font-mono text-green-400">S/ {valorizado.toFixed(2)}</div>
+              <div className="text-[9px] text-slate-500 uppercase tracking-widest">
+                valorizado · con IGV{sinPrecio > 0 ? ` · parcial: ${sinPrecio} sin precio` : ''}</div>
+            </div>
+          )}
         </div>
         {stock.length === 0 ? (
           <div className="text-center py-6 text-slate-500 text-sm">Sin materiales en este almacén. El stock se forma con las recepciones registradas arriba.</div>
@@ -441,12 +622,23 @@ export function Almacen({ user, db, api, obraGlobal }) {
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
                       <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}
-                        {s.reservado > 0 && <div className="text-[9px] text-yellow-400 font-normal">−{s.reservado} pend. aprob.</div>}</td>
+                        {/* Desglosado: una salida sin firmar y un prestamo pedido son dos
+                            conversaciones distintas -- con el residente de esta obra o con
+                            el de la otra. Juntos en un solo numero, el almacenero leia
+                            "-10 pend. aprob." y no sabia a quien ir a buscar. */}
+                        {s.reservado > 0 && (
+                          <div className="text-[9px] text-yellow-400 font-normal leading-tight">−{s.reservado} reservado
+                            <div className="text-slate-500">{[
+                              s.resSalidas > 0 && `${s.resSalidas} en salida sin firmar`,
+                              s.resPrestamos > 0 && `${s.resPrestamos} en préstamo pedido`,
+                            ].filter(Boolean).join(' · ')}</div>
+                          </div>
+                        )}</td>
                       {!soloVigila && (<>
                       <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setS('cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
                         {Number(f.cant) > s.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({s.disponible})</div>}</td>
-                      <td className="py-2 px-1.5"><input value={f.hoja} onChange={e => setS('hoja', e.target.value)} disabled={!esAlm} placeholder="HT-001" className={`w-20 ${inputCls} font-mono`} /></td>
-                      <td className="py-2 px-1.5"><input value={f.zona} onChange={e => setS('zona', e.target.value)} disabled={!esAlm} placeholder="Piso 3 - Dpto 301" className={`w-32 ${inputCls}`} /></td>
+                      <td className="py-2 px-1.5"><input value={f.hoja} onChange={e => setS('hoja', e.target.value)} disabled={!esAlm} placeholder="N° de hoja" className={`w-20 ${inputCls} font-mono`} /></td>
+                      <td className="py-2 px-1.5"><input value={f.zona} onChange={e => setS('zona', e.target.value)} disabled={!esAlm} placeholder="¿En qué zona?" className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5">
                         <button onClick={() => darSalida(s, f)} disabled={!listo} className={btnOk(listo)}>Solicitar aprobación</button></td>
                       </>)}
@@ -457,7 +649,17 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">{soloVigila ? 'Stock = inicial (inventario físico) + recibido − salidas ± préstamos. Lo negativo indica un descuadre que hay que ir a contar.' : 'Toda salida exige N° de hoja de trabajo y zona de trabajo. Stock = inicial (inventario físico) + recibido − salidas ± préstamos.'}</div>
+        {/* El aviso del descuadre estaba SOLO en la version de gerencia -- y
+            quien tiene que ir a contar el estante es el almacenero, que era el
+            unico que no lo leia. Ahora lo ven los dos, y al almacenero se le
+            dice ademas que haga el conteo. */}
+        <div className="mt-3 text-slate-500 text-[11px]">
+          Stock = inicial (inventario físico) + recibido − salidas ± préstamos.
+          {!soloVigila && ' Toda salida exige N° de hoja de trabajo y zona de trabajo.'}
+          {negativos > 0
+            ? <b className="text-red-400"> Hay {negativos} material(es) en negativo: eso es un descuadre real —el sistema dice que salió más de lo que entró— y solo se arregla contando el estante.</b>
+            : ' Un stock negativo indica un descuadre que hay que ir a contar.'}
+        </div>
       </div>
 
       <div className={`bg-slate-900 border rounded-md p-4 mb-3 ${sinMov.length ? 'border-yellow-700' : 'border-slate-800'}`}>
@@ -488,16 +690,19 @@ export function Almacen({ user, db, api, obraGlobal }) {
         )}
         <div className="mt-3 text-slate-500 text-[11px]">Material con stock que no entra ni sale hace más de un mes: capital y espacio inmovilizados. Considera prestarlo a otra obra (queda como deuda) antes de que se vuelva merma.</div>
       </div>
+      </>)}
 
+      {pestana === 'prestamos' && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="flex items-center gap-2 mb-3 flex-wrap">
           <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Préstamos entre almacenes</div>
-          {soloVigila && (
-            <button onClick={() => setVerPres(v => !v)}
-              className="ml-auto px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500">
-              <span className="font-mono font-bold text-purple-400">{presActivos.length}</span>
+          {presCerrados.length > 0 && (
+            <button onClick={() => setVerCerrados(v => !v)}
+              className="ml-auto px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500"
+              title="Devueltos, transferidos, rechazados y anulados. Ya no piden nada a nadie, pero la historia no se borra.">
+              <span className="font-mono font-bold text-slate-400">{presCerrados.length}</span>
               <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
-                activo(s) · {verPres ? '✕ cerrar' : 'ver'}</span>
+                cerrado(s) · {verCerrados ? '✕ ocultar' : 'ver'}</span>
             </button>
           )}
           {presPorLiquidar.length > 0 && (
@@ -522,7 +727,12 @@ export function Almacen({ user, db, api, obraGlobal }) {
         <button onClick={prestar} disabled={!presOk} className={btnOk(!!presOk)}>Solicitar aprobación (origen + destino)</button>
         </>)}
 
-        {(soloVigila ? verPres : presProy.length > 0) && presMostrar.length > 0 && (
+        {presMostrar.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">
+            Ningún préstamo abierto en {proy}.
+            {presCerrados.length > 0 && ` Hay ${presCerrados.length} cerrado(s) archivado(s) arriba.`}
+          </div>
+        ) : (
           <div className="overflow-x-auto mt-4">
             <table className="w-full text-xs">
               <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Origen', 'Destino', 'Aprobación', 'Estado', 'Acción'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
@@ -542,6 +752,23 @@ export function Almacen({ user, db, api, obraGlobal }) {
                       <div className={p.aprobDestino ? 'text-green-400' : 'text-yellow-400'}>{p.aprobDestino ? '✓' : '⋯'} destino{p.aprobDestino ? ` (${p.aprobDestino})` : ''}</div></td>
                     <td className="py-2 px-1.5"><span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${pillEstado(p.estado)}`}>{p.estado}{p.estado === 'Transferido' ? ' al costo' : ''}</span></td>
                     <td className="py-2 px-1.5">
+                      {/* Un prestamo SOLICITADO ya reserva material en el origen
+                          (migracion 73), pero hasta ahora la unica accion en pantalla
+                          era para los 'Prestado'. Si el residente de origen ya firmo,
+                          el prestamo sale de SU bandeja, y si el de destino no firma
+                          nunca, el material se queda reservado indefinidamente sin que
+                          nadie del almacen pueda hacer nada. La base SI permite
+                          Solicitado -> Anulado (migracion 41): faltaba el boton. */}
+                      {esAlm && p.estado === 'Solicitado' && (
+                        <div>
+                          <div className="text-[9px] text-slate-500 leading-tight mb-1">
+                            Esperando la firma de los dos residentes. El material ya está
+                            reservado en {p.origen}: si el préstamo se quedó parado, anúlalo
+                            para liberarlo.
+                          </div>
+                          <AnularBox onConfirm={m => anularPrestamo(p, m)} />
+                        </div>
+                      )}
                       {esAlm && p.estado === 'Prestado' && (
                         <div>
                           <div className="text-[9px] text-slate-500 leading-tight mb-1">
@@ -569,11 +796,29 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
-        <div className="mt-3 text-slate-500 text-[11px]">El préstamo nace "Solicitado" y recién mueve stock cuando lo aprueban los residentes de origen y destino. Ya activo: resta al origen y suma al destino como deuda. "Devuelto" revierte el stock; "Transferir al costo" lo vuelve permanente (gasto al destino). Anular exige motivo y solo procede si el destino no consumió el material.</div>
+        {/* El pie describía "Transferir al costo" como si fuera una opción viva.
+            La migración 74 la deshabilitó durante el piloto, así que mandaba a
+            una puerta tapiada. (Los mensajes de error de la BASE siguen diciendo
+            lo mismo: eso necesita migración y está apuntado en ESTADO.md.) */}
+        <div className="mt-3 text-slate-500 text-[11px]">El préstamo nace "Solicitado" y ya reserva material en el origen, aunque no lo mueve hasta que lo aprueban los residentes de las dos obras. Si se queda parado sin firmar, el almacén puede anularlo y liberar la reserva. Ya activo: resta al origen y suma al destino como deuda. "Devuelto" revierte el stock y solo procede si el destino no lo consumió; si ya lo consumió, el préstamo <b className="text-slate-400">queda abierto a propósito</b> hasta que se liquide entre las empresas — durante el piloto no se transfiere el costo. Anular exige motivo.</div>
       </div>
+      )}
 
+      {pestana === 'salidas' && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4">
-        <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Salidas registradas · {proy} · verificación de uso</div>
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Salidas · {proy} · verificación de uso</div>
+          {salArchivadas.length > 0 && (
+            <button onClick={() => setVerArchivadas(v => !v)}
+              className="ml-auto px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500"
+              title="Ya verificadas, anuladas o rechazadas. No piden nada; la historia no se borra.">
+              <span className="font-mono font-bold text-slate-400">{salArchivadas.length}</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
+                archivada(s) · {verArchivadas ? '✕ ocultar' : 'ver'}</span>
+            </button>
+          )}
+        </div>
+        {esAlm && <div className="text-[11px] text-slate-500 mb-3">Aquí solo lo que falta por verificar. Para registrar una salida nueva, ve a <b className="text-slate-400">Stock</b>: se saca desde la fila del material.</div>}
         {soloVigila && porCausa.length > 0 && (
           <div className="border border-slate-800 rounded p-3 mb-3">
             <div className="text-[10px] font-bold tracking-widest text-red-400 uppercase mb-2">Uso incorrecto · por causa</div>
@@ -601,17 +846,24 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </div>
           </div>
         )}
-        {salidasProy.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Sin salidas registradas en {proy}.</div>
+        {salMostrar.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">
+            {salidasProy.length === 0
+              ? `Sin salidas registradas en ${proy}.`
+              : `Nada por verificar en ${proy}. 👍`}
+            {salArchivadas.length > 0 && salidasProy.length > 0 &&
+              ` Hay ${salArchivadas.length} archivada(s) arriba.`}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Hoja de trabajo', 'Zona', 'Aprobación', 'Uso', 'Acción', ''].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
-                {salidasProy.map(sa => {
+                {salMostrar.map(sa => {
                   const v = verif[sa.n];
+                  const archivada = salidaResuelta(sa);
                   return (
-                    <tr key={sa.n} className={`border-b border-slate-800 align-top ${sa.anulada ? 'opacity-50' : ''}`}>
+                    <tr key={sa.n} className={`border-b border-slate-800 align-top ${sa.anulada ? 'opacity-50' : archivada ? 'opacity-60' : ''}`}>
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{sa.n}</td>
                       <td className="py-2 px-1.5 text-slate-400">{fmt(sa.fecha)}</td>
                       <td className="py-2 px-1.5 text-slate-200">{sa.desc} <span className="text-slate-500">({sa.und})</span>
@@ -628,10 +880,20 @@ export function Almacen({ user, db, api, obraGlobal }) {
                         {sa.anulada ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-800 text-red-300 line-through">Anulada</span>
                         : sa.aprobacion !== 'Aprobada' ? <span className="text-slate-600">—</span>
                         : sa.uso === 'Pendiente' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-yellow-950 text-yellow-400">Pendiente</span>
-                        : sa.uso === 'Correcto' ? <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400">Correcto uso</span>
+                        : sa.uso === 'Correcto' ? <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400">Correcto uso</span>
+                            {soloVigila && <div className="text-[9px] text-slate-500 mt-0.5">verificado {horaTxt(sa.usoEn)}</div>}</div>
                         : <div><span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-red-950 text-red-400">Uso incorrecto</span>
+                            {soloVigila && <div className="text-[9px] text-slate-500 mt-0.5">verificado {horaTxt(sa.usoEn)}</div>}
                             <div className="text-red-400 text-[10px] mt-1">{sa.motivoUso}</div>
-                            {sa.reingresada > 0 && <div className="text-green-400 text-[10px] mt-1">↩ {sa.reingresada} {sa.und} reingresado a stock{sa.reingresoPor ? ` (${sa.reingresoPor})` : ''}</div>}</div>}
+                            {sa.reingresada > 0 && <div className="text-green-400 text-[10px] mt-1">↩ {sa.reingresada} {sa.und} reingresado a stock{sa.reingresoPor ? ` (${sa.reingresoPor})` : ''}
+                              {soloVigila && <span className="text-slate-500"> · {horaTxt(sa.reingresoEn)}</span>}</div>}
+                            {/* Que se vea POR QUÉ salió de la bandeja: sin esto,
+                                una fila archivada con 0 devueltos parece un olvido. */}
+                            {sa.reingresoCerrado && Number(sa.reingresada) < Number(sa.cant) && (
+                              <div className="text-slate-500 text-[10px] mt-1">
+                                ✓ cerrado: no vuelve más ({Number(sa.cant) - Number(sa.reingresada)} {sa.und} sin recuperar)
+                                {soloVigila && sa.reingresoEn && <span> · {horaTxt(sa.reingresoEn)}</span>}</div>
+                            )}</div>}
                       </td>
                       <td className="py-2 px-1.5">
                         {esAlm && !sa.anulada && sa.aprobacion === 'Aprobada' && sa.uso === 'Pendiente' && !v && (
@@ -640,23 +902,82 @@ export function Almacen({ user, db, api, obraGlobal }) {
                             <button onClick={() => setVerif({ ...verif, [sa.n]: { motivo: MOTIVOS_USO[0], otro: '' } })} className={btnRojo}>Uso incorrecto</button>
                           </div>
                         )}
-                        {esAlm && !sa.anulada && sa.uso === 'Incorrecto' && sa.reingresada < sa.cant && (
-                          fReing[sa.n] !== undefined ? (
+                        {/* Uso incorrecto y sin cerrar: hay que decidir el reingreso.
+                            Tres pasos, y el último es la ventana de confirmación —
+                            devolver material MUEVE stock, así que no se dispara con
+                            un solo clic sobre un campo de texto. */}
+                        {esAlm && !sa.anulada && sa.uso === 'Incorrecto' && !sa.reingresoCerrado && sa.reingresada < sa.cant && (
+                          confirmReing && confirmReing.n === sa.n ? (
+                            // PASO 3 · confirmar. Si el reingreso es PARCIAL se
+                            // aprovecha para preguntar lo único que la base no
+                            // puede deducir: si va a volver algo más. El
+                            // almacenero lo sabe ahora; dentro de un mes, no.
+                            <div className="w-52 border border-yellow-700 bg-yellow-950/40 rounded p-2">
+                              <div className="text-[10px] text-slate-200 leading-tight">
+                                ¿Confirmas el reingreso de <b className="text-yellow-400 font-mono">{confirmReing.cant} {sa.und}</b>?
+                              </div>
+                              {Number(confirmReing.cant) + Number(sa.reingresada) < Number(sa.cant) ? (
+                                <>
+                                  {/* NO usar Sí/No aquí. La primera versión preguntaba
+                                      "¿esperas que vuelva algo más?" y ponía [No, esto es
+                                      todo] primero y en VERDE: la pregunta pedía un sí/no
+                                      y el botón destacado decía "No", así que quien iba
+                                      rápido cerraba la HT creyendo que la dejaba abierta.
+                                      Pasó en la prueba del 31 ago. Ahora cada botón dice
+                                      la CONSECUENCIA, no una respuesta. */}
+                                  <div className="text-[9px] text-slate-400 mt-1 leading-tight">
+                                    Vuelven {Number(confirmReing.cant) + Number(sa.reingresada)} de {sa.cant} según esta pantalla.
+                                    Quedarían {Number(sa.cant) - Number(confirmReing.cant) - Number(sa.reingresada)} sin recuperar.
+                                  </div>
+                                  <div className="flex flex-col gap-1 mt-1.5">
+                                    <button onClick={() => reingresar(sa, Number(confirmReing.cant), false)}
+                                      className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-200 border border-slate-500 hover:border-slate-300 text-left">
+                                      ↩ Registrar y DEJAR ABIERTA<br />
+                                      <span className="font-normal normal-case text-slate-400">puede volver más material</span></button>
+                                    <button onClick={() => reingresar(sa, Number(confirmReing.cant), true)}
+                                      className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-orange-300 border border-orange-800 hover:bg-orange-950 text-left">
+                                      ✓ Registrar y CERRAR<br />
+                                      <span className="font-normal normal-case text-orange-200/70">no volverá nada más; sale de la lista</span></button>
+                                  </div>
+                                </>
+                              ) : (
+                                <button onClick={() => reingresar(sa, Number(confirmReing.cant), true)}
+                                  className="mt-1.5 w-full px-2 py-1 rounded text-[9px] font-bold uppercase bg-green-950 text-green-400 border border-green-800 hover:bg-green-900">
+                                  Confirmar · vuelve todo</button>
+                              )}
+                              <button onClick={() => setConfirmReing(null)}
+                                className="mt-1 w-full px-2 py-0.5 rounded text-[9px] text-slate-500 hover:text-slate-200">Cancelar</button>
+                            </div>
+                          ) : fReing[sa.n] !== undefined ? (
+                            // PASO 2 · cuánto vuelve
                             <div className="w-40">
                               <div className="text-[9px] text-slate-400 mb-1">Devolver a stock (máx {sa.cant - sa.reingresada} {sa.und}):</div>
                               <input type="number" min="1" step="any" max={sa.cant - sa.reingresada}
                                 value={fReing[sa.n].cant} onChange={e => setFReing({ ...fReing, [sa.n]: { cant: e.target.value } })}
                                 placeholder="Cantidad" className={`w-full ${inputCls}`} />
                               <div className="flex gap-1 mt-1">
-                                <button onClick={() => reingresar(sa)} disabled={!(Number(fReing[sa.n].cant) > 0 && Number(fReing[sa.n].cant) <= sa.cant - sa.reingresada)}
+                                <button onClick={() => setConfirmReing({ n: sa.n, cant: fReing[sa.n].cant })}
+                                  disabled={!(Number(fReing[sa.n].cant) > 0 && Number(fReing[sa.n].cant) <= sa.cant - sa.reingresada)}
                                   className={`flex-1 ${btnOk(Number(fReing[sa.n].cant) > 0 && Number(fReing[sa.n].cant) <= sa.cant - sa.reingresada)}`}>Reingresar</button>
                                 <button onClick={() => { const f2 = { ...fReing }; delete f2[sa.n]; setFReing(f2); }} className="px-2 py-1 rounded text-[9px] text-slate-500 hover:text-slate-200">✕</button>
                               </div>
                             </div>
                           ) : (
-                            <button onClick={() => setFReing({ ...fReing, [sa.n]: { cant: '' } })}
-                              className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
-                              title="Devolver a stock lo recuperable de esta salida mal usada.">↩ Reingreso</button>
+                            // PASO 1 · ¿hay reingreso o no? Si no lo hay, la HT se
+                            // cierra igual: "no vuelve nada" es una respuesta, y
+                            // hasta ahora no había forma de darla — por eso esas
+                            // filas se quedaban a la vista para siempre.
+                            <div className="w-44">
+                              <div className="text-[9px] text-slate-400 mb-1">¿Vuelve material al almacén?</div>
+                              <div className="flex gap-1">
+                                <button onClick={() => setFReing({ ...fReing, [sa.n]: { cant: '' } })}
+                                  className="flex-1 px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                                  title="Devolver a stock lo recuperable de esta salida mal usada.">Sí</button>
+                                <button onClick={() => reingresar(sa, 0, true)}
+                                  className="flex-1 px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500"
+                                  title="No vuelve nada: la HT se cierra y sale de la lista por verificar. Queda archivada con la hora.">No</button>
+                              </div>
+                            </div>
                           )
                         )}
                         {v && (
@@ -673,15 +994,40 @@ export function Almacen({ user, db, api, obraGlobal }) {
                           </div>
                         )}
                       </td>
-                      <td className="py-2 px-1.5">{esAlm && !sa.anulada && <AnularBox onConfirm={m => anularSalida(sa, m)} />}</td>
+                      {/* ANULAR SOLO ANTES DE VERIFICAR EL USO.
+                          Anular devuelve al stock TODO lo que salió. Si el uso ya
+                          se verificó, ese material se consumió (uso correcto) o se
+                          perdió (uso incorrecto sin recuperar), así que devolverlo
+                          INVENTA existencias: una salida de 10 con 5 recuperados
+                          anulada mete 10 al stock, cinco de ellas inexistentes.
+                          Anular sirve para el error de registro —"esto no salió"—,
+                          y eso se sabe antes de verificar. Después, el camino es
+                          registrar el movimiento que corresponda, no borrar este.
+                          Tampoco se anula una RECHAZADA: nunca movió stock.
+                          OJO: la base todavía lo permite (falta la guarda; anotado
+                          en ESTADO.md como migración pendiente). Esto es solo la
+                          pantalla, y una regla que solo vive en la pantalla se
+                          esquiva. */}
+                      <td className="py-2 px-1.5">
+                        {esAlm && !sa.anulada && sa.aprobacion !== 'Rechazada' && sa.uso === 'Pendiente'
+                          ? <AnularBox onConfirm={m => anularSalida(sa, m)} />
+                          : esAlm && !sa.anulada && sa.uso !== 'Pendiente' && (
+                            <span className="text-[9px] text-slate-600 leading-tight"
+                              title="El uso ya se verificó: anularla devolvería al stock material que se consumió o se perdió. Si hay que corregir algo, se registra el movimiento que toque.">
+                              uso verificado:<br />no se anula</span>
+                          )}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <PieTope mostradas={salMostrar.length} total={salOrden.length}
+              abierto={!!sinTope.salidas} onToggle={() => setSinTope(s => ({ ...s, salidas: !s.salidas }))} />
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

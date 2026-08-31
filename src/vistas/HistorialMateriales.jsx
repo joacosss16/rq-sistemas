@@ -26,12 +26,20 @@ export function HistorialMateriales({ user, db, obraGlobal }) {
     acc[i.cod].total += Number(i.cant);
     acc[i.cod].pedidos.push(i);
     return acc;
-  }, {})).map(g => ({
-    ...g,
-    stock: (esRes || proy !== 'TODOS')
-      ? (((stocks[esRes ? user.proyecto : proy] || {})[g.cod] || {}).cant || 0)
-      : PROYECTOS.reduce((a, [, p]) => a + (((stocks[p] || {})[g.cod] || {}).cant || 0), 0),
-  })).sort((a, b) => b.total - a.total);
+  }, {})).map(g => {
+    // La columna se llama "En almacen ahora", asi que muestra el FISICO -- lo
+    // que esta en el estante. Antes mostraba `cant`, que es el DISPONIBLE y
+    // descuenta las reservas: un material con 100 en el estante y 100
+    // comprometidos por una salida sin firmar salia como "En almacen ahora: 0",
+    // se leia como "no queda nada" y se mandaba comprar. Un numero creible y
+    // falso, justo en la vista con la que se decide comprar por volumen.
+    // El disponible no se pierde: va debajo cuando difiere.
+    const obras = (esRes || proy !== 'TODOS')
+      ? [esRes ? user.proyecto : proy]
+      : PROYECTOS.map(([, p]) => p);
+    const suma = campo => obras.reduce((a, p) => a + (((stocks[p] || {})[g.cod] || {})[campo] || 0), 0);
+    return { ...g, stock: suma('fisico'), disponible: suma('cant') };
+  }).sort((a, b) => b.total - a.total);
 
   // MAS COMPRADOS -- donde negociar por volumen. En multifamiliares el mismo
   // cemento, fierro y porcelanato se compra cientos de veces, piso tras piso:
@@ -127,7 +135,12 @@ export function HistorialMateriales({ user, db, obraGlobal }) {
                         <div className="font-mono text-[10px] text-slate-500">{g.cod}</div></td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{g.pedidos.length}</td>
                       <td className="py-2 px-1.5 font-mono font-bold text-yellow-400">{g.total} {g.und}</td>
-                      <td className={`py-2 px-1.5 font-mono font-bold ${g.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{g.stock}</td>
+                      <td className={`py-2 px-1.5 font-mono font-bold ${g.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{g.stock}
+                    {g.disponible < g.stock && (
+                      <div className="text-[9px] text-yellow-400 font-normal leading-tight"
+                        title="Hay material en el estante que ya está comprometido por salidas sin firmar o préstamos pedidos.">
+                        {g.disponible} disponible</div>
+                    )}</td>
                       <td className="py-2 px-1.5 text-slate-500 text-[10px]">{abierto === g.cod ? '▲ cerrar' : '▼ ver desglose'}</td>
                     </tr>
                     {abierto === g.cod && (

@@ -155,6 +155,14 @@ export function AlertaCerrable({ id, tono = 'rojo', resumen, desaparece = false,
 export function FiltroProyecto({ value, onChange, todos, excluir }) {
   return (
     <select value={value} onChange={e => onChange(e.target.value)} className={inputCls}>
+      {/* Sin opcion vacia, un `value` vacio no casa con ninguna <option> y el
+          navegador pinta LA PRIMERA de la lista: la pantalla dice "2501 ·
+          EMPERATRIZ" mientras el estado sigue vacio, asi que el boton de
+          enviar nunca se habilita y nadie entiende por que. Pasaba al pedir un
+          prestamo, donde el destino arranca sin elegir (QA del 31 ago 2026).
+          Solo aparece cuando de verdad no hay valor: los filtros que siempre
+          tienen obra elegida no cambian. */}
+      {!value && <option value="">— Elegir obra —</option>}
       {todos && <option value="TODOS">Todos los proyectos</option>}
       {PROYECTOS.filter(([c, p]) => p !== excluir).map(([c, p]) => <option key={c} value={p}>{c} · {p}</option>)}
     </select>

@@ -14,6 +14,35 @@ maestro no envejezca con él.
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
 - **77 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
   La 77 (quién contó el efectivo) se corrió el 30 ago.
+- **La 78 está ESCRITA y SIN CORRER** (30-31 ago). Cierra cinco cosas de la
+  auditoría de Almacén: el reingreso lo suma y lo firma el servidor, el uso se
+  verifica una sola vez y solo sobre una salida aprobada, rechazar exige motivo
+  a TODOS los roles (no solo al residente), y **compras deja de poder aprobar
+  salidas y préstamos** (decisión del dueño, 31 ago; conserva la lectura, que
+  la necesita para el consolidado). **El orden importa: primero se corre la
+  migración, DESPUÉS vale el código.** `Almacen.jsx` ya llama a
+  `reingresar_material`, que hasta correrla no existe — el botón "Reingresar"
+  dará error, también en localhost. (Al revés sí es seguro: con la 78 corrida,
+  el código viejo sigue funcionando; la firma se estampa igual.)
+- **La 79 se corrió el 31 ago**: la verificación del uso se cierra y deja la
+  hora. Añade `uso_en`, `reingreso_en` y `reingreso_cerrado` a `salidas`, y
+  `reingresar_material` gana un tercer parámetro (`p_cerrar`); la firma vieja
+  de dos parámetros se borra en la propia migración. Con ella, la tabla de
+  salidas pasa a ser una BANDEJA (solo lo que falta verificar) y lo resuelto se
+  archiva detrás de un contador. El almacenero recibe, a partir de las 16:00,
+  un aviso DENTRO de la aplicación con lo que le falta por verificar — **no es
+  una notificación**: la decisión de que el sistema no manda notificaciones
+  sigue en pie, y el aviso le espera cuando abre en vez de dispararse cuando
+  está en el almacén (que es cuando no lo vería). Las HORAS solo las ve
+  gerencia: son dato de auditoría, y el almacenero es el vigilado.
+  **Con esto se llegó al tope de dos migraciones por sesión (78 y 79).**
+- **La 77 se probó el 31 ago**, a medias y con resultado: el rescate de datos
+  se comportó como prometía (recuperó las 3 jornadas que podía, se abstuvo en
+  las 2 de descuadre), y la firma NO se puede falsear ni con la sesión de
+  gerencia. Falta la prueba real —una jornada nueva con descuadre que enseñe
+  "Arqueo de X · resuelta por Y"—, que **no se puede hacer con los datos
+  actuales**: las entregas de caja nacieron con la migración 38 el 12 ago y
+  cuatro de las cinco rendiciones son anteriores. Hay que fabricarla.
 - **La rama `arqueo-y-reset` tiene 5 commits SIN mergear a main**: el código
   de la 77 (la alerta del arqueo y las dos firmas en pantalla), el reset que
   ahora borra catálogo/proveedores/bancos, el guardián
@@ -80,11 +109,25 @@ Fallos conocidos y sin arreglar, por lo que cuesta que salgan mal:
   la migración 7 promete "vencido bloquea la salida" y esa regla nunca se
   escribió: vive solo en `Almacen.jsx`.
 - **La caducidad no viaja con un préstamo**: material por vencer llega al
-  destino figurando como bueno.
-- **El almacenero ve "S/ 0.00 valorizado"** porque su rol no puede leer
-  `factura_items` (RLS de la migración 13; el residente tampoco). **Decisión
-  del dueño (30 ago): el almacenero NO necesita el valorizado** — se quita el
-  número en vez de abrir el acceso al dinero a dos roles más. Pendiente.
+  destino figurando como bueno. **Y al revés, que no se había visto**: en el
+  ORIGEN la fecha se queda aunque el material se haya ido, porque `cadMin`
+  sale de la recepción y no del stock. Presta lo que está por vencer y el
+  origen se queda con un VENCIDO fantasma de material que ya no tiene. Le da
+  la vuelta a la sugerencia que hace la propia pantalla ("considera prestarlo
+  antes de que se vuelva merma"): prestarlo es lo que borra su fecha.
+- **La alarma de vencido no se apaga nunca en la vista del almacenero**
+  (hallazgo del 30 ago, el más dañino de los tres de caducidad). El arreglo de
+  los lotes con consumo FIFO está en `calcularStocks` —que usa Compras— y NO
+  en `stockDetalleObra`, que es la que alimenta las dos pantallas de almacén:
+  ahí `cadMin` sigue siendo el mínimo pelado de todas las recepciones. Un lote
+  que venció en marzo y se consumió en abril deja el material en **VENCIDO**
+  para siempre, y como "vencido" bloquea el botón, **la salida del material
+  nuevo queda muerta** con el cartel "dar de baja o corregir con Gerencia" —
+  y no hay nada que dar de baja. También infla el contador de vencidos.
+- ~~El almacenero ve "S/ 0.00 valorizado"~~ → **HECHO el 31 ago.** El bloque
+  del valorizado se muestra solo a gerencia (`soloVigila` en `Almacen.jsx`).
+  El almacenero ya no ve un cero que no significa cero; la RLS de la migración
+  13 se queda como está y el dinero no se abre a dos roles más.
 - **"Entrega a tiempo %" y "Holgura promedio" mejoran cuanto peor va**: se
   calculan solo sobre lo ya entregado, así que un material que nunca llega no
   empeora ninguna. Son los indicadores con los que se iba a medir el sistema.
@@ -102,6 +145,88 @@ Fallos conocidos y sin arreglar, por lo que cuesta que salgan mal:
 - **Corregir una recepción** escribe directo a la tabla leyendo el historial de
   la memoria del navegador: dos correcciones simultáneas se pisan (la misma
   carrera que la migración 71 cerró para recepciones). Probabilidad baja.
+  **Ampliado por la auditoría del 30 ago**: además manda la cantidad como
+  TOTAL absoluto, así que si otro registró una recepción entre medias, la
+  corrección la borra. Deja rastro (`{de,a}` en `correcciones`), pero el aviso
+  de pantalla dice el número viejo: quien corrige no se entera. Y permite
+  SUBIR la cantidad, o sea es una segunda puerta de recepción sin el cerrojo
+  de `recibir_material`. La ventana de 7 días es solo de pantalla: un error
+  detectado el día 8 no tiene ningún camino en la aplicación.
+
+**Auditoría de ALMACÉN del 30 ago.** Cinco preguntas al código, 15 hallazgos.
+**El 31 ago se cerró casi todo**: la migración 78 (corrida) se llevó cinco, y
+seis más eran solo código y están arreglados con pruebas (67 en total ahora,
+antes 62). Lo arreglado en código, todo en el commit del 31 ago:
+
+- ✅ **La alarma de vencido que no se apagaba nunca.** `stockDetalleObra` usaba
+  el mínimo histórico de todas las recepciones, así que un lote vencido y ya
+  consumido dejaba el material en VENCIDO para siempre — y como vencido apaga
+  el botón de salida, **el material nuevo no podía salir**. El cálculo por
+  lotes con consumo por orden de llegada se extrajo a `caducidadViva()` y
+  ahora lo usan las dos funciones. De paso se corrigió que `calcularStocks` lo
+  calculaba contra el disponible en vez de contra el estante.
+- ✅ **"En almacén ahora" mostraba el disponible** (`HistorialMateriales.jsx`).
+  Ahora muestra el físico, con el disponible debajo cuando difieren.
+- ✅ **La vista de almacén del residente escondía el reservado**
+  (`AlmacenResidente.jsx`), justo a quien tiene que firmar esas salidas.
+- ✅ **`reservado` mezclaba salidas y préstamos** en un número. Ahora va
+  desglosado (`resSalidas` / `resPrestamos`) y las dos pantallas lo dicen.
+- ✅ **La reserva se contaba en BRUTO** en `stockDetalleObra` y NETA de
+  reingreso en las otras dos fórmulas. Ya coinciden las tres.
+- ✅ **Un préstamo `Solicitado` a medio firmar se atascaba** reservando stock
+  sin que nadie del almacén pudiera anularlo: la base sí lo permitía, faltaba
+  el botón. Ya está, con su aviso propio.
+
+**QA en pantalla del 31 ago (Claude in Chrome, obra MAIA, 4 roles).** Bloques
+A, B, C, E y F completos; el D (aviso de las 16:00) se quedó sin probar porque
+la sesión cerró a las 14:50. La prueba clave —C4, dos pestañas reingresando a
+la vez— **PASÓ**: el total salió 3 y no 2, con el aviso de pantalla
+desactualizada. Comprobado después contra la base: los cuatro caminos de la 79
+quedaron correctos, incluido el de "no vuelve nada" (0 devueltos, cerrado).
+Lo que encontró y ya está arreglado:
+
+- **La pantalla se CONGELABA** (renderer sin responder hasta 30 s, dos veces,
+  sin ningún error de consola). Causa: 309 filas de salidas, cada una con sus
+  inputs y botones. Ahora se pintan 50, las más recientes primero, y el resto
+  a un clic diciendo el total. Igual en Recepción (82). **No se perdió ningún
+  dato en ningún congelamiento**, pero en la máquina de una obra sería peor.
+- **El botón de pedir préstamo no se habilitaba.** No era "hay que tocar el
+  select": `FiltroProyecto` no tenía opción vacía, así que con el destino sin
+  elegir el navegador pintaba la PRIMERA obra mientras el estado seguía vacío.
+  La pantalla mentía sobre lo elegido. Arreglado en `ui.jsx` para todos.
+- **El diálogo del reingreso parcial inducía al error contrario.** Preguntaba
+  "¿esperas que vuelva algo más?" y ponía `[No, esto es todo]` primero y en
+  verde: quien iba rápido cerraba la HT creyendo que la dejaba abierta. Pasó
+  en la prueba, y se vio en los datos. Ahora los botones dicen la consecuencia
+  (DEJAR ABIERTA / CERRAR), no un sí/no.
+- **Los avisos duraban 5 s** y quien probaba concluyó que "no hay
+  confirmación" — el mismo malentendido de los tres botones "muertos" de
+  Compras. Ahora 12 s.
+- **Los placeholders "HT-001" y "Piso 3 - Dpto 301"** se leían como datos ya
+  cargados. Cambiados por "N° de hoja" y "¿En qué zona?".
+
+**Lo que sigue abierto de esa auditoría:**
+
+- **ANULAR UNA SALIDA YA VERIFICADA INFLA EL STOCK** (encontrado por el dueño
+  el 31 ago probando la pantalla, no por el código). Anular devuelve al stock
+  TODO lo que salió; si el uso ya se verificó, ese material se consumió (uso
+  correcto) o se perdió (incorrecto sin recuperar), así que devolverlo inventa
+  existencias — una salida de 10 con 5 recuperados, anulada, mete 10 al stock,
+  cinco inexistentes. **La pantalla ya lo bloquea** (solo se anula con el uso
+  Pendiente, y nunca una Rechazada), pero **la base todavía lo permite**: hay
+  que llevar la guarda a `trg_salida_aprobacion`. Es la primera candidata para
+  la próxima sesión, por delante de las otras tres.
+
+- **Los mensajes mandan a una puerta tapiada.** Al intentar devolver un
+  préstamo consumido, la base dice "corresponde Transferir al costo"
+  (migración 73) y la 69 repite lo mismo — pero la 74 lo bloqueó. El pie de la
+  tabla de préstamos en `Almacen.jsx` también lo sigue explicando como opción
+  viva. El almacenero busca un botón en gris y llama a alguien. Cada vez.
+  **Necesita migración** (los textos viven en funciones de la base).
+- **Corregir una recepción** sigue mandando el total del navegador (ver arriba).
+  **Necesita migración.**
+- **El vencido solo bloquea en pantalla** (ver arriba). **Necesita migración**,
+  y ya se puede escribir: dependía del arreglo de la caducidad, que está hecho.
 
 **Decisiones del dueño, pendientes:**
 - "Transferir al costo" cierra con **una sola firma** cuando la entrada exigió

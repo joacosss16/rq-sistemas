@@ -504,6 +504,12 @@ export default function App() {
       und: s.und || undDe(matMap[s.codigo]), cant: Number(s.cant),
       reingresada: Number(s.cant_reingresada || 0),
       reingresoPor: s.reingreso ? s.reingreso.por : '', fechaReingreso: s.reingreso ? s.reingreso.fecha : '',
+      // Migración 79. `reingresoCerrado` decide si la salida sale de la bandeja
+      // del almacenero: o volvió todo, o él declaró que no volverá más. Las dos
+      // horas son para auditoría — pueden venir vacías en lo anterior a la 79,
+      // y ahí se dice "sin hora registrada" en vez de inventar una.
+      reingresoCerrado: !!s.reingreso_cerrado,
+      usoEn: s.uso_en || '', reingresoEn: s.reingreso_en || '',
       aprobacion: s.aprobacion || 'Aprobada',
       aprobadoPor: usrMap[s.aprobado_por] ? usrMap[s.aprobado_por].nombre : '',
       fechaAprobacion: s.fecha_aprobacion || '', motivoRechazo: s.motivo_rechazo || '',
@@ -794,6 +800,24 @@ export default function App() {
         });
       }, ['salidas']),
       updSalida: (id, patch) => wrap(async () => await supabase.from('salidas').update(patch).eq('id', id), ['salidas']),
+      // Viaja LO QUE VUELVE al almacén, no el total. La suma la hace la base
+      // bloqueando la fila (migración 78): antes esta operación calculaba el
+      // total con el número que tenía en memoria, así que dos personas
+      // devolviendo material de la misma salida se pisaban y lo del primero
+      // desaparecía sin error ni rastro. Es lo mismo que la migración 71 hizo
+      // con la recepción.
+      // La firma —quién devolvió y cuándo— ya no se manda: la estampa la base,
+      // igual que la de la anulación. Un dato que el cliente escribe no es una
+      // firma, y el reingreso MUEVE inventario.
+      // `cerrar` = el almacenero declara que no espera que vuelva más material
+      // (migración 79). Es lo que saca la salida de su bandeja de verificación,
+      // y por eso lo decide una persona y no una deducción: cuando registra que
+      // vuelven 3 de 10, él ya sabe si el resto está en obra o se perdió.
+      // Con cant = 0 y cerrar = true se declara que no volverá nada.
+      reingresar: (salida, cant, cerrar = false) => wrap(async () =>
+        await supabase.rpc('reingresar_material', {
+          p_salida: salida.id, p_cant: Number(cant), p_cerrar: !!cerrar,
+        }), ['salidas']),
       prestar: ({ origen, destino, cod: codigo, cant }) => wrap(async () => {
         const u = (await supabase.auth.getUser()).data.user;
         return await supabase.from('prestamos').insert({

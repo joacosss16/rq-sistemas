@@ -30,7 +30,21 @@ export function AlmacenResidente({ user, db }) {
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.recibido}</td>
                       <td className="py-2 px-1.5 font-mono text-slate-300">{s.salido}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.prestNeto < 0 ? 'text-purple-400' : s.prestNeto > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.prestNeto > 0 ? '+' + s.prestNeto : s.prestNeto}</td>
-                      <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}</td>
+                      {/* El reservado tambien aqui. Esta vista prometia "la misma foto
+                          que ve su almacenero" y se dejaba fuera justo esta linea: el
+                          residente leia "Stock 100" sin saber que 80 estaban
+                          comprometidos por una salida que el mismo tenia sin firmar en
+                          su otra pestana. Es la persona que mas necesita el dato y era
+                          la unica que no lo veia. */}
+                      <td className={`py-2 px-1.5 font-mono font-bold ${s.stock > 0 ? 'text-green-400' : 'text-slate-500'}`}>{s.stock}
+                        {s.reservado > 0 && (
+                          <div className="text-[9px] text-yellow-400 font-normal leading-tight">−{s.reservado} reservado
+                            <div className="text-slate-500">{[
+                              s.resSalidas > 0 && `${s.resSalidas} en salida que te toca firmar`,
+                              s.resPrestamos > 0 && `${s.resPrestamos} en préstamo pedido`,
+                            ].filter(Boolean).join(' · ')}</div>
+                          </div>
+                        )}</td>
                     </tr>
                   );
                 })}

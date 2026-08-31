@@ -47,7 +47,7 @@ npm install          # una vez
 npm run dev          # desarrollo, en localhost:5173
 npm run build        # compila a dist/
 npm run preview      # sirve lo compilado en localhost:4173 (para probar de verdad)
-npm test             # 62 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
+npm test             # 67 pruebas de la lógica pura (caja, fechas, stock, pago, búsqueda)
 ```
 
 **Las migraciones NO se corren solas.** Hay que abrir el archivo
@@ -237,7 +237,7 @@ Las reglas que protegen dinero e inventario viven en `supabase/migrations/`
 facilita y avisa; **la base exige**. Cada vez que se descubre una regla que
 solo vivía en el navegador se baja a la base, porque el navegador corre en la
 máquina del usuario y se puede esquivar. La aplicación está en `src/` (16
-vistas en `src/vistas/`, lógica compartida en ocho módulos); las 62 pruebas en
+vistas en `src/vistas/`, lógica compartida en ocho módulos); las 67 pruebas en
 `test/`; los documentos en `docs/`.
 
 ## Reglas para trabajar en este repo

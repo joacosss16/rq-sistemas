@@ -156,6 +156,19 @@ prueba('la caducidad guardada es la MÁS PRÓXIMA de lo recibido', () => {
   igual(calcularStocks(db).MAIA['020101'].cadMin, '2026-09-01', 'la más próxima');
 });
 
+prueba('la caducidad mira EL ESTANTE, no el disponible', () => {
+  // Una reserva no consume nada: el material sigue ahí. Antes se calculaba
+  // contra el disponible, así que una salida sin firmar "consumía" el lote
+  // viejo y apagaba el aviso de un material que seguía vencido en el estante.
+  const db = base();
+  db.rqs.push({ proyecto: 'MAIA', items: [
+    { decision: 'Aprobado', cod: '020101', cantRecibida: 5, fechaCaducidad: desplazado(-10), fechaEntrega: '2026-01-01' },
+    { decision: 'Aprobado', cod: '020101', cantRecibida: 5, fechaCaducidad: desplazado(90), fechaEntrega: '2026-06-01' },
+  ] });
+  db.salidas.push({ proyecto: 'MAIA', cod: '020101', cant: 5, anulada: false, aprobacion: 'Pendiente' });
+  igual(calcularStocks(db).MAIA['020101'].cadMin, desplazado(-10), 'sigue vencido: lo reservado no se ha ido a ningún sitio');
+});
+
 console.log('\nDETALLE POR OBRA (stockDetalleObra)\n');
 
 prueba('la salida Pendiente reserva pero NO descuenta: stock igual, disponible menos', () => {
@@ -193,6 +206,68 @@ prueba('cada obra ve solo lo suyo', () => {
   db.stockInicial.push({ proyecto: 'LUZ', cod: '020202', desc: 'CEMENTO', und: 'BLS', cant: 7 });
   igual(stockDetalleObra(db, 'MAIA').length, 1, 'MAIA no ve LUZ');
   igual(stockDetalleObra(db, 'MAIA')[0].cod, '010101', 'y ve lo propio');
+});
+
+// ---- La alarma de caducidad que no se apagaba nunca ----
+// `calcularStocks` (la que mira Compras) ya llevaba lotes con consumo por
+// orden de llegada; `stockDetalleObra` —la que mira el ALMACENERO, que es
+// quien decide si el material sale— se había quedado con el mínimo histórico
+// pelado. Como "vencido" apaga el botón de dar salida, el efecto era que el
+// material NUEVO no podía salir, con un cartel que mandaba a darlo de baja
+// cuando no quedaba nada que dar de baja.
+prueba('un lote vencido y YA CONSUMIDO no marca el material como vencido', () => {
+  const db = base();
+  db.rqs.push({ proyecto: 'MAIA', items: [
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 10, fechaCaducidad: desplazado(-40), fechaEntrega: '2026-01-01' },
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 10, fechaCaducidad: desplazado(60), fechaEntrega: '2026-06-01' },
+  ] });
+  // Salieron 10: por orden de llegada, el lote viejo se fue entero.
+  db.salidas.push({ proyecto: 'MAIA', cod: '020101', desc: 'CEMENTO', und: 'BLS', cant: 10, anulada: false, aprobacion: 'Aprobada' });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.stock, 10, 'quedan los 10 del lote bueno');
+  igual(f.cadMin, desplazado(60), 'la caducidad es la del lote VIVO, no la del que ya se gastó');
+  if (estadoCaducidad(f.cadMin).k === 'VENCIDO') throw new Error('material sano figurando como vencido: la salida quedaría bloqueada');
+});
+
+prueba('pero mientras el lote vencido SIGUE en el estante, el material sí está vencido', () => {
+  // La otra mitad, y es la que importa no romper: apagar la alarma de más
+  // sería peor que el fallo original.
+  const db = base();
+  db.rqs.push({ proyecto: 'MAIA', items: [
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 10, fechaCaducidad: desplazado(-40), fechaEntrega: '2026-01-01' },
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 10, fechaCaducidad: desplazado(60), fechaEntrega: '2026-06-01' },
+  ] });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.cadMin, desplazado(-40), 'nadie lo ha consumido: sigue siendo el lote vencido el que manda');
+  igual(estadoCaducidad(f.cadMin).k, 'VENCIDO', 'y la salida debe seguir bloqueada');
+});
+
+prueba('el reservado se desglosa: salida sin firmar y préstamo pedido, por separado', () => {
+  // Mezclados en un solo número, el almacenero leía "−10 pend. aprob." y no
+  // sabía a quién ir a buscar: al residente de su obra o al de la otra.
+  const db = base();
+  db.stockInicial.push({ proyecto: 'MAIA', cod: '010101', desc: 'ALAMBRE', und: 'KG', cant: 20 });
+  db.salidas.push({ proyecto: 'MAIA', cod: '010101', desc: 'ALAMBRE', und: 'KG', cant: 4, anulada: false, aprobacion: 'Pendiente' });
+  db.prestamos.push({ estado: 'Solicitado', origen: 'MAIA', destino: 'LUZ', cod: '010101', desc: 'ALAMBRE', und: 'KG', cant: 6 });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.resSalidas, 4, 'la salida esperando la firma del residente');
+  igual(f.resPrestamos, 6, 'el préstamo esperando las dos firmas');
+  igual(f.reservado, 10, 'el total sigue existiendo para quien solo quiera la suma');
+  igual(f.stock, 20, 'nada se ha movido del estante');
+  igual(f.disponible, 10, 'pero solo se puede disponer de 10');
+});
+
+prueba('el reservado de una salida pendiente es NETO del reingreso, como en la base', () => {
+  // Aquí se contaba en BRUTO. Las tres fórmulas que deben dar el mismo número
+  // —esta, calcularStocks y el stock() de Postgres— dejaban de coincidir en
+  // cuanto una salida sin firmar tenía material devuelto.
+  const db = base();
+  db.stockInicial.push({ proyecto: 'MAIA', cod: '010101', desc: 'ALAMBRE', und: 'KG', cant: 20 });
+  db.salidas.push({ proyecto: 'MAIA', cod: '010101', desc: 'ALAMBRE', und: 'KG', cant: 8, reingresada: 3, anulada: false, aprobacion: 'Pendiente' });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.reservado, 5, '8 salieron, 3 volvieron');
+  igual(f.disponible, 15, 'lo que de verdad se puede disponer');
+  igual(calcularStocks(db).MAIA['010101'].cant, 15, 'y las dos funciones dan el MISMO número');
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} fallas\n`);
