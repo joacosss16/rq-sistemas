@@ -42,15 +42,79 @@ restart identity cascade;
 -- trabajo, y el catálogo sobrevive al reset igual que ellos.
 delete from public.alertas_levantadas where clave not like 'dup:%';
 
--- 2) Materiales creados DURANTE las pruebas (aprobaciones de ensayo).
---    El catálogo seed se cargó en un solo lote: todo lo posterior a
---    esa primera hora es de prueba.
-delete from public.materiales
- where creado_en > (select min(creado_en) + interval '1 hour' from public.materiales);
+--    ⚠ OJO CON ESTO AHORA QUE EL CATÁLOGO SE REEMPLAZA ENTERO (paso 2).
+--    Esas claves `dup:` son pares de códigos que Lucía revisó y marcó "no son
+--    duplicados". Se guardaron mirando el catálogo VIEJO. Si el archivo nuevo
+--    reutiliza los mismos códigos para los mismos materiales, la curaduría
+--    sigue valiendo y conservarla ahorra todo ese trabajo. Si los códigos
+--    cambiaron, una clave vieja **silencia una alerta que hoy sí importa** — y
+--    la alerta más peligrosa es la que nadie llega a ver.
+--    Si hay duda, borrarlas también y que Lucía las repase sobre el catálogo
+--    nuevo:  delete from public.alertas_levantadas;
 
--- 3) Proveedor insertado por el harness de pruebas
---    (SANICENTER volverá con el seed real de los 255 proveedores)
-delete from public.proveedores where ruc = '20138651917';
+-- 2) TODO el catálogo de materiales.
+--    Antes se borraba solo lo creado más de una hora después de la carga
+--    original ("todo lo posterior es de prueba"). Esa regla tenía una víctima
+--    silenciosa: **cualquier material legítimo que Lucía diera de alta después
+--    también se iba**, y con él su unidad, su familia y su equivalencia de
+--    caja. Nadie se enteraba hasta echarlo en falta.
+--
+--    **Decisión del dueño (30 ago 2026): se carga el catálogo NUEVO completo
+--    después del reset.** Con eso, conservar el viejo a medias no sirve de
+--    nada: se borra entero y entra una sola carga limpia.
+--
+--    Es seguro en este punto y no antes: las cinco tablas que apuntan a un
+--    código de material —rq_items, salidas, prestamos, stock_inicial y
+--    solicitudes_material— acaban de vaciarse en el truncate de arriba. Si se
+--    corriera esta línea suelta, la clave ajena lo impediría.
+--
+--    NO se tocan las `familias` (58): son la estructura del código de 6
+--    dígitos, no el catálogo. Si el archivo nuevo trae familias distintas,
+--    hay que cargarlas ANTES que los materiales, porque cada material apunta
+--    a la suya.
+delete from public.materiales;
+
+-- 3) TODOS los proveedores.
+--    Antes solo se borraba el del harness de pruebas (RUC 20138651917) y los
+--    demás sobrevivían, porque la idea era cargar los 255 reales ANTES del
+--    reset. **Decisión del dueño (30 ago 2026): primero el reset, y recién
+--    entonces se carga todo.** Con ese orden, dejar proveedores vivos solo
+--    sirve para arrastrar basura.
+--
+--    Y había basura de verdad: al facturar, los proveedores nuevos SE DAN DE
+--    ALTA SOLOS (migración 13). Cada prueba de Lucía o de Frank dejó uno. No
+--    hay forma de distinguirlos de los buenos por fecha ni por nombre, porque
+--    nacen igual. Borrarlos todos y cargar los 255 de una vez es la única
+--    manera de que el maestro empiece limpio.
+--
+--    Ojo al orden: esto va DESPUÉS del truncate de facturas, o la clave ajena
+--    lo impide.
+delete from public.proveedores;
+
+-- 4) BANCOS DE PRUEBA. Los cinco de la migración 10 son INVENTADOS
+--    (191-1111111-0-11, 0011-0222-0200333, 200-3000444555…) y hasta hoy
+--    sobrevivían al borrado, así que Pagos los mostraba como buenos.
+--
+--    Y es peor que un dato feo: la guarda de la migración 70 exige que
+--    el pago use el banco de la obra, o sea que estaba OBLIGANDO a pagar
+--    contra una cuenta que no existe. Ese banco queda además CONGELADO
+--    dentro de cada factura al pagarla, y es justo lo que Auditoría
+--    cruza después contra el extracto del banco.
+--
+--    Se borran por su número exacto, no la tabla entera: si las cuentas
+--    reales ya estuvieran cargadas, este script no las toca. Mismo
+--    criterio que el proveedor de prueba de arriba.
+--
+--    AL QUEDAR LA OBRA SIN CUENTA, EL SISTEMA EXIGE LA REAL POR SÍ SOLO:
+--    Pagos no deja registrar el pago ("esta obra no tiene cuenta
+--    configurada · no se puede pagar") hasta que se cargue. Es el fallo
+--    ruidoso que se quiere: mejor no poder pagar que pagar contra una
+--    ficción. Y para comprobarlo antes de que se entere el usuario, el
+--    guardián está en `supabase/verificar_datos_reales.sql`, que hay
+--    que correr DESPUÉS de cargar las cuentas del paso (a).
+delete from public.proyectos_banco
+ where nro_cuenta in ('191-1111111-0-11', '0011-0222-0200333',
+                      '200-3000444555', '000-5566777', '191-8888888-0-88');
 
 -- ============================================================
 -- PASOS MANUALES QUE ESTE SCRIPT NO HACE (datos de prueba que se
@@ -58,16 +122,16 @@ delete from public.proveedores where ruc = '20138651917';
 -- a) BANCOS REALES por obra. OJO: desde la migración 32 los datos
 --    bancarios YA NO viven en `proyectos` sino en `proyectos_banco`
 --    (tabla cerrada a gerencia y pagos). Escribir en la tabla vieja
---    NO tiene ningún efecto: Pagos seguiría usando los datos falsos
---    de prueba y los grabaría dentro de cada factura al pagarla,
---    donde quedan congelados. Usar SIEMPRE esta forma:
+--    NO tiene ningún efecto: la obra se queda sin cuenta y Pagos no
+--    la deja pagar. Usar SIEMPRE esta forma:
 --    insert into public.proyectos_banco (codigo, banco, nro_cuenta)
 --    values ('2503', '<banco real>', '<cuenta real>')
 --    on conflict (codigo) do update
 --       set banco = excluded.banco, nro_cuenta = excluded.nro_cuenta;
 --    (una línea por obra: 2501, 2502, 2503, 2504, 2601)
---    Comprobar después que no quede ninguna cuenta de prueba:
---    select * from public.proyectos_banco order by codigo;
+--    El paso 4 del borrado ya se llevó las cinco cuentas de prueba,
+--    así que cada obra queda SIN cuenta hasta que se cargue la real.
+--    Comprobarlo corriendo aparte: supabase/verificar_datos_reales.sql
 -- b) cajas_chicas.tolerancia -> confirmar la tolerancia REAL del arqueo
 --    por obra: update public.cajas_chicas set tolerancia=<real> where proyecto='2503';
 --    (monto_fondo quedó OBSOLETA con la migración 38: la caja chica ya no
@@ -83,9 +147,10 @@ delete from public.proveedores where ruc = '20138651917';
 --    revisa/ajusta desde la vista Catálogo (checkbox por material).
 -- ============================================================
 
--- Verificación tras ejecutar. Todo lo de movimiento en 0, y el catálogo
--- intacto. Si alguna de las de arriba no da 0, quedó una tabla fuera del
--- borrado: buscarla antes de cargar un solo dato real.
+-- Verificación tras ejecutar. TODO en 0 menos las familias: desde el 30 de
+-- agosto el catálogo, los proveedores y los bancos también se borran, porque
+-- se cargan enteros y nuevos justo después. Si algo no da 0, quedó una tabla
+-- fuera del borrado: buscarla antes de cargar un solo dato real.
 --
 --   select 'rqs' t, count(*) from public.rqs
 --   union all select 'rq_items',             count(*) from public.rq_items
@@ -98,6 +163,8 @@ delete from public.proveedores where ruc = '20138651917';
 --   union all select 'alertas (solo dup:)',   count(*) from public.alertas_levantadas where clave not like 'dup:%'
 --   union all select 'solicitudes_material', count(*) from public.solicitudes_material
 --   union all select 'stock_inicial',        count(*) from public.stock_inicial
---   union all select 'materiales (=1740)',   count(*) from public.materiales
+--   union all select 'materiales (=0)',      count(*) from public.materiales
 --   union all select 'proveedores (=0)',     count(*) from public.proveedores
+--   union all select 'familias (=58)',      count(*) from public.familias
+--   union all select 'bancos de prueba (=0)', count(*) from public.proyectos_banco where nro_cuenta in ('191-1111111-0-11','0011-0222-0200333','200-3000444555','000-5566777','191-8888888-0-88')
 --   order by 1;
