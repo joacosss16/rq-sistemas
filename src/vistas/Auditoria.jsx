@@ -156,16 +156,25 @@ export function Auditoria({ user, db, api }) {
     // Sin separación de funciones: la misma persona puso el efectivo en manos
     // del comprador y después contó y aprobó lo que devolvió. No se puede
     // evitar con una sola persona de administración, pero sí se puede mirar.
-    const mismaMano = rendiciones.filter(r => r.estado === 'Aprobada' && r.aprobadoPor)
+    //
+    // Mira arqueoPor —quien CONTO el efectivo— y no aprobadoPor. Hasta la
+    // migración 77 miraba aprobadoPor, y eso apagaba la alerta justo en los
+    // días con descuadre: gerencia resuelve la diferencia, su nombre pisa el
+    // de administración, la comparación da falso y no saltaba nada. El control
+    // callado precisamente los días en que el efectivo no cuadró.
+    //
+    // Y sin filtrar por estado: el arqueo ya ocurrió aunque la jornada siga
+    // 'Con diferencia' esperando a gerencia. Ahí el dato importa más, no menos.
+    const mismaMano = rendiciones.filter(r => r.arqueoPor)
       .map(r => ({ r, ents: entregas.filter(e => !e.anulMotivo
-        && e.proyecto === r.proyecto && e.fecha === r.fecha && e.entregadoPor === r.aprobadoPor) }))
+        && e.proyecto === r.proyecto && e.fecha === r.fecha && e.entregadoPor === r.arqueoPor) }))
       .filter(x => x.ents.length > 0);
     if (mismaMano.length) {
-      const quien = [...new Set(mismaMano.map(x => x.r.aprobadoPor))].join(', ');
+      const quien = [...new Set(mismaMano.map(x => x.r.arqueoPor))].join(', ');
       const monto = mismaMano.reduce((a, x) => a + x.ents.reduce((b, e) => b + e.monto, 0), 0);
       alertas.push({
         clave: `misma-mano:${mismaMano.length}:${monto.toFixed(2)}`,
-        tipo: 'Entregó y aprobó la misma persona',
+        tipo: 'Entregó y arqueó la misma persona',
         detalle: `${quien}: en ${mismaMano.length} jornada(s) entregó el efectivo (S/ ${monto.toFixed(2)}) y además cerró el arqueo de ese día. Es lo esperable con una sola persona de administración; conviene revisar el arqueo de esos días con más detalle.`,
       });
     }

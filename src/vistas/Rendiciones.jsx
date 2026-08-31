@@ -336,7 +336,14 @@ export function Rendiciones({ user, db, api, obraGlobal }) {
                 {/* Ya no se habla de reposición: con el modelo de entregas (mig. 38)
                     el comprador devuelve el vuelto y no hay fondo que reponer. Las
                     rendiciones viejas sí conservan su reposición y se siguen viendo. */}
-                Aprobada por {r.aprobadoPor} el {fmt(r.fechaAprobacion)}
+                {/* Dos firmas, no una (migración 77). En un día que cuadra son la
+                    misma persona y se dice una sola vez. En un día con descuadre
+                    quien cuenta el efectivo es administración y quien da el visto
+                    bueno es gerencia: escribir solo "aprobada por gerencia" borraba
+                    de la vista que el arqueo lo hizo administración. */}
+                {r.arqueoPor && r.arqueoPor !== r.aprobadoPor
+                  ? <>Arqueo de {r.arqueoPor} · resuelta por {r.aprobadoPor} el {fmt(r.fechaAprobacion)}</>
+                  : <>Aprobada por {r.aprobadoPor || r.arqueoPor} el {fmt(r.fechaAprobacion)}</>}
                 {r.repOp && ` · repuesta (modelo anterior): ${[(bancoDe[r.proyecto] || {}).banco, `op. ${r.repOp}`].filter(Boolean).join(' ')} (${fmt(r.repFecha)}, ${r.repuestoPor})`}
               </div>
             )}

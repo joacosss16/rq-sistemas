@@ -455,6 +455,11 @@ export default function App() {
       responsable: usrMap[r.responsable_id] ? usrMap[r.responsable_id].nombre : '',
       montoFondo: Number(r.monto_fondo), estado: r.estado, observacion: r.observacion || '',
       aprobadoPor: usrMap[r.aprobado_por] ? usrMap[r.aprobado_por].nombre : '',
+      // Quien CONTO el efectivo, que no es lo mismo que quien dio el visto
+      // bueno final (migracion 77). En un dia con descuadre resuelve gerencia
+      // y aprobadoPor pasa a ser gerencia; arqueoPor sigue siendo quien conto.
+      // De este dato depende la alerta de Auditoria.
+      arqueoPor: usrMap[r.arqueo_por] ? usrMap[r.arqueo_por].nombre : '',
       fechaAprobacion: r.fecha_aprobacion || '', repOp: r.reposicion_operacion || '',
       repFecha: r.reposicion_fecha || '', repuestoPor: usrMap[r.repuesto_por] ? usrMap[r.repuesto_por].nombre : '',
       // corrección hecha por administración (la ve gerencia, migración 26)
