@@ -93,7 +93,7 @@ mencionan en varios sitios pero **todavía no están copiados**).
 1. Residente crea RQ (proyecto fijo por login, partida auto-prefijada con código de obra, fecha necesitada ≥ hoy obligatoria, destino detallado obligatorio, color opcional con nota "dejar vacío si no aplica"). Al enviar se genera PDF formal (réplica de la HOJA RQ con membrete y bloque de 4 firmas: Residente → V°B° Gerente de Operaciones → Recepción en obra → Entregado por). El PDF también se puede regenerar desde "Mis requerimientos" y desde Compras (clic en RQ-xxx).
 2. Compras decide: **Aprobar / Rechazar (motivo obligatorio, se comunica al residente, cierra el ítem)**. La decisión es PASO PREVIO separado del estado logístico.
 3. Aprobado → estado logístico: — / Comprado / Entregado / Incompleto. "Comprado" lo marca Compras o el comprador (Frank) al comprar o recoger el ítem, con botón por ítem (migración 15, reemplaza al antiguo "En camino"); visible para todo el equipo. Entregado/Incompleto los fija el almacén al recibir. Pago: — / Pagado / Crédito / Falta.
-4. **Facturación y pago separados** (desde jul 2026): Compras registra la factura completa — serie, proveedor (maestro con RUC; los nuevos se agregan solos), RUC 11 dígitos, fecha, monto total, forma de pago, y **desglose de precio unitario por ítem** (la suma debe cuadrar con el total; trigger lo valida, tolerancia S/ 0.50). **Una factura puede cubrir varios ítems** del mismo proyecto. Duplicados serie+RUC bloqueados. **Compromiso de crédito** (migración 14): si el proveedor da crédito y emite la factura recién al pagar, Compras marca "SIN factura aún" — serie interna CRED-#### automática, forma fija Crédito, nunca efectivo; la deuda es visible en Pagos/KPIs desde el día 1, y Pagos NO puede marcar Pagada sin digitar la serie real (el compromiso se convierte en factura; trigger lo exige). El **pago lo ejecuta el rol `pagos`** en su propia vista: banco + N° de operación + fecha, filtrable por proyecto (cada obra su cuenta). El estado de pago vive en la FACTURA; los ítems lo heredan: sin factura "—", factura pendiente a crédito "Crédito", pendiente contado "Falta", pagada "Pagado". Factura pagada queda congelada (trigger).
+4. **Facturación y pago separados** (desde jul 2026): Compras registra la factura completa — serie, proveedor (maestro con RUC; los nuevos se agregan solos), RUC 11 dígitos, fecha, monto total, forma de pago, y **desglose de precio unitario por ítem** (la suma debe cuadrar con el total; trigger lo valida, tolerancia S/ 0.50). **Una factura puede cubrir varios ítems** del mismo proyecto. Duplicados serie+RUC bloqueados. **Compromiso de crédito** (migración 14): si el proveedor da crédito y emite la factura recién al pagar, Compras marca "SIN factura aún" — serie interna CRED-#### automática, forma fija Crédito, nunca efectivo; la deuda es visible en Pagos/KPIs desde el día 1, y Pagos NO puede marcar Pagada sin digitar la serie real (el compromiso se convierte en factura; trigger lo exige). El **pago lo ejecuta Mónica** (rol `administracion`; el rol `pagos` está dormido, migración 47) en la vista de Pagos: banco + N° de operación + fecha, filtrable por proyecto (cada obra su cuenta). El estado de pago vive en la FACTURA; los ítems lo heredan: sin factura "—", factura pendiente a crédito "Crédito", pendiente contado "Falta", pagada "Pagado". Factura pagada queda congelada (trigger).
 5. Almacén recibe: solo cantidad + observaciones. Parcial → Incompleto automático (visible en Compras y Almacén); al llegar el saldo se registra otra recepción → Entregado. **Sobre-recepción bloqueada** (no se puede recibir más de lo pedido; si el proveedor entregó de más, se corrige con Compras).
 6. Ítem Entregado + Pagado → se CIERRA (sale de la vista de Compras, queda solo en Tablero).
 7. Salidas de almacén: exigen N° de hoja de trabajo + zona de trabajo; no exceden stock. **Aprobación del residente** (migración 18): la salida nace "Pendiente" y NO descuenta stock (solo lo reserva) hasta que el residente de la obra la aprueba o rechaza con motivo; el almacenero ve el botón pasar a verde "Salida aprobada". Recién aprobada admite verificación de uso: Correcto / Incorrecto (motivos: No se completó el trabajo / Se encontró botado / Uso inadecuado / Otro con texto obligatorio). Reingreso a stock desde una salida de uso incorrecto (migración 17). Anular restaura stock completo.
@@ -110,9 +110,9 @@ stock = recibido − salidas (no anuladas) ± préstamos netos (activos). Por al
 - `compras` (Lucía Arana) → Compras + Catálogo + Tablero
 - `residente.danaus` (Andrés Chino), `residente.maia` (Edwin Salas) → solo su vista; proyecto y nombre fijos (no puede pedir para otra obra)
 - `almacen.luz` (Brayan Huamán), `almacen.maia` (Anton Taucca) → solo su almacén, sin selector de proyecto
-- `pagos` (área de pagos) → solo vista Pagos: ejecuta el pago de facturas por medio (Transferencia/Cheque/Tarjeta; banco fijo según la obra) + reposiciones de caja chica; no edita datos comerciales
-- `administracion` (Mónica Del Castillo) → solo vista Rendiciones: aprueba/observa la rendición diaria de caja chica
-- Caja chica (**NO es un fondo fijo** — corregido por el dueño el 12 ago 2026, migración 38): el efectivo que necesita el comprador depende del día, y Pagos le **entrega** dinero una o varias veces la misma jornada (transferencia, efectivo o cheque), cada entrega en `entregas_caja` con su N° de operación. **La jornada la abre la ENTREGA, no la compra** (migración 48): si se le entrega dinero un día en que no compra nada, la rendición se crea igual, o ese efectivo quedaría sin ningún sitio donde constar que lo devolvió. Al cerrar el día devuelve el vuelto y al siguiente empieza en cero. Frank (rol `comprador`) compra con efectivo; la factura en efectivo nace Pagada contra la rendición del día (única por obra+fecha); administración la cierra con arqueo. **Fórmula: debe quedar = Σ entregas − Σ gastado (sin las anuladas); diferencia = contado − debe quedar.** `cajas_chicas.monto_fondo` y `rendiciones.monto_fondo` quedaron obsoletas; `cajas_chicas.tolerancia` sigue vigente. Bancos por obra en la tabla `proyectos_banco` (migración 32; salió de `proyectos` porque esa la leen los 7 roles para el nombre de la obra y las cuentas quedaban expuestas). Solo la leen gerencia y pagos. **Al abrir una obra nueva hay que cargarle ahí su cuenta, o Pagos no podrá pagarla.** Datos de prueba hasta tener los reales.
+- `pagos` → **rol DORMIDO, sin usuario y a propósito** (migración 47, decisión del dueño): en una empresa de este tamaño no hay dos personas de administración, y fingir que las hay produce cuentas compartidas, que es peor. Se queda en el sistema para el día que exista tesorería, y ese día se separa sin tocar una línea de código.
+- `administracion` (Mónica Del Castillo) → Rendiciones **y Pagos**. Aprueba/observa la rendición diaria de caja chica, entrega el efectivo al comprador y ejecuta el pago de facturas por medio (Transferencia/Cheque/Tarjeta; banco fijo según la obra). No edita datos comerciales. **Tiene el circuito del dinero completo en una mano**: el control que lo compensa es la alerta de Auditoría "Entregó y arqueó la misma persona" (migraciones 47 y 77) — no bloquea, hace visible.
+- Caja chica (**NO es un fondo fijo** — corregido por el dueño el 12 ago 2026, migración 38): el efectivo que necesita el comprador depende del día, y Pagos le **entrega** dinero una o varias veces la misma jornada (transferencia, efectivo o cheque), cada entrega en `entregas_caja` con su N° de operación. **La jornada la abre la ENTREGA, no la compra** (migración 48): si se le entrega dinero un día en que no compra nada, la rendición se crea igual, o ese efectivo quedaría sin ningún sitio donde constar que lo devolvió. Al cerrar el día devuelve el vuelto y al siguiente empieza en cero. Frank (rol `comprador`) compra con efectivo; la factura en efectivo nace Pagada contra la rendición del día (única por obra+fecha); administración la cierra con arqueo. **Fórmula: debe quedar = Σ entregas − Σ gastado (sin las anuladas); diferencia = contado − debe quedar.** `cajas_chicas.monto_fondo` y `rendiciones.monto_fondo` quedaron obsoletas; `cajas_chicas.tolerancia` sigue vigente. Bancos por obra en la tabla `proyectos_banco` (migración 32; salió de `proyectos` porque esa la leen los 7 roles para el nombre de la obra y las cuentas quedaban expuestas). Solo la leen gerencia y pagos. **Al abrir una obra nueva hay que cargarle ahí su cuenta, o Pagos no podrá pagarla.** Las cinco cuentas de prueba de la migración 10 son INVENTADAS y **el reset ya se las lleva** (paso 4 de `reset_pruebas.sql`); al quedar la obra sin cuenta, Pagos no la deja pagar hasta cargar la real. Comprobarlo con `supabase/verificar_datos_reales.sql`.
 
 ### Tablero
 14 KPIs: RQs, ítems, % urgentes, entregados, llegaron tarde, rechazados, anulados, incompletos, facturado S/, préstamos activos, holgura promedio, entrega a tiempo %, uso incorrecto %, falta de pago más antiguo. KPIs clicables Pago Crédito / Pago Falta filtran el consolidado. Tablas: **Planificación por residente** (% urgentes con semáforo: verde <25%, amarillo <50%, rojo ≥50% — mide quién planifica y quién apaga incendios) y **Resumen por proyecto** (RQs, % urg, facturado, holgura, uso incorrecto, préstamos). Descarga CSV: botón global + botón por proyecto (27 columnas, BOM UTF-8, abre directo en Excel).
@@ -129,18 +129,35 @@ Indicador estrella (fase 2): **costo del desorden** = (uso incorrecto × valor) 
 **Fallos conocidos y sin arreglar.** No son todos los que hubo: son los que
 quedan después de cerrar los 22 de Almacén y Pagos.
 
-- **Un RQ puede quedar fantasma**: la cabecera se crea antes que las líneas y
-  no hay transacción, así que si una línea se rechaza queda un RQ numerado y
-  vacío. Empeoró con la migración 60, que añadió un motivo más de rechazo. Es
-  el arreglo pendiente más grande: mover la creación entera a una función del
-  servidor.
-- **La salida de material vencido solo se bloquea en pantalla.**
+- **El RQ fantasma sigue vivo por el PEDIDO POR COTIZACIÓN.** La migración 76
+  cerró el camino normal, pero `crearPedidoCotizacion` (`src/App.jsx`) no la
+  usa: da de alta los materiales UNO A UNO, luego la cabecera, luego las
+  líneas — tres escrituras sueltas sin transacción. Si falla la última quedan
+  **materiales permanentes en el catálogo de Lucía y un RQ numerado y vacío**.
+  Peor que el original, porque un código de material no se recicla nunca.
+  Además el generador de códigos 97xxxx toma el máximo y suma uno **sin tope**:
+  si la familia se llenara, desbordaría a la 98 en silencio.
+- **El informe mensual de gerencia trae dos números falsos** (señalados el 16
+  ago en `docs/08`, vivos el 30). En `ReporteMensual.jsx`: "Facturas pagadas" y
+  "Monto pagado" **siguen contando las anuladas** (falta el filtro que sí
+  tienen las dos líneas de justo debajo), y la columna "Teórico" del faltante
+  de caja se calcula con `monto_fondo`, el fondo fijo que dejó de existir el 12
+  de agosto. No sale "0": sale un número creíble e inventado, en la misma fila
+  que la diferencia real.
+- **La salida de material vencido solo se bloquea en pantalla.** La cabecera de
+  la migración 7 promete "vencido bloquea la salida" y esa regla nunca se
+  escribió: vive solo en `Almacen.jsx`.
 - **La caducidad no viaja con un préstamo**: material por vencer llega al
   destino figurando como bueno.
 - **El almacenero ve "S/ 0.00 valorizado"** porque su rol no puede leer
-  `factura_items`.
-- **"Entrega a tiempo %" mejora cuanto peor va**: solo cuenta lo entregado, así
-  que un material que nunca llega no empeora el indicador.
+  `factura_items` (política RLS de la migración 13; el residente tampoco).
+  **Decisión del dueño (30 ago): el almacenero NO necesita el valorizado**, así
+  que se quita el número en vez de abrirle el acceso al dinero a dos roles más.
+  Pendiente de hacer.
+- **"Entrega a tiempo %" y "Holgura promedio" mejoran cuanto peor va**: las dos
+  se calculan sobre la misma lista, que solo contiene lo ya entregado, así que
+  un material que nunca llega no empeora ninguna. Son los dos indicadores con
+  los que se iba a medir si el sistema mejora la obra.
 - **Frank escribe el banco a mano** al facturar (consecuencia de la migración
   32: ya no ve qué banco usa cada obra). Dispara alertas falsas en Auditoría, y
   hasta que ese campo sea una lista fija, la guarda de la migración 70 no se
@@ -155,8 +172,9 @@ quedan después de cerrar los 22 de Almacén y Pagos.
   decide a qué empresa aterriza el costo y lo firma un solo almacenero, cuando
   la entrada exigió a los dos residentes. (Hoy irrelevante: transferir está
   deshabilitado.)
-- La **fecha de pago** acepta 2030 o 1990: falta ponerle tope, como se hizo con
-  la fecha de factura.
+- La **fecha de pago** ya tiene tope hoy EN LA PANTALLA (`Pagos.jsx`,
+  `max={HOY_ISO}`), pero **no en la base**: por fuera sigue admitiendo 2030, y
+  1990 pasa por los dos lados. Falta el tope y el suelo en el servidor.
 
 **Estado de los módulos** (método de cierre uno por uno), al 28 ago:
 - **Compras — CERRADO.** Atacado por código (28 hallazgos) y probado a mano por
@@ -239,12 +257,12 @@ Nuevos RQs: piso/nivel obligatorio (lista cerrada), fecha necesitada única por 
 El sistema ya guarda, sin habérselo propuesto, casi todo lo que exige el Registro de Compras: serie, RUC y razón social del proveedor, fecha de emisión, monto, forma de pago, medio, N° de operación y obra. **Faltaría** el desglose de IGV (base imponible / IGV / total), el tipo de comprobante (factura, boleta, nota de crédito), la fecha de vencimiento del comprobante y la **detracción** cuando aplique. Con eso, Yheyson podría exportar el registro en vez de re-digitarlo desde los PDFs.
 **No tocar hasta terminar el piloto** (decisión del dueño). Va junto con los cinco casos de compra pendientes —detracción, pago parcial, un pago para varias facturas, anticipo y canje por letra— y con la nota de crédito / saldo a favor, porque son el mismo bloque contable.
 
-**Pendientes de Lucía (lunes):** equivalencias caja→unidades de los ~29 materiales "CAJA" (y PQT/ROLLO/PAR), su hoja de control de almacenes (inventarios iniciales por obra, ideal con precios), confirmar nombres de familias 62/73/91, y CONTROL_RQ_LUZ.xlsx (255 proveedores). Falta crear usuario del rol `pagos` en Auth + tabla usuarios.
+**Pendientes de Lucía (lunes):** equivalencias caja→unidades de los ~29 materiales "CAJA" (y PQT/ROLLO/PAR), su hoja de control de almacenes (inventarios iniciales por obra, ideal con precios), confirmar nombres de familias 62/73/91, y CONTROL_RQ_LUZ.xlsx (255 proveedores).
 
 ## Esquema Supabase propuesto (siguiente tarea)
 Tablas: `materiales`, `proveedores`, `usuarios` (con rol y proyecto asignado), `rqs`, `rq_items`, `facturas`, `factura_items` (puente N:M), `salidas`, `prestamos`, `stock_inicial`. Row Level Security por rol y proyecto (residente solo ve/crea en su obra; almacenero solo su almacén; compras y gerencia global). Auth de Supabase reemplaza el login demo. Ver `docs/04_roadmap_supabase.md`.
 
-## Reglas que se bajaron a la base (migraciones 49–76, ago 2026)
+## Reglas que se bajaron a la base (migraciones 49–77, ago 2026)
 
 Todas nacieron de un fallo encontrado atacando el sistema o usándolo de verdad.
 Están en `supabase/migrations/` con su porqué escrito completo; aquí solo lo
@@ -263,10 +281,15 @@ que cambia cómo trabaja la gente.
   el desglose en proporción** (68). El 65 solo abrió la puerta y afirmó que el
   cuadre se validaba solo; era falso —el trigger de cuadre vive sobre las
   líneas, no sobre la factura— y dejaba el desglose descuadrado en silencio.
-- **El arqueo de caja chica lo calcula la base** (67). Antes el navegador
-  mandaba la diferencia Y el veredicto (`estado: excede ? ...`), o sea que
-  quien decidía si la caja cuadraba era la pantalla que estaba siendo
-  controlada. Ahora solo viaja lo que administración cuenta.
+
+- **Quién CONTÓ el efectivo no se borra** (77). La migración 47 concentró el
+  circuito del dinero en Mónica y prometió a cambio un control: avisar a
+  gerencia cuando la misma persona entrega el efectivo y además cierra el
+  arqueo. Ese aviso existía y miraba `aprobado_por` — que en un día con
+  descuadre lo pisa GERENCIA al resolverlo. O sea que **el control estaba
+  callado exactamente los días en que el efectivo no cuadró**. Ahora son dos
+  firmas: `arqueo_por` (quién contó, la pone siempre el servidor) y
+  `aprobado_por` (el visto bueno final). La jornada muestra las dos.
 
 **Inventario y catálogo**
 - **La unidad viaja congelada en cada línea** (59) y **el factor de caja
@@ -412,11 +435,17 @@ rq-sistema-proyecto/
 │   └── codificacion_de_almacen.xlsx  ← el catálogo real (1,740 materiales).
 │                          FALTA copiar CONTROL_RQ_LUZ.xlsx (255 proveedores)
 └── supabase/
-    ├── migrations/      ← 75 archivos numerados del 1 al 76 (el 33 no existe:
+    ├── migrations/      ← 76 archivos numerados del 1 al 77 (el 33 no existe:
     │                      se descartó antes de correrse). Son la fuente de
     │                      verdad de las reglas de negocio.
     ├── CORRER_ESTO_*.sql ← varias migraciones juntas, para pegar de una vez
-    └── reset_pruebas.sql ← borra datos de prueba antes de arrancar
+    ├── reset_pruebas.sql ← borra datos de prueba antes de arrancar
+    └── verificar_datos_reales.sql ← EL GUARDIÁN: se corre antes de anunciar y
+                            FALLA listando todo lo que falta (personas, cuentas,
+                            catálogo, proveedores, inventario). Va suelto y no
+                            dentro del reset porque el editor de Supabase
+                            deshace TODO el pegado cuando algo falla: un
+                            guardián que aborta ahí desharía el propio reset.
 ```
 
 **Dónde vive cada cosa, y por qué importa:** las reglas que protegen dinero e
@@ -440,19 +469,46 @@ siguiente**. El dueño lo planteó así y es el que manda:
 5. **Reset otra vez**, para borrar lo que generó esa prueba.
 6. **AHORA sí, cargar los datos reales.** Este orden importa: el reset borra
    `stock_inicial`, así que el inventario cargado antes se perdería.
-7. `VITE_ENTORNO = produccion` en Vercel + Redeploy. **Es lo último que se
+7. **Correr `supabase/verificar_datos_reales.sql`** y que pase en silencio.
+   Falla listando lo que falte; se arregla y se vuelve a correr. Es lo que
+   sustituye a "creo que ya está todo".
+8. `VITE_ENTORNO = produccion` en Vercel + Redeploy. **Es lo último que se
    toca**: si se cambia antes de borrar las pruebas, el equipo verá
    movimientos inventados como si fueran reales; y si no se cambia, trabajarán
    con dinero de verdad leyendo "esto no son los datos reales".
-8. **Anunciar y lanzar.**
+9. **Anunciar y lanzar.**
 
-**QUÉ SOBREVIVE AL RESET, y por eso se puede cargar antes** (comprobado contra
-el guion): los **255 proveedores** (solo borra el de prueba, RUC 20138651917),
-las **equivalencias de caja** (viven en el catálogo), y la **curaduría de
-duplicados** de Lucía.
+**EL ORDEN, DECIDIDO POR EL DUEÑO EL 30 AGO 2026: primero el reset, y RECIÉN
+ENTONCES se carga todo.** Antes se pensaba al revés —cargar lo que sobrevivía
+y resetear después— y era una trampa: el reset borra `stock_inicial` entero y
+borra todo material dado de alta después de la carga original, así que el
+inventario y las altas nuevas de Lucía se perdían sin avisar.
 
-**QUÉ NO SOBREVIVE:** el **inventario inicial**. Decisión del dueño: se carga
-después de anunciar el piloto. Tiene sentido más allá de lo técnico — es la
+Con el orden nuevo eso desaparece, y a cambio **el reset borra ahora tres cosas
+que antes sobrevivían**:
+
+- **Todo el catálogo de materiales.** Se carga entero y nuevo después. La regla
+  vieja —borrar solo lo creado más de una hora después de la carga original—
+  tenía una víctima silenciosa: cualquier material legítimo que Lucía diera de
+  alta después se iba con él, y su unidad, su familia y su equivalencia de caja
+  con él. **Las 58 familias NO se borran**: son la estructura del código de 6
+  dígitos, no el catálogo. Si el archivo nuevo trae familias distintas, van
+  cargadas ANTES que los materiales.
+- **Todos los proveedores.** Al facturar, los proveedores nuevos **se dan de
+  alta solos**, así que cada prueba dejó uno y no hay forma de distinguirlos de
+  los buenos ni por fecha ni por nombre. Se borran todos y entran los 255 de
+  una vez.
+- **Las cinco cuentas bancarias** de prueba de la migración 10.
+
+Lo único que sigue sobreviviendo a propósito: la **curaduría de duplicados** de
+Lucía (claves `dup:` de `alertas_levantadas`). **OJO ahora que el catálogo se
+reemplaza entero**: esas marcas se pusieron mirando el catálogo VIEJO. Si el
+archivo nuevo conserva los códigos, la curaduría vale y ahorra ese trabajo; si
+los cambió, una marca vieja **silencia una alerta que hoy sí importa**. Ante la
+duda se borran también y Lucía las repasa. Decisión pendiente.
+
+**Y el inventario inicial se carga el último.** Decisión del dueño: después de
+anunciar el piloto. Tiene sentido más allá de lo técnico — es la
 foto de lo que hay en cada almacén ESE día, y tomada con una semana de
 antelación ya está desactualizada.
 
@@ -466,7 +522,7 @@ avisa, o pensarán que el sistema está roto.
 - **El almacenero de DANAUS** — sin él, esa obra no recibe ni saca material.
 - Supabase **Pro** con recuperación a punto en el tiempo.
 - Los **bancos reales** en `proyectos_banco` (2502 y 2503 para el piloto).
-- Cuentas de correo reales por persona, y el usuario del rol `pagos`.
+- Cuentas de correo reales por persona.
 - Los **manuales por rol**.
 
 ## Reglas para trabajar en este repo
