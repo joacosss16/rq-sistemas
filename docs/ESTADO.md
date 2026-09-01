@@ -85,11 +85,11 @@ maestro no envejezca con él.
   "Arqueo de X · resuelta por Y"—, que **no se puede hacer con los datos
   actuales**: las entregas de caja nacieron con la migración 38 el 12 ago y
   cuatro de las cinco rendiciones son anteriores. Hay que fabricarla.
-- **La rama `arqueo-y-reset` tiene 7 commits SIN mergear a main**: el código
-  de la 77 (la alerta del arqueo y las dos firmas en pantalla), el reset que
-  ahora borra catálogo/proveedores/bancos, el guardián
-  `verificar_datos_reales.sql`, la reorganización de CLAUDE.md, los hooks, y
-  los dos días de trabajo sobre ALMACÉN (migraciones 78-80 y su pantalla).
+- **PRODUCCIÓN ESTÁ AL DÍA** (1 sep). Se mergeó y publicó todo: los 13 commits
+  que llevaban parados desde el 28 de agosto — el código de la 77, el reset que
+  borra catálogo/proveedores/bancos, el guardián, la reorganización de
+  CLAUDE.md, los hooks, y los dos días de trabajo sobre Almacén, Pagos y caja
+  chica. `main`, `origin/main` y la rama están en el mismo commit.
   Mergear cuando el dueño lo decida — un push a main publica en Vercel.
   Mientras tanto la base va por delante del código en modo seguro: la firma
   nueva del arqueo se guarda, solo que la pantalla aún no la muestra.
@@ -121,9 +121,12 @@ maestro no envejezca con él.
   cerrados, la vista reorganizada en cuatro pestañas y dos rondas de QA con
   Claude in Chrome. Falta: probar en pantalla lo hecho DESPUÉS del segundo QA,
   las dos migraciones que quedan, y las decisiones de la lista de abajo.
-- **Pagos — atacado y arreglado por código, SIN probar en pantalla.** Es lo
-  siguiente. El precedente son los tres botones "muertos" de Compras: el
-  mensaje de error de la base tiene que llegar a la cara del usuario.
+- **Pagos y Compras del día (Frank) — atacados el 31 ago, dos BLOQUEANTES
+  cerrados y el circuito del dinero PROBADO en pantalla de punta a punta el
+  1 de septiembre**: entrega que abre la jornada, compra en efectivo, arqueo
+  que cuadra, arqueo con diferencia escalado a gerencia, pago normal, pago con
+  fecha futura rechazado, y pago de un compromiso de crédito. Queda por probar
+  el bloque de préstamos con doble firma (no mueve dinero).
 
 ## LO QUE SIGUE ABIERTO (30 ago 2026)
 
@@ -424,6 +427,37 @@ anulada libera su número, que los RQ íntegramente rechazados eran inalcanzable
 (botón para archivar, ninguno para abrir), y que la partida no se validaba
 contra la obra — hoy hay un aviso ⚠ en pantalla, pero **no bloquea**, y el
 servidor solo exige que no esté vacía.
+
+## CIERRE DEL 1 DE SEPTIEMBRE — POR DÓNDE SEGUIR
+
+**Lo único que falta antes de meter dinero real NO es código:**
+
+1. **Correr `supabase/verificar_datos_reales.sql`.** Falla listando todo lo que
+   falta. Ya se sabe que saldrán al menos dos: **el almacenero de DANAUS** (sin
+   él, media obra del piloto no recibe ni saca material) y **los 255
+   proveedores** (`CONTROL_RQ_LUZ.xlsx` sigue sin estar en `datos/`).
+2. **Cargar**: familias → materiales → proveedores → cuentas bancarias reales
+   de 2502 y 2503 → usuarios → **stock inicial el último, el día del arranque**.
+3. **OJO CON EL STOCK INICIAL**: sin él el sistema dirá que no hay material y
+   tendrá razón; los almaceneros no podrán registrar salidas y pensarán que
+   está roto. Cargarlo ANTES de que entre nadie.
+4. `VITE_ENTORNO = produccion` en Vercel. Lo último que se toca.
+
+**Lo que quedó abierto no impide arrancar.** Todo falla hacia "alguien registra
+algo raro y se ve en el arqueo", no hacia "nadie puede trabajar". Por orden de
+lo que toca dinero: aprobar una jornada sin contar el efectivo · el aviso de
+saldo a Frank · las entregas duplicadas · la conciliación que existe pero nadie
+encuentra (está en Auditoría, y un revisor con instrucciones explícitas no dio
+con ella: el contador "sin conciliar" de Pagos no lleva a ninguna parte).
+
+**LO QUE SE APRENDIÓ EL 31 DE AGOSTO, y conviene no olvidar:** de los ocho
+fallos que impedían trabajar encontrados en dos días, **ninguno salió de leer
+el código**. Dos los encontró el dueño probando la pantalla (el anular que
+inflaba el stock, el buscador que enseñaba 8 materiales de 1.750), dos los
+introdujimos nosotros mismos al reparar otra cosa (las dos líneas de la
+migración 82), y el resto salieron de los ataques adversariales — que además
+cazaron TRES cabeceras de migración afirmando cosas que el código no hacía, que
+es exactamente el precedente de la migración 65.
 
 ## EL PLAN DE LANZAMIENTO (acordado con el dueño el 28 ago, ajustado el 30)
 

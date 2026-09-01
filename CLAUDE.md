@@ -257,6 +257,21 @@ vistas en `src/vistas/`, lógica compartida en ocho módulos); las 67 pruebas en
   nada avisa. Y reescribir desde una versión vieja borra guardas: la migración
   72 se copió de la 38 cuando ya la habían mejorado la 45, la 46 y la 48, y
   esa tarde costó 20 hallazgos (reparados en la 75).
+- **Al reescribir una función, copiar también lo de ALREDEDOR de su cuerpo.**
+  El 31 ago la caja chica estuvo horas rota porque `trg_entrega_caja` perdió su
+  `security definer`: la migración 72 lo quitó, y la 75 —que existía para
+  reparar el daño de la 72— restauró las cuatro guardas palabra por palabra y
+  volvió a dejarse esa línea. Sin ella, el insert que abre la jornada choca
+  con la política de la tabla. El cuerpo estaba perfecto y la función no
+  servía. Comprobar siempre `security definer` y `set search_path`.
+- **Una migración que añade una columna tiene que revisar las LISTAS de
+  columnas de los triggers de esa tabla.** El mismo día, la 77 añadió
+  `arqueo_por` y `arqueo_en` al arqueo y nadie las metió en el `campos_admin`
+  de la migración 37: administración dejó de poder cerrar ningún día, con un
+  mensaje sobre reponer el fondo que no tenía nada que ver. Estas listas
+  (`campos_admin`, `campos_almacen`, `campos_residente`, `campos_recepcion`)
+  comparan la fila ENTERA menos lo permitido, así que cualquier columna nueva
+  las rompe en silencio.
 - **Cada migración se ataca antes de correrla.** Las que se dieron por buenas
   sin atacar traían fallos graves: la 60 bloqueaba la compra parcial de Frank
   con el efectivo ya gastado, la 61 declaraba cerrado un agujero que seguía
