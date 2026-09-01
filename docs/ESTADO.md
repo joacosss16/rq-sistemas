@@ -12,8 +12,15 @@ maestro no envejezca con él.
 
 - **App multi-usuario en producción**: Vercel (https://rq-sistemas.vercel.app),
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
-- **82 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
-  La 77 se corrió el 30 ago; la 78, 79, 80, 81 y 82, el 31.
+- **83 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
+  La 77 el 30 ago; la 78, 79, 80, 81 y 82 el 31; la 83 el 1 de septiembre.
+- **La 83 (1 sep): dos controles del dinero que no controlaban nada.** La fecha
+  de pago no la validaba nadie —un pago fechado adelante desaparecía de la
+  conciliación para siempre y sin corrección posible— y la conciliación
+  "exclusiva de gerencia" se saltaba por las dos ramas que recorre
+  administración, además de que su guarda solo miraba el booleano y dejaba
+  falsear quién concilió. **Traía un tercer arreglo que el ataque obligó a
+  quitar** (ver abajo, lo de aprobar sin contar el efectivo).
 - **La 82 (31 ago) — LA CAJA CHICA ESTABA ROTA Y NADIE LO SABÍA.** Dos fallos
   vivos en la base que bloqueaban el circuito del efectivo de punta a punta:
   Mónica no podía registrar la primera entrega del día de ninguna obra, ni
