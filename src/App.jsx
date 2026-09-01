@@ -526,6 +526,11 @@ export default function App() {
       und: p.und || undDe(matMap[p.codigo]), cant: Number(p.cant),
       autoriza: p.autoriza, estado: p.estado, fechaCierre: p.fecha_cierre,
       aprobOrigen: p.aprob_origen ? p.aprob_origen.por : '', aprobDestino: p.aprob_destino ? p.aprob_destino.por : '',
+      // Las dos confirmaciones de la DEVOLUCIÓN (migración 81): el almacén que
+      // entrega y el que recibe. Con las dos, la base cierra el préstamo sola.
+      // Una sola firma deja el préstamo A MEDIAS, y eso hay que verlo.
+      devolOrigen: p.devol_origen ? p.devol_origen.por : '', devolOrigenFecha: p.devol_origen ? p.devol_origen.fecha : '',
+      devolDestino: p.devol_destino ? p.devol_destino.por : '', devolDestinoFecha: p.devol_destino ? p.devol_destino.fecha : '',
       rechazoMotivo: p.rechazo ? p.rechazo.motivo : '', rechazoPor: p.rechazo ? p.rechazo.por : '',
       motivoAnulacion: p.anulacion ? p.anulacion.motivo : '', anuladoPor: p.anulacion ? p.anulacion.por : '',
       registradoPor: usrMap[p.registrado_por] ? usrMap[p.registrado_por].nombre : '',

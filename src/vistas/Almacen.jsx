@@ -424,9 +424,23 @@ export function Almacen({ user, db, api, obraGlobal }) {
   const presCerrados = presProy.filter(p => CERRADOS.includes(p.estado));
   const presMostrar = verCerrados ? presProy : presAbiertos;
 
-  const setPres = async (p, estado) => {
-    const r = await api.updPrestamo(p.id, { estado });
-    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+  // (Aquí vivía `setPres`, que mandaba el estado a mano. Su único uso era el
+  // botón "Devuelto" de un solo clic, que la migración 81 retiró: ahora el
+  // estado lo deriva la base cuando llegan las dos confirmaciones, y mandarlo
+  // a mano está prohibido. Se quita para que nadie lo reutilice creyendo que
+  // sigue siendo un camino válido.)
+
+  // DEVOLVER: las dos confirmaciones (migración 81). Cada almacén firma SU lado
+  // —el destino "lo entregué", el origen "lo recibí y lo conté"— y la base
+  // cierra el préstamo cuando llegan las dos. El contenido de la firma lo pone
+  // el servidor; desde aquí solo se manda la intención.
+  const confirmarDevol = async (p, lado) => {
+    const r = await api.updPrestamo(p.id, { [lado === 'origen' ? 'devol_origen' : 'devol_destino']: {} });
+    if (r.error) { avisar('⚠ ' + r.error, 9000); return; }
+    const otro = lado === 'origen' ? p.devolDestino : p.devolOrigen;
+    avisar(otro
+      ? `Préstamo #${p.n} DEVUELTO: confirmado por los dos almacenes. El stock vuelve a ${p.origen}.`
+      : `Confirmado tu lado del préstamo #${p.n}. Queda a medias hasta que ${lado === 'origen' ? p.destino : p.origen} confirme; el material sigue contando en ${p.destino}.`);
   };
   const anularPrestamo = async (p, motivo) => {
     const solicitado = p.estado === 'Solicitado';
@@ -456,13 +470,50 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // abra, a las 16:05 o a las 19:00, lo primero que ve es lo que le falta.
   const HORA_AVISO = 16;
   const esTarde = new Date().getHours() >= HORA_AVISO;
-  const avisoTarde = esAlm && esTarde && porVerificar > 0;
   const presEsperando = presProy.filter(p => p.estado === 'Solicitado').length;
+
+  // DEVOLUCIONES A MEDIAS: uno de los dos almacenes confirmó y el otro no.
+  // Media firma se queda dormida para siempre si nadie la mira, y este sistema
+  // no manda avisos: lo único que despierta a alguien es el color de un número
+  // que ya tiene delante. Por eso se pintan en ROJO al final de la jornada.
+  //
+  // SE EXCLUYEN LOS QUE NO TIENEN SALIDA. Si el destino ya consumió el
+  // material, la segunda firma va a fallar SIEMPRE —la guarda de la migración
+  // 73 lo impide, y ni transferir (74) ni anular (misma guarda) son caminos—.
+  // Pintar en rojo, todos los días, algo que nadie puede resolver es la forma
+  // más rápida de que el almacenero aprenda que el rojo no significa nada.
+  // Esos salen ya en `presPorLiquidar`, que es su sitio.
+  const sinSalida = p => {
+    const st = stockTodo.find(x => x.cod === p.cod);
+    return p.destino === proy && st && Number(st.stock) < Number(p.cant);
+  };
+  const aMedias = presProy.filter(p => p.estado === 'Prestado'
+    && ((p.devolOrigen && !p.devolDestino) || (p.devolDestino && !p.devolOrigen))
+    && !sinSalida(p));
+  // Los días que lleva esperando la primera firma. Si pasa de hoy, el aviso
+  // deja de ser "cierra el día" y pasa a ser "esto se quedó colgado".
+  const diasAMedias = p => {
+    const f = p.devolOrigenFecha || p.devolDestinoFecha;
+    return f ? -diasHoy(String(f).slice(0, 10)) : 0;
+  };
+  const aMediasViejas = aMedias.filter(p => diasAMedias(p) >= 1);
+
+  // A las 16:00 el aviso de cierre del día mira DOS cosas: los usos sin
+  // verificar y las devoluciones a medias. Las segundas van en rojo aunque no
+  // sean muchas: cada una es material que dos obras cuentan distinto.
+  //
+  // VA AQUÍ ABAJO, DESPUÉS de `aMedias`, y no es un detalle de estilo: una
+  // primera versión lo puso ANTES y era un ReferenceError en zona muerta. Y no
+  // saltaba nunca en las pruebas, porque `esAlm && esTarde` corta por la
+  // izquierda: la pantalla funcionaba toda la mañana y se caía en blanco a las
+  // 16:00, solo para el almacenero. Compilaba y las 73 pruebas pasaban. Es el
+  // mismo fallo que ya tumbó producción una vez (ver CLAUDE.md).
+  const avisoTarde = esAlm && esTarde && (porVerificar > 0 || aMedias.length > 0);
   const PESTANAS = [
     { k: 'recepcion', t: 'Recepción',  n: porRecibir.length,             urge: false, nota: 'comprado sin llegar' },
     { k: 'salidas',   t: 'Salidas',    n: porVerificar,                  urge: false, nota: 'sin verificar el uso' },
     { k: 'stock',     t: 'Stock',      n: negativos + cadVencidos,       urge: true,  nota: 'negativos y vencidos' },
-    { k: 'prestamos', t: 'Préstamos',  n: presEsperando + presPorLiquidar.length, urge: true, nota: 'esperando firma o por liquidar' },
+    { k: 'prestamos', t: 'Préstamos',  n: presEsperando + presPorLiquidar.length + aMedias.length, urge: true, nota: 'esperando firma, a medias o por liquidar' },
   ];
 
   return (
@@ -511,16 +562,32 @@ export function Almacen({ user, db, api, obraGlobal }) {
             <div className="text-[11px] font-bold tracking-widest text-yellow-400 uppercase">
               ⏰ Antes de cerrar el día
             </div>
-            <div className="text-[11px] text-slate-300 mt-0.5">
-              Te faltan verificar <b className="text-yellow-400 font-mono">{porVerificar}</b> salida(s):
-              hay que decir si el material se usó bien o mal.
-              {pestana !== 'salidas' && (
-                <button onClick={() => setPestana('salidas')}
-                  className="ml-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-slate-800 text-yellow-400 border border-yellow-700 hover:bg-slate-700">
-                  Ir a Salidas
-                </button>
-              )}
-            </div>
+            {porVerificar > 0 && (
+              <div className="text-[11px] text-slate-300 mt-0.5">
+                Te faltan verificar <b className="text-yellow-400 font-mono">{porVerificar}</b> salida(s):
+                hay que decir si el material se usó bien o mal.
+                {pestana !== 'salidas' && (
+                  <button onClick={() => setPestana('salidas')}
+                    className="ml-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-slate-800 text-yellow-400 border border-yellow-700 hover:bg-slate-700">
+                    Ir a Salidas
+                  </button>
+                )}
+              </div>
+            )}
+            {aMedias.length > 0 && (
+              <div className="text-[11px] text-slate-300 mt-1">
+                <b className="text-red-400 font-mono">{aMedias.length}</b> devolución(es) de préstamo
+                <b className="text-red-400"> a medias</b>: un almacén confirmó y el otro no, así que
+                las dos obras cuentan ese material distinto.
+                {aMediasViejas.length > 0 && <span className="text-red-400"> {aMediasViejas.length} llevan más de un día.</span>}
+                {pestana !== 'prestamos' && (
+                  <button onClick={() => setPestana('prestamos')}
+                    className="ml-2 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-widest bg-slate-800 text-red-400 border border-red-800 hover:bg-slate-700">
+                    Ir a Préstamos
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
         <div className="mt-3"><Aviso msg={aviso} /></div>
@@ -839,7 +906,9 @@ export function Almacen({ user, db, api, obraGlobal }) {
               <thead><tr>{['#', 'Fecha', 'Material', 'Cant', 'Origen', 'Destino', 'Aprobación', 'Estado', 'Acción'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
               <tbody>
                 {presMostrar.map(p => (
-                  <tr key={p.n} className="border-b border-slate-800 align-top">
+                  <tr key={p.n} className={`border-b align-top ${
+                    p.estado === 'Prestado' && ((p.devolOrigen && !p.devolDestino) || (p.devolDestino && !p.devolOrigen))
+                      ? 'border-red-800 bg-red-950/30' : 'border-slate-800'}`}>
                     <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{p.n}</td>
                     <td className="py-2 px-1.5 text-slate-400">{fmt(p.fecha)}</td>
                     <td className="py-2 px-1.5 text-slate-200">{p.desc} <span className="text-slate-500">({p.cant} {p.und})</span>
@@ -875,8 +944,28 @@ export function Almacen({ user, db, api, obraGlobal }) {
                           <div className="text-[9px] text-slate-500 leading-tight mb-1">
                             Si la otra obra ya consumió el material, avisa a gerencia: durante el
                             piloto no se transfiere el costo (hace falta factura entre empresas).</div>
+                          {/* DEVOLVER, CON LAS DOS FIRMAS (migración 81). Antes era
+                              un solo botón "Devuelto" que veían los dos almacenes,
+                              así que el que TENÍA el material podía darlo por
+                              devuelto sin moverlo: el stock volvía al origen, que
+                              no tenía nada. Ahora cada uno confirma su lado y la
+                              base cierra sola cuando llegan los dos. */}
+                          <div className="mb-1">
+                            {[['destino', p.destino, p.devolDestino, 'lo entregué'],
+                              ['origen',  p.origen,  p.devolOrigen,  'lo recibí y lo conté']].map(([lado, obra, firma, texto]) => (
+                              <div key={lado} className="flex items-center gap-1 mb-0.5">
+                                {firma
+                                  ? <span className="text-[9px] text-green-400">✓ {obra}: {texto} ({firma})</span>
+                                  : proy === obra
+                                    ? <button onClick={() => confirmarDevol(p, lado)}
+                                        className="px-2 py-1 rounded text-[9px] font-bold uppercase bg-slate-800 text-green-400 border border-slate-700 hover:border-green-400"
+                                        title={`Confirma que ${texto}. El préstamo se cierra cuando lo confirmen los dos almacenes.`}>
+                                        ↩ {texto}</button>
+                                    : <span className="text-[9px] text-yellow-400">⋯ falta que {obra} confirme</span>}
+                              </div>
+                            ))}
+                          </div>
                           <div className="flex gap-1">
-                            <button onClick={() => setPres(p, 'Devuelto')} className={btnVerde}>Devuelto</button>
                             {/* "Transferir al costo" queda FUERA durante el piloto (decisión del
                                 dueño, 28 ago 2026): las obras pertenecen a razones sociales
                                 distintas, y mover el costo de una empresa a otra sin emitir la

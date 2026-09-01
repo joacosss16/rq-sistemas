@@ -12,8 +12,27 @@ maestro no envejezca con él.
 
 - **App multi-usuario en producción**: Vercel (https://rq-sistemas.vercel.app),
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
-- **80 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
-  La 77 se corrió el 30 ago; la 78, la 79 y la 80, el 31.
+- **81 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
+  La 77 se corrió el 30 ago; la 78, 79, 80 y 81, el 31.
+- **La 81 (31 ago): devolver un préstamo lo confirman los DOS almacenes.**
+  Prestar exigía dos firmas y devolver una sola — y encima podía pulsarla el
+  almacén que TENÍA el material, así que podía dar por devuelto algo que no
+  había movido: el stock volvía al origen, que no tenía nada. La guarda que
+  existía comprobaba que el destino TUVIERA el material, no que lo hubiera
+  ENTREGADO. Ahora firman los dos almaceneros (no los residentes: la entrada es
+  una decisión, la devolución es un hecho físico y firma quien cuenta las
+  bolsas). Una devolución a medias se pinta en ROJO a partir de las 16:00, con
+  los días que lleva.
+  **El ataque encontró tres cosas antes de correrla**, y una era un
+  BLOQUEANTE EN LA PANTALLA: `avisoTarde` usaba `aMedias` antes de declararla
+  —zona muerta temporal— y como el `&&` corta por la izquierda, la vista
+  funcionaba toda la mañana y **se caía en blanco a las 16:00, solo para el
+  almacenero**. Compilaba y las 73 pruebas pasaban. Es el mismo fallo que ya
+  tumbó producción una vez. Las otras dos: gerencia podía firmar los dos lados
+  en una sentencia y cerrar el préstamo sola, y una devolución a medias sobre
+  material ya consumido quedaba ATASCADA para siempre (sin devolver, sin
+  transferir, sin anular, sin poder retirar la firma) y en rojo todos los días
+  sin que nadie pudiera quitarlo — la forma más rápida de matar una alerta.
 - **La 78 se corrió el 31 ago.** Cierra cinco cosas de la
   auditoría de Almacén: el reingreso lo suma y lo firma el servidor, el uso se
   verifica una sola vez y solo sobre una salida aprobada, rechazar exige motivo
