@@ -24,26 +24,27 @@ export function estadoCaducidad(fecha) {
   return { k: fmt(fecha), cls: 'bg-slate-800 text-slate-400' };
 }
 
-// La caducidad de lo que QUEDA, no de lo que alguna vez entró.
+// LOS LOTES QUE TODAVÍA ESTÁN EN EL ESTANTE, ya descontado lo consumido.
+// Es el único sitio donde vive el FIFO, y de aquí salen las dos respuestas que
+// necesita el almacén: cuándo caduca lo que queda, y CUÁNTO está vencido.
 //
-// Sin control de lotes en el almacén, la única suposición razonable es que se
-// consume por orden de llegada (lo primero que entra, lo primero que sale): se
-// descuenta lo ya consumido de los lotes más antiguos y la caducidad sale del
-// más próximo de los que siguen en pie. Sin esto, un lote vencido y consumido
-// hace meses marca el material como vencido PARA SIEMPRE — y una alarma que no
-// se apaga nunca es una alarma que se deja de mirar.
+// Sin control de lotes real, la única suposición razonable es que se consume
+// por orden de llegada: se descuenta lo ya consumido de los más antiguos y
+// sobreviven los demás. Sin esto, un lote vencido y consumido hace meses marca
+// el material como vencido PARA SIEMPRE — y una alarma que no se apaga nunca
+// es una alarma que se deja de mirar.
 //
 // `quedan` es el stock FÍSICO, no el disponible. Lo reservado sigue en el
 // estante y sus lotes siguen contando: usar el disponible haría "desaparecer"
 // lotes que están ahí y apagaría el aviso antes de tiempo. Ante la duda, el
 // lado seguro es avisar de más.
 //
-// Vive suelta porque la usan las DOS funciones de abajo. Antes solo la tenía
-// `calcularStocks` —la que mira Compras— y `stockDetalleObra` —la que mira el
-// almacenero, que es quien decide si el material sale— se había quedado con el
-// mínimo histórico pelado. El arreglo estaba en la pantalla equivocada.
-export function caducidadViva(lotes, quedan) {
-  if (!lotes || !lotes.length) return null;
+// Vive suelta porque la usan las dos funciones de stock. Antes el FIFO solo lo
+// tenía `calcularStocks` —la que mira Compras— y `stockDetalleObra` —la que
+// mira el almacenero, que es quien decide si el material sale— se había quedado
+// con el mínimo histórico pelado. El arreglo estaba en la pantalla equivocada.
+export function lotesVivos(lotes, quedan) {
+  if (!lotes || !lotes.length) return [];
   const enLotes = lotes.reduce((a, l) => a + l.cant, 0);
   let consumido = Math.max(0, enLotes - Math.max(0, quedan));
   const vivos = [];
@@ -52,7 +53,25 @@ export function caducidadViva(lotes, quedan) {
     vivos.push({ ...l, cant: l.cant - consumido });
     consumido = 0;
   });
-  return vivos.reduce((min, l) => (!min || l.cad < min ? l.cad : min), null);
+  return vivos;
+}
+
+// UNIDADES VENCIDAS que siguen en el estante.
+//
+// Este número es el que faltaba, y sin él la regla "vencido bloquea la salida"
+// es inaplicable: el stock real es MIXTO. Con 110 unidades de las que 10
+// caducaron, preguntar "¿hay algo vencido?" da que sí y bloquea las 110. La
+// pregunta útil es otra —"¿cuántas hay sanas?"— y son 100, que se pueden sacar
+// sin problema.
+export function cantidadVencida(lotes, quedan) {
+  return lotesVivos(lotes, quedan)
+    .filter(l => diasHoy(l.cad) < 0)
+    .reduce((a, l) => a + l.cant, 0);
+}
+
+// La caducidad más próxima de lo que queda en pie.
+export function caducidadViva(lotes, quedan) {
+  return lotesVivos(lotes, quedan).reduce((min, l) => (!min || l.cad < min ? l.cad : min), null);
 }
 
 // Stock por obra y material: inicial + recibido − salidas ± préstamos,
@@ -112,6 +131,9 @@ export function calcularStocks(db) {
   // de tiempo.
   Object.values(map).forEach(porMat => Object.values(porMat).forEach(e => {
     e.cadMin = caducidadViva(e.lotes, e.fisico);
+    // Cuántas de las que quedan están vencidas. Con eso, quien decide puede
+    // sacar lo sano en vez de quedarse bloqueado por lo caducado.
+    e.vencida = cantidadVencida(e.lotes, e.fisico);
   }));
   return map;
 }
@@ -184,6 +206,13 @@ export function stockDetalleObra(db, proy) {
   return Object.values(stockMap).map(s => {
     const reservado = s.resSalidas + s.resPrestamos;
     const stock = s.inicial + s.recibido - s.salido + s.prestNeto;
-    return { ...s, reservado, stock, disponible: stock - reservado, cadMin: caducidadViva(s.lotes, stock) };
+    const vencida = cantidadVencida(s.lotes, stock);
+    return {
+      ...s, reservado, stock, vencida,
+      disponible: stock - reservado,
+      // Lo que se puede sacar de verdad: ni lo reservado ni lo vencido.
+      sano: Math.max(0, stock - reservado - vencida),
+      cadMin: caducidadViva(s.lotes, stock),
+    };
   });
 }

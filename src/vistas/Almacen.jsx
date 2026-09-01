@@ -770,7 +770,14 @@ export function Almacen({ user, db, api, obraGlobal }) {
                   const setS = (k, v) => setFSal({ ...fSal, [s.cod]: { ...f, [k]: v } });
                   const cad = estadoCaducidad(s.cadMin);
                   const vencido = cad && cad.k === 'VENCIDO';
-                  const listo = esAlm && !vencido && Number(f.cant) > 0 && Number(f.cant) <= s.disponible && f.hoja.trim() && f.zona.trim();
+                  // NO SE BLOQUEA TODO POR TENER ALGO VENCIDO. El stock real es
+                  // MIXTO: con 110 unidades de las que 10 caducaron, parar las
+                  // 110 es desproporcionado y deja al almacenero sin poder
+                  // trabajar, sin ninguna forma de dar de baja las 10. Se limita
+                  // a lo SANO — ni reservado ni vencido — y se dice cuánto hay
+                  // de cada cosa. Quien mira las bolsas es él.
+                  const tope = s.sano;
+                  const listo = esAlm && tope > 0 && Number(f.cant) > 0 && Number(f.cant) <= tope && f.hoja.trim() && f.zona.trim();
                   return (
                     <tr key={s.cod} className="border-b border-slate-800 align-top">
                       <td className="py-2 px-1.5 font-mono text-[11px] text-slate-500">{s.cod}</td>
@@ -780,7 +787,13 @@ export function Almacen({ user, db, api, obraGlobal }) {
                         {cad ? (
                           <div>
                             <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase whitespace-nowrap ${cad.cls}`}>{cad.k}</span>
-                            {vencido && <div className="text-[9px] text-red-400 mt-1 w-28 leading-tight">Salida bloqueada: dar de baja o corregir con Gerencia</div>}
+                            {s.vencida > 0 && (
+                          <div className="text-[9px] text-red-400 mt-1 w-28 leading-tight">
+                            {s.vencida} {s.und} vencida(s) en el estante. No las uses.
+                            {s.sano > 0 ? ` Puedes sacar hasta ${s.sano}.` : ' No queda nada sano que sacar.'}
+                            {' '}Avisa a gerencia.
+                          </div>
+                        )}
                           </div>
                         ) : <span className="text-slate-600">—</span>}</td>
                       <td className={`py-2 px-1.5 font-mono ${s.inicial > 0 ? 'text-sky-400' : 'text-slate-500'}`}>{s.inicial}</td>
@@ -802,7 +815,13 @@ export function Almacen({ user, db, api, obraGlobal }) {
                         )}</td>
                       {!soloVigila && (<>
                       <td className="py-2 px-1.5"><input type="number" min="1" step="any" value={f.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setS('cant', v); }} disabled={!esAlm} className={`w-16 ${inputCls}`} />
-                        {Number(f.cant) > s.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({s.disponible})</div>}</td>
+                        {Number(f.cant) > tope && (
+                        <div className="text-[9px] text-red-400 mt-1">
+                          Excede lo que se puede sacar ({tope})
+                          {s.vencida > 0 && <span> · {s.vencida} vencida(s)</span>}
+                          {s.reservado > 0 && <span> · {s.reservado} reservada(s)</span>}
+                        </div>
+                      )}</td>
                       <td className="py-2 px-1.5"><input value={f.hoja} onChange={e => setS('hoja', e.target.value)} disabled={!esAlm} placeholder="N° de hoja" className={`w-20 ${inputCls} font-mono`} /></td>
                       <td className="py-2 px-1.5"><input value={f.zona} onChange={e => setS('zona', e.target.value)} disabled={!esAlm} placeholder="¿En qué zona?" className={`w-32 ${inputCls}`} /></td>
                       <td className="py-2 px-1.5">

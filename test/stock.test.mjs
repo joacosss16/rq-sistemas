@@ -12,7 +12,7 @@
 // dentro y su firma no se cambia — la mudanza no reescribe nada.
 // ============================================================
 
-import { estadoCaducidad, calcularStocks, stockDetalleObra } from '../src/stock.js';
+import { estadoCaducidad, calcularStocks, stockDetalleObra, cantidadVencida, lotesVivos } from '../src/stock.js';
 import { fmt } from '../src/fechas.js';
 
 let ok = 0, fallos = 0;
@@ -268,6 +268,53 @@ prueba('el reservado de una salida pendiente es NETO del reingreso, como en la b
   igual(f.reservado, 5, '8 salieron, 3 volvieron');
   igual(f.disponible, 15, 'lo que de verdad se puede disponer');
   igual(calcularStocks(db).MAIA['010101'].cant, 15, 'y las dos funciones dan el MISMO número');
+});
+
+// ---- CUANTO HAY VENCIDO, NO SOLO SI HAY ALGO VENCIDO ----
+// La regla "vencido bloquea la salida" es inaplicable sin este numero, porque
+// el stock real es MIXTO. Bloquear 100 unidades sanas porque hay 10 vencidas
+// entre ellas deja al almacenero sin poder trabajar, y no existe ninguna forma
+// de dar de baja esas 10.
+prueba('cuenta las unidades vencidas que SIGUEN en el estante', () => {
+  const lotes = [
+    { cad: desplazado(-30), cant: 10, llego: '2026-01-01' },   // vencido
+    { cad: desplazado(60),  cant: 100, llego: '2026-06-01' },  // bueno
+  ];
+  igual(cantidadVencida(lotes, 110), 10, 'estan las 110: 10 vencidas');
+  igual(cantidadVencida(lotes, 100), 0, 'salieron 10 y por orden de llegada fueron las vencidas');
+  igual(cantidadVencida(lotes, 105), 5, 'salieron 5: quedan 5 vencidas');
+  igual(cantidadVencida(lotes, 0), 0, 'sin stock no queda nada vencido');
+});
+
+prueba('sin caducidad no hay nada vencido', () => {
+  igual(cantidadVencida([], 100), 0, 'sin lotes');
+  igual(cantidadVencida(null, 100), 0, 'sin lista');
+  igual(cantidadVencida([{ cad: desplazado(30), cant: 50, llego: '2026-06-01' }], 50), 0, 'todo por vencer, nada vencido');
+});
+
+prueba('el detalle por obra separa lo sano de lo vencido y lo reservado', () => {
+  const db = base();
+  db.rqs.push({ proyecto: 'MAIA', items: [
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 10, fechaCaducidad: desplazado(-30), fechaEntrega: '2026-01-01' },
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 100, fechaCaducidad: desplazado(60), fechaEntrega: '2026-06-01' },
+  ] });
+  db.salidas.push({ proyecto: 'MAIA', cod: '020101', desc: 'CEMENTO', und: 'BLS', cant: 20, anulada: false, aprobacion: 'Pendiente' });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.stock, 110, 'en el estante estan las 110: lo reservado no se ha ido');
+  igual(f.vencida, 10, 'diez vencidas');
+  igual(f.reservado, 20, 'veinte comprometidas por una salida sin firmar');
+  igual(f.sano, 80, 'se pueden sacar 80: ni las vencidas ni las reservadas');
+});
+
+prueba('si TODO esta vencido, no se puede sacar nada', () => {
+  const db = base();
+  db.rqs.push({ proyecto: 'MAIA', items: [
+    { decision: 'Aprobado', cod: '020101', desc: 'CEMENTO', und: 'BLS', cantRecibida: 40, fechaCaducidad: desplazado(-5), fechaEntrega: '2026-06-01' },
+  ] });
+  const [f] = stockDetalleObra(db, 'MAIA');
+  igual(f.stock, 40, 'las 40 siguen fisicamente ahi');
+  igual(f.vencida, 40, 'y las 40 estan vencidas');
+  igual(f.sano, 0, 'asi que no hay nada que sacar');
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} fallas\n`);

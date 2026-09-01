@@ -12,8 +12,26 @@ maestro no envejezca con él.
 
 - **App multi-usuario en producción**: Vercel (https://rq-sistemas.vercel.app),
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
-- **81 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
-  La 77 se corrió el 30 ago; la 78, 79, 80 y 81, el 31.
+- **82 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
+  La 77 se corrió el 30 ago; la 78, 79, 80, 81 y 82, el 31.
+- **La 82 (31 ago) — LA CAJA CHICA ESTABA ROTA Y NADIE LO SABÍA.** Dos fallos
+  vivos en la base que bloqueaban el circuito del efectivo de punta a punta:
+  Mónica no podía registrar la primera entrega del día de ninguna obra, ni
+  cerrar NINGÚN arqueo. Los encontró el ataque a Compras del día.
+  - `trg_entrega_caja` perdió su `security definer` en la 72, y **la 75 —que
+    existe para reparar el daño de la 72— tampoco lo puso**. Sin él, el insert
+    que abre la jornada choca con la política de `rendiciones` (exige ser
+    comprador y ser uno mismo el responsable; quien registra es Mónica y el
+    responsable es Frank).
+  - `campos_admin` de `trg_rendicion_guarda` no conocía `arqueo_por` ni
+    `arqueo_en`, que la 77 escribe SIEMPRE. El trigger veía dos columnas
+    desconocidas y lanzaba un mensaje sobre reponer el fondo, que no tiene nada
+    que ver. Y la exención `rq.arqueo` de la 77 no salvaba: `rendiciones_guarda`
+    corre ANTES que `zz_arqueo_solo_del_servidor`, por orden alfabético.
+  - **LA LECCIÓN, que es lo que hay que llevarse:** este archivo ya decía que a
+    la 77 le faltaba "la prueba real — una jornada nueva con descuadre". Esa
+    prueba que faltaba es EXACTAMENTE la que revienta. Se dio la migración por
+    buena porque las dos comprobaciones que sí se hicieron salieron bien.
 - **La 81 (31 ago): devolver un préstamo lo confirman los DOS almacenes.**
   Prestar exigía dos firmas y devolver una sola — y encima podía pulsarla el
   almacén que TENÍA el material, así que podía dar por devuelto algo que no
