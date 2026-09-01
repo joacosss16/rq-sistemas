@@ -1,4 +1,4 @@
-# Por qué existe cada regla (migraciones 49–77, ago 2026)
+# Por qué existe cada regla (migraciones 49–83, ago–sep 2026)
 
 La historia de las reglas que se bajaron a la base. Salió de CLAUDE.md el 30
 ago: las **reglas vigentes** quedaron allá, en el modelo de negocio; aquí vive
@@ -131,6 +131,67 @@ usaban indistintamente:
 - `fisico` = lo que está **en el estante** (las reservas siguen ahí)
 El conteo ciego y el cierre valorizado usan el físico: a nadie se le puede pedir
 que cuente material que sí está.
+
+## Del 31 de agosto y el 1 de septiembre: Almacén, Pagos y la caja chica
+
+Seis migraciones (78–83). Las cinco primeras salieron de una auditoría al
+módulo de Almacén y de dos rondas de prueba en pantalla; las dos últimas, de
+atacar Pagos y Compras del día.
+
+- **El reingreso viaja como incremento, no como total** (78). Era la migración
+  71 otra vez en la operación de al lado: la pantalla mandaba el total
+  acumulado calculado en memoria, así que dos personas devolviendo material de
+  la misma salida se pisaban y lo del primero desaparecía sin error ni rastro.
+- **La firma del reingreso la pone la base** (78). Devolver material MUEVE
+  stock, igual que anular — y la 41 ya había dejado escrito que esa es la firma
+  que menos puede venir del navegador. El reingreso se quedó fuera de aquella
+  pasada.
+- **El uso se verifica sobre lo que salió, y una sola vez** (78). No había
+  ninguna guarda: por la API se marcaba como mal usado material de una salida
+  que nunca se aprobó, y se podía ir y volver de Correcto a Incorrecto borrando
+  el motivo anterior.
+- **Rechazar una salida exige motivo, sea quien sea** (78). La guarda vivía
+  DENTRO de la rama del residente, así que gerencia y compras rechazaban con el
+  motivo vacío y el almacenero no sabía qué corregir. Mismo error de ubicación
+  que la 69 ya había corregido para el caso de re-decidir.
+- **Compras no aprueba salidas ni préstamos** (78). La política de la 18 se lo
+  permitía sobre cualquier obra, sin que apareciera justificado en ninguna
+  parte y sin que su rol tenga siquiera la pestaña. Conserva la lectura, que la
+  necesita para el consolidado.
+- **La verificación del uso se cierra, y deja la hora** (79). Faltaba el dato
+  de "no volverá más material": sin él no se puede saber si una salida con 3 de
+  10 devueltos está cerrada o esperando, y esas filas se quedaban a la vista
+  para siempre. Con eso, la tabla pasó a ser una bandeja de lo pendiente.
+- **Anular una salida ya verificada infla el stock** (80). Lo encontró el dueño
+  probando la pantalla, no el ataque al código. Anular devuelve lo que salió y
+  no volvió; si el uso ya se verificó, ese material se consumió o se perdió.
+  Y no deja negativo: deja el stock INFLADO, que es el error que nadie busca.
+  **Se permite si volvió todo**, porque entonces no devuelve nada.
+- **Y con ella nació `corregir_uso()`** (80), porque la prohibición sola creaba
+  una trampa peor: "Correcto uso" se marca con un clic sin confirmación, y un
+  clic en la fila equivocada dejaba esa salida congelada mal para siempre. Es
+  seguro para el inventario: `stock()` no mira `uso`.
+- **Devolver un préstamo lo confirman los DOS almacenes** (81). Prestar exigía
+  dos firmas y devolver una sola — y podía pulsarla el almacén que TENÍA el
+  material, así que podía darlo por devuelto sin moverlo. La guarda que existía
+  comprobaba que el destino TUVIERA el material, no que lo hubiera ENTREGADO.
+- **La fecha de pago no puede ser futura ni anterior a la factura** (83). No la
+  validaba nadie: el `max` del campo no rechaza nada porque no hay formulario
+  (lo mismo que los "2.5 tornillos" de la 75). Un pago fechado adelante
+  desaparece de la conciliación y de su alerta, y no se puede corregir porque
+  una factura pagada queda congelada.
+- **La conciliación es de gerencia, de verdad** (83). La guarda vivía al final
+  de la función y dos `return` tempranos salían antes — justo los dos caminos
+  que recorre administración. Y solo miraba el booleano, así que se podía
+  falsear o borrar quién concilió.
+
+**Y una migración que no trae ninguna regla nueva: la 82.** Repara dos líneas
+que se cayeron al arreglar otra cosa, y las dos dejaban sin trabajar a quien
+maneja el efectivo: `trg_entrega_caja` perdió su `security definer` (la 72 lo
+quitó y la 75, que existía para reparar el daño de la 72, tampoco lo puso), y
+`campos_admin` no conocía las dos columnas que la 77 había añadido el día
+antes. Ninguna regla nueva; solo el recordatorio de que **una reparación
+también se ataca**.
 
 ## Tiempo
 

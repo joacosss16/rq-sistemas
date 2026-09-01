@@ -282,6 +282,13 @@ vistas en `src/vistas/`, lógica compartida en ocho módulos); las 67 pruebas en
   mayoría daño propio de esa mañana.
 - **El trabajo se queda en la rama hasta estar 100% seguro de mergear a main**
   (regla del dueño, 30 ago): un push a main publica en producción al instante.
+- **Al cerrar el día, el estado se escribe contra el DIFF, no contra la
+  conversación** (regla del dueño, 1 sep). Primero `git log` y `git diff` de lo
+  que se commiteó de verdad; solo después se contrasta con lo hablado, para ver
+  si cuadra. Al revés se documentan cosas que se propusieron y no se hicieron —
+  y peor: se acumulan entradas que se contradicen. El 1 de septiembre había
+  SEIS párrafos sobre el material vencido, dos de ellos llamando "migración 81"
+  a algo que acabó siendo la de los préstamos.
 - **Leer `docs/ESTADO.md` antes de proponer o arreglar nada.** El estado ya no
   vive en este archivo, y actuar sin leerlo es re-arreglar lo arreglado — el
   30 ago casi pasa con el RQ fantasma. Al cerrar el día, actualizarlo.

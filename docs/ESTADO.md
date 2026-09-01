@@ -155,9 +155,28 @@ Fallos conocidos y sin arreglar, por lo que cuesta que salgan mal:
 - **Nadie puede responder "¿quién aprobó esta compra?"**: el dato se guarda
   desde el 12 ago y viaja hasta la pantalla (`decididoPor`), pero ninguna vista
   lo muestra ni está en el CSV.
-- **La salida de material vencido solo se bloquea en pantalla.** La cabecera de
-  la migración 7 promete "vencido bloquea la salida" y esa regla nunca se
-  escribió: vive solo en `Almacen.jsx`.
+- **EL VENCIDO — dónde está de verdad, al 1 sep** (esta entrada sustituye a las
+  cinco que había repartidas y que se contradecían entre sí):
+  - ✅ **La pantalla ya no bloquea de más.** `stock.js` expone `vencida` (las
+    unidades caducadas que siguen en el estante) y `sano` (lo que se puede
+    sacar: ni reservado ni vencido). Con 110 de las que 10 caducaron, el
+    almacenero puede sacar 100 y la pantalla se lo dice. Antes paraba las 110.
+    Commit `a1f1b9a`, con 4 pruebas.
+  - ❌ **En la BASE la regla sigue sin existir.** La promesa de la migración 7
+    ("vencido bloquea la salida") lleva sin cumplirse desde julio: vive solo en
+    `Almacen.jsx` y por la API se esquiva.
+  - ⏸ **La migración que la bajaba está PARADA**, en
+    `supabase/pendientes/el_vencido_bloquea_la_salida.sql` — fuera de
+    `migrations/` a propósito y **sin número**: el 81 acabó siendo el de los
+    préstamos. Su cabecera explica los tres hallazgos del ataque. Lo que la
+    para ya no es el cálculo (arreglado arriba) sino que **preguntaba "¿hay
+    algo vencido?" en vez de "¿cuántas hay sanas?"**. Rehacerla con
+    `stock_sano` es directo; y alinear el FIFO del SQL con el del JS, que
+    ordenan por fechas distintas cuando falta la de entrega.
+  - ❌ **No existe DAR DE BAJA material vencido.** La pantalla lo menciona
+    desde julio y ese botón nunca se hizo, así que lo caducado se queda
+    contando como existencias. Con el arreglo de arriba ya no bloquea a nadie,
+    así que pasa de requisito a mejora.
 - **La caducidad no viaja con un préstamo**: material por vencer llega al
   destino figurando como bueno. **Y al revés, que no se había visto**: en el
   ORIGEN la fecha se queda aunque el material se haya ido, porque `cadMin`
@@ -165,15 +184,10 @@ Fallos conocidos y sin arreglar, por lo que cuesta que salgan mal:
   origen se queda con un VENCIDO fantasma de material que ya no tiene. Le da
   la vuelta a la sugerencia que hace la propia pantalla ("considera prestarlo
   antes de que se vuelva merma"): prestarlo es lo que borra su fecha.
-- **La alarma de vencido no se apaga nunca en la vista del almacenero**
-  (hallazgo del 30 ago, el más dañino de los tres de caducidad). El arreglo de
-  los lotes con consumo FIFO está en `calcularStocks` —que usa Compras— y NO
-  en `stockDetalleObra`, que es la que alimenta las dos pantallas de almacén:
-  ahí `cadMin` sigue siendo el mínimo pelado de todas las recepciones. Un lote
-  que venció en marzo y se consumió en abril deja el material en **VENCIDO**
-  para siempre, y como "vencido" bloquea el botón, **la salida del material
-  nuevo queda muerta** con el cartel "dar de baja o corregir con Gerencia" —
-  y no hay nada que dar de baja. También infla el contador de vencidos.
+- ~~La alarma de vencido no se apaga nunca~~ → **HECHO el 31 ago** (commit
+  `6a1a468`). El FIFO por lotes se extrajo a `lotesVivos()`/`caducidadViva()`
+  en `stock.js` y ahora lo usan las dos funciones de stock, no solo la que
+  mira Compras. Con pruebas.
 - ~~El almacenero ve "S/ 0.00 valorizado"~~ → **HECHO el 31 ago.** El bloque
   del valorizado se muestra solo a gerencia (`soloVigila` en `Almacen.jsx`).
   El almacenero ya no ve un cero que no significa cero; la RLS de la migración
@@ -361,43 +375,12 @@ por orden de lo que toca dinero:
   no deja negativo, deja el stock INFLADO, que es el error que nadie va a
   buscar—. La pantalla ya lo bloquea desde el 31 ago; la 80 lo baja a la base,
   y de paso impide anular una salida RECHAZADA, que nunca movió stock.
-- **El vencido solo bloquea en pantalla → la migración 81 se escribió y se
-  PARÓ.** El ataque adversarial encontró un bloqueante y dos graves, así que
-  vive en `supabase/pendientes/el_vencido_bloquea_la_salida.sql`, **fuera de
-  `migrations/` a propósito** y con una cabecera de PARADA que explica los
-  tres. Lo que la para no es aritmético: **la regla es binaria y el stock real
-  es mixto**. Bloquear 100 unidades sanas porque hay 10 vencidas entre ellas,
-  sin ninguna forma de dar de baja esas 10, es peor que el problema.
-- **BLOQUEANTE ANTES DE CARGAR EL INVENTARIO REAL — el cálculo de lotes falla
-  con existencias sin caducidad, y ESO YA ESTÁ CORRIENDO EN PANTALLA.**
-  `consumido = Σ(lotes) − stock_físico`, pero `stock_fisico()` cuenta también
-  el stock inicial, las recepciones sin caducidad y los préstamos recibidos, y
-  nada de eso genera lote. Con 100 de inventario inicial y un lote de 10
-  vencido, `consumido` sale 0, el lote vencido "sobrevive" para siempre y
-  bloquea las 100 sanas. Hoy no muerde **porque no hay stock inicial cargado**
-  — y se carga justo antes de arrancar el piloto. Hay que arreglarlo en
-  `src/stock.js` con pruebas. Junto con eso, alinear los dos FIFO: la pantalla
-  ordena por `fecha_necesitada` y el SQL parado por `fecha_rq`, y el desempate
-  de lotes del mismo día tampoco coincide.
-- ~~El vencido solo bloquea en pantalla~~ → ~~**migración 81**~~ (ver arriba): La promesa de la migración 7, sin cumplir desde julio. Añade
-  `caducidad_viva(proyecto, codigo)` en SQL —el mismo FIFO por lotes que
-  `caducidadViva()` en `stock.js`, que se extrajo esta mañana justo para tener
-  una sola definición— y `trg_salidas_bi` la mira. **No se podía hacer antes**:
-  con el cálculo viejo habría bloqueado en el servidor las salidas de material
-  sano, y desde la base no hay quien lo esquive.
-  - **ANTES DE CORRERLA CON DATOS REALES**, correr la consulta 3 de su bloque
-    de comprobación: dice cuánto material quedaría atrapado. Con datos de
-    prueba da igual; con el inventario real, cada fila es material que ya no
-    podrá salir.
-  - **HALLAZGO NUEVO que abre esa migración: no existe DAR DE BAJA material
-    vencido.** La pantalla dice "dar de baja o corregir con Gerencia" y no hay
-    botón para lo primero. El callejón ya existía —la pantalla ya bloqueaba—,
-    pero la 81 lo sella. **Es lo siguiente que necesita Almacén.**
-  - **Decisión pendiente del dueño**: prestar material vencido sigue
-    permitido. Endosarle a otra obra lo que aquí no se puede usar
-    probablemente debería bloquearse, pero no se mete de tapadillo en una
-    migración sobre salidas.
-
+- **El cálculo de lotes es impreciso cuando hay existencias SIN caducidad**
+  (stock inicial, recepciones sin fecha, préstamos recibidos): `consumido =
+  Σ(lotes) − físico` los cuenta en el físico pero no en los lotes, así que
+  supone que lo consumido no salió de los lotes. **Ya no bloquea a nadie** —el
+  arreglo de `sano` del 1 sep lo desactivó como bloqueante— y el error va
+  siempre hacia avisar de más, nunca de menos. Queda como imprecisión conocida.
 - **Los mensajes mandan a una puerta tapiada.** Al intentar devolver un
   préstamo consumido, la base dice "corresponde Transferir al costo"
   (migración 73) y la 69 repite lo mismo — pero la 74 lo bloqueó. El pie de la
@@ -406,8 +389,6 @@ por orden de lo que toca dinero:
   **Necesita migración** (los textos viven en funciones de la base).
 - **Corregir una recepción** sigue mandando el total del navegador (ver arriba).
   **Necesita migración.**
-- **El vencido solo bloquea en pantalla** (ver arriba). **Necesita migración**,
-  y ya se puede escribir: dependía del arreglo de la caducidad, que está hecho.
 
 **Decisiones del dueño, pendientes:**
 - "Transferir al costo" cierra con **una sola firma** cuando la entrada exigió
