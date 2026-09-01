@@ -285,6 +285,51 @@ almacenero acabaría abriendo cientos de filas en cero. Ahora:
   el buscador del catálogo y con 5 pruebas propias: si una pantalla encuentra
   algo y la otra no, quien busca deja de fiarse del buscador.
 
+**DEL ATAQUE A PAGOS Y A COMPRAS DEL DÍA (31 ago) — lo que queda abierto.**
+La migración 83 se lleva dos (la fecha de pago y la conciliación). Lo demás,
+por orden de lo que toca dinero:
+
+- **SE PUEDE APROBAR UNA JORNADA DE CAJA SIN CONTAR EL EFECTIVO.** Con la
+  jornada abierta: "Observar" (motivo cualquiera) y después "Guardar corrección
+  y aprobar". Queda Aprobada con `efectivo_contado`, `diferencia` y
+  `arqueo_por` NULOS. Nadie cuenta el dinero, no hay escalamiento a gerencia
+  aunque falten S/ 500, y **la alerta de "entregó y arqueó la misma persona" no
+  salta** —mira `arqueo_por`—, o sea que el control que la migración 47
+  prometió a cambio de concentrar el circuito en una persona se apaga con dos
+  clics de esa misma persona. Y después la jornada ya no se reabre.
+  **ESTUVO EN LA 83 Y SE QUITÓ**: la guarda tal como estaba escrita habría
+  dejado ese botón fallando el 100% de las veces, porque "Observar" solo se
+  ofrece sobre una jornada 'Abierta' y una 'Abierta' nunca tiene el efectivo
+  contado. Contar primero tampoco vale: `cerrar_con_arqueo` la saca de
+  'Observada' y el cuadro de corrección desaparece.
+  **El arreglo de verdad**: que el texto de la corrección viaje DENTRO de
+  `cerrar_con_arqueo` (un `p_correccion` opcional), para contar y explicar en
+  el mismo acto. Migración propia + pantalla.
+- **Nada avisa a Frank de cuánto efectivo le queda** al registrar una compra.
+  `registrar_factura` no compara el gasto contra las entregas del día. El caso
+  que parió la migración 53 —teclear S/ 1,690 donde se compró por S/ 169— no se
+  detecta hasta el cierre, y aparece invertido: el arqueo dirá que SOBRAN. **No
+  convertirlo en bloqueo** (sería la migración 60 otra vez: Frank compra antes
+  de que Mónica registre la entrega): un aviso no bloqueante con
+  `Σ entregas − Σ gastado` del día, en rojo si el importe lo supera.
+- **Si la jornada de HOY deja de estar Abierta, Frank queda atrapado el resto
+  del día.** Mónica cierra a las 16:00, Frank compra a las 17:00 y no puede
+  registrarlo: no hay forma de reabrir. Mitigación sin tocar la base: que
+  Mónica no cierre hasta que Frank devuelva el vuelto.
+- **El aviso de entrega de efectivo duplicada que la migración 75 delegó
+  explícitamente a la pantalla nunca se construyó.** Dos clics con red lenta =
+  dos entregas idénticas, y el faltante se lo come Frank en el arqueo. Es de
+  pantalla y media hora: un estado "enviando" en el botón más un aviso si ya
+  existe una entrega igual ese día.
+- **Una compra en efectivo de una jornada *Observada* no se puede anular**
+  (`anular_factura` exige 'Abierta'), y "Observada" es justo el estado que
+  Mónica pone cuando una factura está mal.
+- **La entrega de efectivo arranca apuntando a EMPERATRIZ**, que no entra al
+  piloto: el formulario usa la primera obra por código. Un descuido abre una
+  jornada en la obra equivocada, y una entrega no se edita, hay que anularla.
+- Gerencia puede pagar por la API (la pantalla lo impide, la RLS no), y nada
+  impide dos pagos con el mismo N° de operación.
+
 **Lo que sigue abierto de esa auditoría:**
 
 - ~~ANULAR UNA SALIDA YA VERIFICADA INFLA EL STOCK~~ → **migración 80, CORRIDA el 31 ago**
