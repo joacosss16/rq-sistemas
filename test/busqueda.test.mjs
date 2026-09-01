@@ -60,6 +60,25 @@ prueba('un material sin familia (m[3] vacío) no revienta', () => {
   igual(buscarEnCatalogo([['990101', 'MATERIAL SUELTO', 'UND']], 'suelto', 10).length, 1, 'sin familia');
 });
 
+prueba('SIN tope devuelve TODO lo que coincide, no solo el principio', () => {
+  // El fallo real (31 ago 2026): el buscador del residente cortaba en 8 y el
+  // catálogo va ordenado por código, así que los 40 clavos "PARA CONCRETO" van
+  // seguidos y se comían el cupo entero. Buscar "concreto" devolvía ocho
+  // clavos y NADA más — ni el aditivo, ni la vibradora, ni el premezclado—,
+  // y el corte no se anunciaba: el residente concluía que el material no
+  // estaba en el catálogo y lo pedía por WhatsApp.
+  const cat = [];
+  for (let i = 0; i < 40; i++) cat.push(['0204' + (30 + i), 'CLAVO DE ACERO PARA CONCRETO ' + i, 'CAJA', 'ACERO']);
+  cat.push(['100001', 'ADITIVO PARA CONCRETO', 'GLN', 'QUIMICOS']);
+  cat.push(['100002', 'VIBRADORA DE CONCRETO', 'UND', 'EQUIPOS']);
+  igual(buscarEnCatalogo(cat, 'concreto', 8).length, 8, 'con tope, solo ocho');
+  igual(buscarEnCatalogo(cat, 'concreto', 8).every(m => m[1].startsWith('CLAVO')), true,
+    'y los ocho son clavos: lo demás no llegaba a verse');
+  const todos = buscarEnCatalogo(cat, 'concreto', Infinity);
+  igual(todos.length, 42, 'sin tope salen todos');
+  igual(todos.filter(m => !m[1].startsWith('CLAVO')).length, 2, 'incluidos el aditivo y la vibradora');
+});
+
 console.log('\nFILTRO DE TABLAS (coincide)\n');
 
 // La usan la tabla de stock del almacen y la de recepcion. Tiene que

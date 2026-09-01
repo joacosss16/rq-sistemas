@@ -31,7 +31,14 @@ const NIVELES = [
 
 function Buscador({ catalogo, onPick, stockDe, deshabilitado, inputRef }) {
   const [q, setQ] = useState('');
-  const res = useMemo(() => buscarEnCatalogo(catalogo, deshabilitado ? '' : q, 8), [q, catalogo, deshabilitado]);
+  // SIN TOPE (decisión del dueño, 31 ago 2026). Antes se cortaba en 8, y con un
+  // catálogo de 1.750 eso escondía casi todo: buscar "concreto" devolvía ocho
+  // clavos —van seguidos por código, así que se comían el cupo entero— y el
+  // residente concluía, con razón, que el buscador no encontraba los materiales.
+  // Y lo peor era que el corte NO SE ANUNCIABA: un tope silencioso se lee como
+  // "no hay más". Es el mismo fallo que el de las tablas del almacén.
+  // Ahora salen todos los que coincidan y el número se dice siempre.
+  const res = useMemo(() => buscarEnCatalogo(catalogo, deshabilitado ? '' : q, Infinity), [q, catalogo, deshabilitado]);
   return (
     <div className="relative">
       <label className={lblCls}>Buscar material en catálogo · {catalogo.length} materiales</label>
@@ -40,7 +47,14 @@ function Buscador({ catalogo, onPick, stockDe, deshabilitado, inputRef }) {
         placeholder={deshabilitado ? 'Primero completa la cabecera: 1. partida → 2. nivel → 3. fecha (y motivo si es urgente)' : 'Escribe descripción o código… (Enter agrega el primer resultado)'}
         className={`w-full ${inputCls} py-2 text-sm ${deshabilitado ? 'opacity-60 cursor-not-allowed' : ''}`} />
       {res.length > 0 && (
-        <div className="absolute top-full left-0 right-0 bg-slate-950 border border-yellow-400 border-t-0 rounded-b max-h-56 overflow-y-auto z-50">
+        <div className="absolute top-full left-0 right-0 bg-slate-950 border border-yellow-400 border-t-0 rounded-b max-h-96 overflow-y-auto z-50">
+          {/* El número, SIEMPRE. Sin él nadie sabe si está viendo todo o solo el
+              principio, y esa duda es la que hace que se deje de usar el
+              buscador y se vuelva a pedir por WhatsApp. */}
+          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            {res.length} {res.length === 1 ? 'resultado' : 'resultados'}
+            {res.length > 40 && <span className="text-slate-500 font-normal normal-case tracking-normal"> · escribe más palabras para acotar</span>}
+          </div>
           {res.map(m => (
             <div key={m[0]} onClick={() => { onPick(m); setQ(''); }}
               className="px-3 py-2 cursor-pointer border-b border-slate-800 hover:bg-slate-800">
