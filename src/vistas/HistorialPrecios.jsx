@@ -23,7 +23,12 @@ export function HistorialPrecios({ db }) {
   const conCompras = useMemo(
     () => catalogo.filter(m => (historialPrecios[m[0]] || []).length > 0),
     [catalogo, historialPrecios]);
-  const res = useMemo(() => (q.trim() ? buscarEnCatalogo(conCompras, q, 12) : []), [q, conCompras]);
+  // SIN TOPE (decisión del dueño, 31 ago 2026). Cortar los resultados escondía
+  // materiales que SÍ coincidían, y el corte no se anunciaba: buscar "concreto"
+  // devolvía ocho clavos —van seguidos por código y se comían el cupo— y quien
+  // buscaba concluía que el material no estaba en el catálogo. Un tope
+  // silencioso se lee como "no hay más".
+  const res = useMemo(() => (q.trim() ? buscarEnCatalogo(conCompras, q, Infinity) : []), [q, conCompras]);
 
   const mat = cod ? catalogo.find(m => m[0] === cod) : null;
   const compras = cod ? (historialPrecios[cod] || []) : [];
@@ -89,7 +94,11 @@ export function HistorialPrecios({ db }) {
           <input value={q} onChange={e => { setQ(e.target.value); setCod(''); }}
             placeholder="Buscar el material que vas a negociar…" className={`w-full ${inputCls} py-2 text-sm`} />
           {res.length > 0 && !cod && (
-            <div className="mt-2 border border-slate-800 rounded divide-y divide-slate-800">
+            <div className="mt-2 border border-slate-800 rounded divide-y divide-slate-800 max-h-96 overflow-y-auto">
+              <div className="sticky top-0 bg-slate-900 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {res.length} {res.length === 1 ? 'material' : 'materiales'} con compras
+                {res.length > 40 && <span className="text-slate-500 font-normal normal-case tracking-normal"> · acota con más palabras</span>}
+              </div>
               {res.map(m => (
                 <button key={m[0]} onClick={() => { setCod(m[0]); setQ(m[1]); }}
                   className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-slate-800">

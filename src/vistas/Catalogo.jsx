@@ -160,7 +160,12 @@ export function Catalogo({ user, db, api }) {
     const r2 = { ...rech }; delete r2[s.n]; setRech(r2);
   };
 
-  const res = useMemo(() => buscarEnCatalogo(catalogo, q, 15), [q, catalogo]);
+  // SIN TOPE (decisión del dueño, 31 ago 2026). Cortar los resultados escondía
+  // materiales que SÍ coincidían, y el corte no se anunciaba: buscar "concreto"
+  // devolvía ocho clavos —van seguidos por código y se comían el cupo— y quien
+  // buscaba concluía que el material no estaba en el catálogo. Un tope
+  // silencioso se lee como "no hay más".
+  const res = useMemo(() => buscarEnCatalogo(catalogo, q, Infinity), [q, catalogo]);
 
   // Lista completa agrupada: familia (2 primeros dígitos) → subfamilia/grupo (dígitos 3-4)
   const [verLista, setVerLista] = useState(false);
@@ -418,7 +423,12 @@ export function Catalogo({ user, db, api }) {
         <input value={q} onChange={e => setQ(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && res.length > 0) { e.preventDefault(); irAMaterial(res[0][0]); } }}
           placeholder="Buscar material… (Enter baja hasta él en la lista y lo resalta)" className={`w-full ${inputCls} py-2 text-sm mb-2`} />
-        {res.length > 0 && <div className="text-[10px] text-slate-500 mb-1">Clic en un resultado para ubicarlo dentro de su familia ↓</div>}
+        {res.length > 0 && (
+          <div className="text-[10px] text-slate-500 mb-1">
+            <b className="text-slate-300">{res.length}</b> {res.length === 1 ? 'resultado' : 'resultados'} · clic en uno para ubicarlo dentro de su familia ↓
+            {res.length > 40 && <span> · escribe más palabras para acotar</span>}
+          </div>
+        )}
         {res.length > 0 && (
           <table className="w-full text-xs">
             <thead><tr>{['Código', 'Descripción', 'Und', 'Familia', 'Perecedero'].map((h, i) => <th key={i} className={thCls}>{h}</th>)}</tr></thead>
