@@ -12,6 +12,20 @@
 // encontrar por familia sin dar ningún error.
 // ============================================================
 
+// La misma regla del catálogo, suelta, para filtrar cualquier tabla: TODAS las
+// palabras escritas, en cualquier orden, sin distinguir mayúsculas ni acentos
+// de más. Vive aquí y no en cada vista para que buscar signifique lo mismo en
+// todo el sistema — si el catálogo encuentra "cemento tipo" y la tabla de stock
+// no, quien busca deja de fiarse del buscador.
+//
+// Con la búsqueda vacía devuelve true: filtrar por nada es no filtrar.
+export function coincide(texto, q) {
+  const palabras = (q || '').toUpperCase().split(/\s+/).filter(Boolean);
+  if (!palabras.length) return true;
+  const t = String(texto || '').toUpperCase();
+  return palabras.every(p => t.includes(p));
+}
+
 // Búsqueda por palabras: ignora espacios extra y encuentra materiales que
 // contengan TODAS las palabras escritas, en cualquier orden.
 export function buscarEnCatalogo(catalogo, q, max) {

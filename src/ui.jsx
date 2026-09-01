@@ -74,13 +74,18 @@ export function Aviso({ msg }) {
   );
 }
 
-export function AnularBox({ label = 'Anular', onConfirm }) {
+// Caja de "hacer algo irreversible con motivo obligatorio". Nació para anular,
+// y desde la migración 80 la reusa también "Corregir verificación": es el mismo
+// gesto —una acción con rastro que exige explicar por qué— así que `label`,
+// `placeholder` y `titulo` se dejan configurables en vez de duplicar el
+// componente. Lo demás no cambia para quien ya la usaba.
+export function AnularBox({ label = 'Anular', placeholder = 'Motivo de anulación (obligatorio)', titulo, onConfirm }) {
   const [open, setOpen] = useState(false);
   const [motivo, setMotivo] = useState('');
-  if (!open) return <button onClick={() => setOpen(true)} className="text-[9px] text-slate-500 hover:text-red-400 underline underline-offset-2">{label}</button>;
+  if (!open) return <button onClick={() => setOpen(true)} title={titulo} className="text-[9px] text-slate-500 hover:text-red-400 underline underline-offset-2">{label}</button>;
   return (
     <div className="w-44 mt-1">
-      <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Motivo de anulación (obligatorio)" className={`w-full ${inputCls}`} />
+      <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder={placeholder} className={`w-full ${inputCls}`} />
       <div className="flex gap-1 mt-1">
         <button onClick={() => { if (motivo.trim()) { onConfirm(motivo.trim()); setOpen(false); setMotivo(''); } }}
           disabled={!motivo.trim()}

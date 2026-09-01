@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { HOY_ISO, fmt, dias, diasHoy } from '../fechas';
 import { estadoCaducidad, stockDetalleObra } from '../stock';
+import { coincide } from '../busqueda';
 import { PROYECTOS, ALMACENEROS } from '../maestros';
 import { Aviso, AnularBox, FiltroProyecto, FechaInput, inputCls, lblCls, thCls, btnOk, btnRojo, btnVerde, pillEstado } from '../ui';
 
@@ -16,6 +17,27 @@ const TOPE_FILAS = 50;
 
 // Pie comun de las tablas recortadas. Decir cuantas hay es lo que impide que
 // un tope se lea como "no hay mas": un corte silencioso es peor que la lentitud.
+// Buscador de tabla. Va arriba de la tabla, con el contador de lo que queda a
+// la vista: sin el numero, un filtro que no encuentra nada se confunde con una
+// tabla vacia o con una pantalla rota.
+function Buscar({ valor, onChange, placeholder, encontradas, total }) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap mb-2">
+      <input value={valor} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className={`w-64 ${inputCls}`} />
+      {valor.trim() && (
+        <>
+          <span className={`text-[10px] font-mono ${encontradas ? 'text-slate-400' : 'text-yellow-400'}`}>
+            {encontradas} de {total}{encontradas === 0 ? ' · nada coincide' : ''}
+          </span>
+          <button onClick={() => onChange('')}
+            className="text-[9px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-200">✕ limpiar</button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PieTope({ mostradas, total, abierto, onToggle }) {
   if (total <= mostradas && !abierto) return null;
   return (
@@ -69,6 +91,12 @@ export function Almacen({ user, db, api, obraGlobal }) {
   const [sinTope, setSinTope] = useState({});
   // La ventana efímera de confirmación del reingreso: { n, cant }.
   const [confirmReing, setConfirmReing] = useState(null);
+  // Marcas de tiempo de las verificaciones de esta sesión, para el recordatorio
+  // de "vas muy seguido". Vive solo en memoria: no es un control, es un aviso.
+  const [marcas, setMarcas] = useState([]);
+  // Buscadores de las tablas de Stock y Recepcion: { stock, recepcion }.
+  const [busq, setBusq] = useState({});
+  const [verCeros, setVerCeros] = useState(false);
   const [fSal, setFSal] = useState({});
   const [verif, setVerif] = useState({});
   const [fReing, setFReing] = useState({});
@@ -89,7 +117,12 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // Misma razón que en las salidas: 82 filas con inputs ya se notan, y la lista
   // crece sola. Lo urgente primero — la fecha en que se necesita el material.
   const porRecibirOrden = porRecibir.slice().sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
-  const porRecibirMostrar = sinTope.recepcion ? porRecibirOrden : porRecibirOrden.slice(0, TOPE_FILAS);
+  // Se busca por material, por código y por número de RQ: "RQ-311" es como lo
+  // pregunta el residente por WhatsApp, así que es como hay que poder buscarlo.
+  const qRec = (busq.recepcion || '').trim();
+  const porRecibirFiltrado = porRecibirOrden.filter(i =>
+    coincide(`${i.cod} ${i.desc} RQ-${String(i.rq).padStart(3, '0')} ${i.rq}`, qRec));
+  const porRecibirMostrar = (qRec || sinTope.recepcion) ? porRecibirFiltrado : porRecibirFiltrado.slice(0, TOPE_FILAS);
 
   const getF = id => form[id] || { cant: '', obs: '' };
   const setF = (id, k, v) => setForm({ ...form, [id]: { ...getF(id), [k]: v } });
@@ -149,7 +182,29 @@ export function Almacen({ user, db, api, obraGlobal }) {
   };
 
   const salidasProy = salidas.filter(s => s.proyecto === proy);
-  const stock = stockDetalleObra(db, proy);
+  const stockTodo = stockDetalleObra(db, proy);
+
+  // MATERIALES EN CERO, ARCHIVADOS HASTA QUE VUELVAN A TENER.
+  // Un material entra a esta lista la primera vez que pasa por el almacén y ya
+  // no sale nunca: con 1.740 en el catálogo, en unos meses el almacenero abre
+  // Stock y se encuentra cientos de filas en cero. Vuelven solas en cuanto
+  // entra material, sin que nadie tenga que hacer nada.
+  //
+  // OJO CON EL CRITERIO, que no es "stock <= 0": los NEGATIVOS se quedan
+  // SIEMPRE a la vista. Un negativo es un descuadre real —salió más de lo que
+  // entró— y esconderlo es justo el fallo que ya se pagó una vez (ver el
+  // comentario de stockDetalleObra en stock.js). Lo reservado tampoco se
+  // archiva: hay material comprometido esperando una firma.
+  const enCero = s => s.stock === 0 && s.reservado === 0;
+  const stockVivo = stockTodo.filter(s => !enCero(s));
+  const stockCero = stockTodo.filter(enCero);
+  // Buscar mira SIEMPRE en todo, incluidos los archivados: si alguien escribe
+  // el nombre de un material, quiere ese material — que esté en cero es la
+  // respuesta, no un motivo para no enseñárselo.
+  const qStock = (busq.stock || '').trim();
+  const stockBase = qStock ? stockTodo : (verCeros ? stockTodo : stockVivo);
+  const stockFiltrado = stockBase.filter(s => coincide(`${s.cod} ${s.desc}`, qStock));
+  const stock = qStock || verCeros ? stockFiltrado : stockFiltrado.slice(0, TOPE_FILAS);
 
   // Alerta de materiales SIN MOVIMIENTO: con stock parado y sin entradas ni
   // salidas hace más de 30 días (capital y espacio inmovilizados).
@@ -161,7 +216,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
     if (i.decision === 'Aprobado' && Number(i.cantRecibida) > 0) marcarMov(i.cod, i.fechaEntregaSaldo || i.fechaEntrega);
   }));
   salidas.filter(s => s.proyecto === proy && !s.anulada && s.aprobacion === 'Aprobada').forEach(s => marcarMov(s.cod, s.fecha));
-  const sinMov = stock.filter(s => s.stock > 0)
+  const sinMov = stockTodo.filter(s => s.stock > 0)
     .map(s => ({ ...s, dias: ultimoMov[s.cod] ? -diasHoy(ultimoMov[s.cod]) : null, desde: ultimoMov[s.cod] || null }))
     .filter(s => s.dias === null || s.dias > DIAS_SIN_MOV)
     .sort((a, b) => (b.dias ?? 99999) - (a.dias ?? 99999));
@@ -176,9 +231,9 @@ export function Almacen({ user, db, api, obraGlobal }) {
   //   USO INCORRECTO -- material pagado y desperdiciado. Va SIEMPRE con el % de
   //                 salidas verificadas al lado: un 0% sobre el 10% revisado no
   //                 es un cero, es un "no sabemos".
-  const negativos = stock.filter(s => s.stock < 0).length;
-  const cadVencidos = stock.filter(s => s.cadMin && diasHoy(s.cadMin) < 0).length;
-  const cadPorVencer = stock.filter(s => s.cadMin && diasHoy(s.cadMin) >= 0 && diasHoy(s.cadMin) <= 30).length;
+  const negativos = stockTodo.filter(s => s.stock < 0).length;
+  const cadVencidos = stockTodo.filter(s => s.cadMin && diasHoy(s.cadMin) < 0).length;
+  const cadPorVencer = stockTodo.filter(s => s.cadMin && diasHoy(s.cadMin) >= 0 && diasHoy(s.cadMin) <= 30).length;
   const salVerif = salidasProy.filter(s => !s.anulada && s.aprobacion === 'Aprobada');
   const verificadas = salVerif.filter(s => s.uso !== 'Pendiente');
   const incorrectas = verificadas.filter(s => s.uso === 'Incorrecto').length;
@@ -192,8 +247,8 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // llevan IGV y el desglose real (base imponible / IGV) aun no se guarda -- va
   // con el bloque de SUNAT, post-piloto. Rotularlo es honesto; "corregirlo" con
   // un 18% supuesto seria falso, y encima invisible.
-  const valorizado = stock.reduce((a, x) => a + (precioProm[x.cod] != null ? x.stock * precioProm[x.cod] : 0), 0);
-  const sinPrecio = stock.filter(x => x.stock > 0 && precioProm[x.cod] == null).length;
+  const valorizado = stockTodo.reduce((a, x) => a + (precioProm[x.cod] != null ? x.stock * precioProm[x.cod] : 0), 0);
+  const sinPrecio = stockTodo.filter(x => x.stock > 0 && precioProm[x.cod] == null).length;
 
   // Material que llego a medias y sigue esperando el saldo: obra parada.
   const incompletos = rqs.filter(r => r.proyecto === proy)
@@ -215,7 +270,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
   }).filter(x => x.n > 0);
 
   const resumen = [
-    { k: 'Materiales', n: stock.length, cls: 'text-slate-200' },
+    { k: 'Materiales', n: stockVivo.length, cls: 'text-slate-200' },
     { k: 'Stock negativo', n: negativos, cls: 'text-red-400', nota: negativos ? 'hay que ir a contar' : null },
     { k: 'Vencidos', n: cadVencidos, cls: 'text-red-400' },
     { k: 'Por vencer · 30 d', n: cadPorVencer, cls: 'text-yellow-400' },
@@ -241,7 +296,27 @@ export function Almacen({ user, db, api, obraGlobal }) {
 
   const marcarUso = async (sa, uso, motivo = '') => {
     const r = await api.updSalida(sa.id, { uso, motivo_uso: motivo || null });
-    if (r.error) avisar('⚠ ' + r.error, 7000);
+    if (r.error) { avisar('⚠ ' + r.error, 7000); return; }
+    // RECORDATORIO, NO ACUSACIÓN. Marcar seis seguidas es perfectamente normal:
+    // el almacenero recorre la obra por la mañana y registra al volver. Esto no
+    // pretende atrapar a nadie —para eso está la alerta de Auditoría, que mira
+    // el patrón y no se esquiva esperando— sino recordarle PARA QUÉ sirve lo
+    // que está marcando, que casi siempre es el problema real y no la mala fe.
+    // No bloquea, no exige nada y no se puede fallar.
+    const ahora = Date.now();
+    const recientes = [...marcas.filter(t => ahora - t < 60000), ahora];
+    setMarcas(recientes);
+    if (recientes.length === 6) {
+      avisar('Llevas 6 salidas verificadas en un minuto. Si alguna llevaba material mal usado y se marca como correcta, ese material desaparece de los indicadores y nadie irá a recogerlo a la obra.', 12000);
+    }
+  };
+
+  // Deshacer una verificación equivocada (migración 80). Solo si no hubo
+  // reingreso: si volvió material, ESO sí movió stock y no se deshace por aquí.
+  const corregirUso = async (sa, motivo) => {
+    const r = await api.corregirUso(sa, motivo);
+    if (r.error) { avisar('⚠ ' + r.error, 9000); return; }
+    avisar(`HT ${sa.hoja}: la verificación se deshizo y la salida vuelve a estar por verificar. Queda registrado con tu nombre, la hora y el motivo.`);
   };
 
   const confirmarIncorrecto = sa => {
@@ -310,7 +385,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
           : ' Sigue en la lista: dijiste que puede volver más.'}${otro}`, otro ? 9000 : 6000);
   };
 
-  const matPres = stock.find(s => s.cod === fPres.cod);
+  const matPres = stockTodo.find(s => s.cod === fPres.cod);
   const presOk = esAlm && matPres && Number(fPres.cant) > 0 && Number(fPres.cant) <= matPres.disponible && fPres.destino;
 
   const prestar = async () => {
@@ -332,7 +407,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
   // que poder verlos, o se acumulan sin que nadie se entere.
   const presPorLiquidar = presActivos.filter(p => {
     if (p.destino !== proy) return false;        // solo se juzga el propio almacén
-    const st = stock.find(x => x.cod === p.cod);
+    const st = stockTodo.find(x => x.cod === p.cod);
     return st && Number(st.stock) < Number(p.cant);
   });
   // Un préstamo CERRADO ya no pide nada a nadie: devuelto, transferido,
@@ -454,8 +529,14 @@ export function Almacen({ user, db, api, obraGlobal }) {
       {pestana === 'recepcion' && (
       <div className="bg-slate-900 border border-slate-800 rounded-md p-4 mb-3">
         <div className="text-[11px] font-bold tracking-widest text-slate-500 uppercase mb-3">Recepción de materiales · {proy}</div>
-        {porRecibir.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Nada por recibir en {proy}. Los ítems aparecen aquí cuando Compras los aprueba.</div>
+        <Buscar valor={busq.recepcion || ''} onChange={v => setBusq(b => ({ ...b, recepcion: v }))}
+          placeholder="Buscar material, código o RQ…"
+          encontradas={porRecibirFiltrado.length} total={porRecibir.length} />
+        {porRecibirMostrar.length === 0 ? (
+          <div className="text-center py-6 text-slate-500 text-sm">
+            {qRec ? `Nada por recibir coincide con "${qRec}" en ${proy}.`
+              : `Nada por recibir en ${proy}. Los ítems aparecen aquí cuando Compras los aprueba.`}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -514,7 +595,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
-        <PieTope mostradas={porRecibirMostrar.length} total={porRecibir.length}
+        <PieTope mostradas={porRecibirMostrar.length} total={porRecibirFiltrado.length}
           abierto={!!sinTope.recepcion} onToggle={() => setSinTope(s => ({ ...s, recepcion: !s.recepcion }))} />
         <div className="mt-3 text-slate-500 text-[11px]">Si la cantidad recibida es menor a la pedida, el ítem pasa a Incompleto automáticamente (visible en Compras y Almacén); al llegar el saldo se registra otra recepción y pasa a Entregado.</div>
       </div>
@@ -589,8 +670,26 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </div>
           )}
         </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Buscar valor={busq.stock || ''} onChange={v => setBusq(b => ({ ...b, stock: v }))}
+            placeholder="Buscar material o código…"
+            encontradas={stockFiltrado.length} total={stockTodo.length} />
+          {stockCero.length > 0 && !qStock && (
+            <button onClick={() => setVerCeros(v => !v)}
+              className="mb-2 px-2.5 py-1 rounded border border-slate-700 bg-slate-800 hover:border-slate-500"
+              title="Materiales que pasaron por este almacén y hoy están en cero. Vuelven solos a la lista en cuanto entre material.">
+              <span className="font-mono font-bold text-slate-400">{stockCero.length}</span>
+              <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 ml-1.5">
+                sin stock · {verCeros ? '✕ ocultar' : 'ver'}</span>
+            </button>
+          )}
+        </div>
         {stock.length === 0 ? (
-          <div className="text-center py-6 text-slate-500 text-sm">Sin materiales en este almacén. El stock se forma con las recepciones registradas arriba.</div>
+          <div className="text-center py-6 text-slate-500 text-sm">
+            {qStock ? `Ningún material coincide con "${qStock}" en ${proy}.`
+              : stockTodo.length === 0 ? 'Sin materiales en este almacén. El stock se forma con las recepciones registradas en Recepción.'
+              : `Nada con stock en ${proy}. Hay ${stockCero.length} material(es) en cero, archivados arriba.`}
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -649,6 +748,8 @@ export function Almacen({ user, db, api, obraGlobal }) {
             </table>
           </div>
         )}
+        <PieTope mostradas={stock.length} total={stockFiltrado.length}
+          abierto={!!verCeros} onToggle={() => setVerCeros(v => !v)} />
         {/* El aviso del descuadre estaba SOLO en la version de gerencia -- y
             quien tiene que ir a contar el estante es el almacenero, que era el
             unico que no lo leia. Ahora lo ven los dos, y al almacenero se le
@@ -717,7 +818,7 @@ export function Almacen({ user, db, api, obraGlobal }) {
           <div className="md:col-span-2"><label className={lblCls}>Material (con stock)</label>
             <select value={fPres.cod} onChange={e => setFPres({ ...fPres, cod: e.target.value })} disabled={!esAlm} className={`w-full ${inputCls}`}>
               <option value="">— Elegir —</option>
-              {stock.filter(s => s.disponible > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (disp: {s.disponible})</option>)}</select></div>
+              {stockTodo.filter(s => s.disponible > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (disp: {s.disponible})</option>)}</select></div>
           <div><label className={lblCls}>Cantidad</label>
             <input type="number" min="1" step="any" value={fPres.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setFPres({ ...fPres, cant: v }); }} disabled={!esAlm} className={`w-full ${inputCls}`} />
             {matPres && Number(fPres.cant) > matPres.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({matPres.disponible})</div>}</div>
@@ -901,6 +1002,19 @@ export function Almacen({ user, db, api, obraGlobal }) {
                             <button onClick={() => marcarUso(sa, 'Correcto')} className={btnVerde}>Correcto uso</button>
                             <button onClick={() => setVerif({ ...verif, [sa.n]: { motivo: MOTIVOS_USO[0], otro: '' } })} className={btnRojo}>Uso incorrecto</button>
                           </div>
+                        )}
+                        {/* CORREGIR UNA VERIFICACIÓN EQUIVOCADA (migración 80).
+                            "Correcto uso" se marca con UN clic, sin confirmación, en
+                            una tabla larga: el clic en la fila de al lado es cuestión
+                            de tiempo. Sin este camino, esa salida quedaba congelada
+                            mal para siempre — no se podía re-verificar, ni anular, ni
+                            reingresar. Solo aparece mientras no haya vuelto material:
+                            un reingreso SÍ movió stock y no se deshace desde aquí. */}
+                        {esAlm && !sa.anulada && sa.uso !== 'Pendiente' && Number(sa.reingresada || 0) === 0 && (
+                          <AnularBox label="↺ Corregir verificación"
+                            placeholder="¿Por qué se corrige? (obligatorio)"
+                            titulo="Deshacer esta verificación: la salida vuelve a quedar por verificar. No mueve stock; queda el rastro con tu nombre y la hora."
+                            onConfirm={m => corregirUso(sa, m)} />
                         )}
                         {/* Uso incorrecto y sin cerrar: hay que decidir el reingreso.
                             Tres pasos, y el último es la ventana de confirmación —

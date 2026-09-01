@@ -814,6 +814,15 @@ export default function App() {
       // y por eso lo decide una persona y no una deducción: cuando registra que
       // vuelven 3 de 10, él ya sabe si el resto está en obra o se perdió.
       // Con cant = 0 y cerrar = true se declara que no volverá nada.
+      // Deshacer una verificación de uso mal marcada (migración 80). "Correcto
+      // uso" se marca con un clic en una tabla larga: sin esto, un clic en la
+      // fila equivocada dejaba esa salida congelada mal para siempre — no se
+      // podía re-verificar, ni anular, ni reingresar.
+      // Es SEGURO para el inventario: `stock()` no mira `uso`.
+      corregirUso: (salida, motivo) => wrap(async () =>
+        await supabase.rpc('corregir_uso', {
+          p_salida: salida.id, p_motivo: motivo,
+        }), ['salidas']),
       reingresar: (salida, cant, cerrar = false) => wrap(async () =>
         await supabase.rpc('reingresar_material', {
           p_salida: salida.id, p_cant: Number(cant), p_cerrar: !!cerrar,

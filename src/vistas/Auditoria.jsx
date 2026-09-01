@@ -4,11 +4,30 @@ import { HOY_ISO, fmt, diasHoy } from '../fechas';
 import { calcularStocks } from '../stock';
 import { vencimientoDe, SIN_BANCO } from '../pago';
 import { imprimirCierre, imprimirConteo } from '../pdf';
-import { PROYECTOS } from '../maestros';
+import { PROYECTOS, ALMACENEROS } from '../maestros';
 import { Aviso, FechaInput, inputCls, thCls, btnOk } from '../ui';
 
 // Umbral de pago inusual: viaja con Auditoria, nadie mas lo usa.
 const UMBRAL_MONTO_INUSUAL = 10000; // S/ — pagos por encima se marcan para revisión
+
+// ---- VERIFICAR EL USO SIN MIRARLO ----
+// El 31 ago 2026 la vista de Almacen paso a ser una BANDEJA: lo verificado
+// desaparece. Es mejor para trabajar, y a la vez crea el incentivo de vaciarla
+// a clics. El dueno lo vio venir el mismo dia.
+//
+// La primera idea fue avisar en pantalla si se marca muy rapido. No sirve: se
+// esquiva contando hasta tres, castiga al almacenero que recorre la obra y
+// vuelve a marcar seis seguidas -- que es lo correcto --, y sobre todo se lo
+// ensena al vigilado y no al vigilante.
+//
+// Esto es lo contrario, y es el patron que ya funciono con el arqueo
+// (migracion 77): no bloquea, HACE VISIBLE. Mide el patron, no el intervalo
+// entre dos clics, asi que no se burla con paciencia. Y no hizo falta ninguna
+// migracion: `uso_en` ya lo guarda la 79.
+const RAFAGA_MINUTOS = 3;    // ventana para considerar que se marco "de corrido"
+const RAFAGA_MINIMO   = 10;  // cuantas en esa ventana empiezan a llamar la atencion
+const MUESTRA_MINIMA  = 20;  // por debajo de esto, un 100% correcto no dice nada
+const DEMORA_ALTA     = 7;   // dias de media entre la salida y su verificacion
 
 // OJO: las claves de las alertas se guardan en la base (alertas
 // levantadas). Ni un caracter de su formato se cambia, o todas las
@@ -185,6 +204,68 @@ export function Auditoria({ user, db, api }) {
   // en efectivo se auditan por su rendición, no aquí.
   porBanco.filter(f => !f.conciliada && f.fechaPago && diasHoy(f.fechaPago) <= -14)
     .forEach(f => alertas.push({ clave: `sin-conciliar:${f.serie}`, tipo: 'Sin conciliar hace 14+ días', detalle: `${f.serie} (${f.proyecto}) pagada el ${fmt(f.fechaPago)} sigue sin conciliar contra el banco` }));
+
+  // ---- LA VERIFICACIÓN DE USO, MIRADA POR PATRÓN ----
+  // Quién verificó no se guarda columna a columna, pero no hace falta: el botón
+  // solo lo tiene el almacenero de la obra, así que se agrupa por obra y se
+  // nombra a quien la lleva. Si algún día verifican dos personas, esto habrá
+  // que afinarlo.
+  {
+    const verificadas = salidas.filter(s => !s.anulada && s.uso !== 'Pendiente' && s.usoEn);
+    const porObraUso = {};
+    verificadas.forEach(s => {
+      const g = (porObraUso[s.proyecto] = porObraUso[s.proyecto]
+        || { obra: s.proyecto, todas: [], incorrectas: 0 });
+      g.todas.push(s);
+      if (s.uso === 'Incorrecto') g.incorrectas += 1;
+    });
+    const quienDe = obra => ALMACENEROS[obra] ? `${ALMACENEROS[obra]} (${obra})` : obra;
+
+    Object.values(porObraUso).forEach(g => {
+      // 1 · EN RÁFAGA. Ventana deslizante sobre las horas ordenadas: se busca
+      // el mayor grupo que cabe en RAFAGA_MINUTOS. Diez verificaciones en tres
+      // minutos no es revisar material, es vaciar una lista.
+      const t = g.todas.map(s => new Date(s.usoEn).getTime()).sort((a, b) => a - b);
+      const ventana = RAFAGA_MINUTOS * 60000;
+      let pico = 0, picoIni = null;
+      for (let i = 0; i < t.length; i++) {
+        let j = i;
+        while (j < t.length && t[j] - t[i] <= ventana) j++;
+        if (j - i > pico) { pico = j - i; picoIni = t[i]; }
+      }
+      if (pico >= RAFAGA_MINIMO) {
+        alertas.push({
+          clave: `verif-rafaga:${g.obra}:${pico}`,
+          tipo: 'Verificación de uso en ráfaga',
+          detalle: `${quienDe(g.obra)}: ${pico} salidas verificadas en menos de ${RAFAGA_MINUTOS} minutos (desde ${new Date(picoIni).toLocaleString('es-PE')}). Puede ser una revisión real hecha en obra y registrada de una vez al volver; conviene preguntarlo antes de suponer nada.`,
+        });
+      }
+
+      // 2 · TODO CORRECTO. Con muestra suficiente, un cero absoluto no es una
+      // obra perfecta: es que el dato dejó de recogerse. Y ese dato es el que
+      // alimenta el indicador de material perdido.
+      if (g.todas.length >= MUESTRA_MINIMA && g.incorrectas === 0) {
+        alertas.push({
+          clave: `verif-todo-correcto:${g.obra}:${g.todas.length}`,
+          tipo: 'Ninguna salida marcada como uso incorrecto',
+          detalle: `${quienDe(g.obra)}: ${g.todas.length} salidas verificadas y NINGUNA como uso incorrecto. O la obra no desperdicia nada, o el uso se está marcando sin revisarlo — y en el segundo caso el material tirado en obra deja de aparecer en los indicadores y nadie va a recogerlo.`,
+        });
+      }
+
+      // 3 · TARDE. Verificar tres semanas después no es comprobar, es recordar.
+      const dias = g.todas.map(s => Math.round((new Date(s.usoEn) - new Date(s.fecha)) / 86400000)).filter(d => d >= 0);
+      if (dias.length >= MUESTRA_MINIMA) {
+        const media = Math.round(dias.reduce((a, d) => a + d, 0) / dias.length);
+        if (media >= DEMORA_ALTA) {
+          alertas.push({
+            clave: `verif-tardia:${g.obra}:${media}`,
+            tipo: 'El uso se verifica muy tarde',
+            detalle: `${quienDe(g.obra)}: pasan ${media} días de media entre la salida del material y la verificación de su uso (${dias.length} salidas). A esa distancia ya no se comprueba nada: se recuerda.`,
+          });
+        }
+      }
+    });
+  }
 
   // Las alertas levantadas salen de la lista activa pero NO se borran: quedan
   // abajo con su nota, para que nadie descubra que una alerta existió solo

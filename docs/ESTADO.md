@@ -1,5 +1,5 @@
 # ESTADO DEL PROYECTO
-**Actualizado: 30 ago 2026.** Aquí vive todo lo que cambia cada semana: lo
+**Actualizado: 31 ago 2026.** Aquí vive todo lo que cambia cada semana: lo
 abierto, el plan, el backlog. Salió de CLAUDE.md el 30 ago para que el contexto
 maestro no envejezca con él.
 
@@ -12,18 +12,16 @@ maestro no envejezca con él.
 
 - **App multi-usuario en producción**: Vercel (https://rq-sistemas.vercel.app),
   repo GitHub `joacosss16/rq-sistemas`, base Supabase (Postgres + RLS + Auth).
-- **77 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
-  La 77 (quién contó el efectivo) se corrió el 30 ago.
-- **La 78 está ESCRITA y SIN CORRER** (30-31 ago). Cierra cinco cosas de la
+- **80 migraciones corridas** (la 33 no existe: se descartó antes de correrse).
+  La 77 se corrió el 30 ago; la 78, la 79 y la 80, el 31.
+- **La 78 se corrió el 31 ago.** Cierra cinco cosas de la
   auditoría de Almacén: el reingreso lo suma y lo firma el servidor, el uso se
   verifica una sola vez y solo sobre una salida aprobada, rechazar exige motivo
   a TODOS los roles (no solo al residente), y **compras deja de poder aprobar
   salidas y préstamos** (decisión del dueño, 31 ago; conserva la lectura, que
   la necesita para el consolidado). **El orden importa: primero se corre la
   migración, DESPUÉS vale el código.** `Almacen.jsx` ya llama a
-  `reingresar_material`, que hasta correrla no existe — el botón "Reingresar"
-  dará error, también en localhost. (Al revés sí es seguro: con la 78 corrida,
-  el código viejo sigue funcionando; la firma se estampa igual.)
+  `reingresar_material`, y hasta correrla el botón "Reingresar" daba error.
 - **La 79 se corrió el 31 ago**: la verificación del uso se cierra y deja la
   hora. Añade `uso_en`, `reingreso_en` y `reingreso_cerrado` a `salidas`, y
   `reingresar_material` gana un tercer parámetro (`p_cerrar`); la firma vieja
@@ -43,10 +41,11 @@ maestro no envejezca con él.
   "Arqueo de X · resuelta por Y"—, que **no se puede hacer con los datos
   actuales**: las entregas de caja nacieron con la migración 38 el 12 ago y
   cuatro de las cinco rendiciones son anteriores. Hay que fabricarla.
-- **La rama `arqueo-y-reset` tiene 5 commits SIN mergear a main**: el código
+- **La rama `arqueo-y-reset` tiene 7 commits SIN mergear a main**: el código
   de la 77 (la alerta del arqueo y las dos firmas en pantalla), el reset que
   ahora borra catálogo/proveedores/bancos, el guardián
-  `verificar_datos_reales.sql`, la reorganización de CLAUDE.md y los hooks.
+  `verificar_datos_reales.sql`, la reorganización de CLAUDE.md, los hooks, y
+  los dos días de trabajo sobre ALMACÉN (migraciones 78-80 y su pantalla).
   Mergear cuando el dueño lo decida — un push a main publica en Vercel.
   Mientras tanto la base va por delante del código en modo seguro: la firma
   nueva del arqueo se guarda, solo que la pantalla aún no la muestra.
@@ -65,7 +64,7 @@ maestro no envejezca con él.
   catálogo nuevo de materiales, los 255 proveedores (CONTROL_RQ_LUZ.xlsx,
   **aún no está en `datos/`**), las cuentas bancarias reales y el stock inicial.
 
-**Estado de los módulos** (método de cierre uno por uno), al 30 ago:
+**Estado de los módulos** (método de cierre uno por uno), al 31 ago:
 - **Compras — CERRADO.** Atacado por código (28 hallazgos) y probado a mano por
   el dueño en tres rondas.
 - **Residente — arreglado**, a falta de dos comprobaciones que necesitan datos:
@@ -73,10 +72,14 @@ maestro no envejezca con él.
   anulados. Se cubren al probar Almacén.
 - **Gerencia — rediseñada y verificada**, PERO su informe mensual tiene dos
   números falsos (ver abajo): esa palabra quedó grande.
-- **Almacén y Pagos — atacados y arreglados por código, SIN probar en
-  pantalla.** Es lo siguiente. Ahí hay 22 guardas nuevas que nadie ha visto
-  dispararse: el mensaje de error de la base tiene que llegar a la cara del
-  usuario, y el precedente son los tres botones "muertos" de Compras.
+- **Almacén — auditado, reconstruido y PROBADO EN PANTALLA el 31 ago.** Tres
+  migraciones (78, 79, 80), once de los quince hallazgos de la auditoría
+  cerrados, la vista reorganizada en cuatro pestañas y dos rondas de QA con
+  Claude in Chrome. Falta: probar en pantalla lo hecho DESPUÉS del segundo QA,
+  las dos migraciones que quedan, y las decisiones de la lista de abajo.
+- **Pagos — atacado y arreglado por código, SIN probar en pantalla.** Es lo
+  siguiente. El precedente son los tres botones "muertos" de Compras: el
+  mensaje de error de la base tiene que llegar a la cara del usuario.
 
 ## LO QUE SIGUE ABIERTO (30 ago 2026)
 
@@ -205,17 +208,103 @@ Lo que encontró y ya está arreglado:
 - **Los placeholders "HT-001" y "Piso 3 - Dpto 301"** se leían como datos ya
   cargados. Cambiados por "N° de hoja" y "¿En qué zona?".
 
+**Verificar el uso sin mirarlo (31 ago).** Al convertir Salidas en una bandeja
+que se vacía se creó, sin querer, el incentivo de vaciarla a clics. Lo vio el
+dueño el mismo día. Se descartó avisar por velocidad en la pantalla del
+almacenero —se esquiva contando hasta tres, castiga a quien recorre la obra y
+registra seis seguidas, y se lo enseña al vigilado— y se hizo lo del arqueo:
+**no bloquea, hace visible**. Tres alertas nuevas en Auditoría, solo gerencia,
+sin migración (usan `uso_en` de la 79): verificación **en ráfaga** (10+ en 3
+minutos), **ninguna marcada como incorrecta** con 20+ verificadas, y **el uso
+se verifica muy tarde** (7+ días de media entre la salida y su verificación).
+Más un recordatorio suave en la pantalla del almacenero a las 6 en un minuto,
+que no bloquea y explica qué se pierde. **Los umbrales son una estimación
+mía**: hay que ajustarlos cuando haya datos reales. **Límite conocido**: se
+agrupa por OBRA, no por persona — no guardamos quién verificó, y hoy el botón
+solo lo tiene el almacenero de la obra. Si algún día verifican dos personas,
+hay que afinarlo.
+
+**Segunda pasada de QA (31 ago, tarde): el bloque D PASA.** El aviso de las
+16:00 aparece para el almacenero ("Te faltan verificar 303 salida(s)"),
+persiste entre pestañas, el botón "Ir a Salidas" navega, y **no** le sale a
+gerencia. Los demás hallazgos del informe son los mismos de la mañana, ya
+corregidos.
+
+**Ruido y búsqueda en Almacén (31 ago).** Al mirar qué pasa con un material que
+llega a cero apareció que la tabla de Stock **era la única tabla grande sin
+tope de filas** — y es la que crece sola: un material entra la primera vez que
+pasa por el almacén y ya no sale nunca, así que con 1.740 en el catálogo el
+almacenero acabaría abriendo cientos de filas en cero. Ahora:
+- Los materiales en **cero exacto y sin reservas se archivan** detrás de un
+  contador y **vuelven solos** en cuanto entra material. Los NEGATIVOS se
+  quedan siempre a la vista: son descuadre real, y esconderlos es el fallo que
+  ya se pagó una vez (ver el comentario de `stockDetalleObra`).
+- **Buscador en Stock** (material o código) y **en Recepción** (material,
+  código o número de RQ — "RQ-311" es como lo pregunta el residente por
+  WhatsApp). Buscar mira SIEMPRE en todo, archivados incluidos: quien escribe
+  el nombre de un material quiere ese material, y que esté en cero es la
+  respuesta, no un motivo para ocultárselo.
+- La regla de búsqueda se sacó a `coincide()` en `busqueda.js`, compartida con
+  el buscador del catálogo y con 5 pruebas propias: si una pantalla encuentra
+  algo y la otra no, quien busca deja de fiarse del buscador.
+
 **Lo que sigue abierto de esa auditoría:**
 
-- **ANULAR UNA SALIDA YA VERIFICADA INFLA EL STOCK** (encontrado por el dueño
-  el 31 ago probando la pantalla, no por el código). Anular devuelve al stock
-  TODO lo que salió; si el uso ya se verificó, ese material se consumió (uso
-  correcto) o se perdió (incorrecto sin recuperar), así que devolverlo inventa
-  existencias — una salida de 10 con 5 recuperados, anulada, mete 10 al stock,
-  cinco inexistentes. **La pantalla ya lo bloquea** (solo se anula con el uso
-  Pendiente, y nunca una Rechazada), pero **la base todavía lo permite**: hay
-  que llevar la guarda a `trg_salida_aprobacion`. Es la primera candidata para
-  la próxima sesión, por delante de las otras tres.
+- ~~ANULAR UNA SALIDA YA VERIFICADA INFLA EL STOCK~~ → **migración 80, CORRIDA el 31 ago**
+  tras ser atacada y corregida.** El ataque encontró que la primera versión
+  creaba una trampa peor que el fallo: "Correcto uso" se marca con UN clic sin
+  confirmación, y un clic en la fila equivocada dejaba esa salida **congelada
+  mal para siempre** — ni re-verificar, ni anular, ni reingresar—, mientras el
+  mensaje de la propia función mandaba a "anula la salida y regístrala de
+  nuevo", que es justo lo que ella prohibía 43 líneas después. La versión
+  corregida trae la prohibición **más `corregir_uso()`**, el camino que
+  faltaba: devuelve el uso a Pendiente con motivo y firma, y es seguro porque
+  `stock()` no mira `uso`. Más la excepción de anular cuando volvió todo (ahí
+  no infla nada), los mensajes reescritos, la aritmética corregida —infla
+  (cant − cant_reingresada), NO `cant`— y las pruebas del pie blindadas para
+  que fallen si no tocan ninguna fila. El botón "↺ Corregir verificación" va
+  en el mismo commit. Lo encontró el dueño probando la pantalla, no el código.
+  Anular devuelve al stock todo lo que salió; si el uso ya se verificó, ese
+  material se consumió o se perdió, así que devolverlo inventa existencias —y
+  no deja negativo, deja el stock INFLADO, que es el error que nadie va a
+  buscar—. La pantalla ya lo bloquea desde el 31 ago; la 80 lo baja a la base,
+  y de paso impide anular una salida RECHAZADA, que nunca movió stock.
+- **El vencido solo bloquea en pantalla → la migración 81 se escribió y se
+  PARÓ.** El ataque adversarial encontró un bloqueante y dos graves, así que
+  vive en `supabase/pendientes/el_vencido_bloquea_la_salida.sql`, **fuera de
+  `migrations/` a propósito** y con una cabecera de PARADA que explica los
+  tres. Lo que la para no es aritmético: **la regla es binaria y el stock real
+  es mixto**. Bloquear 100 unidades sanas porque hay 10 vencidas entre ellas,
+  sin ninguna forma de dar de baja esas 10, es peor que el problema.
+- **BLOQUEANTE ANTES DE CARGAR EL INVENTARIO REAL — el cálculo de lotes falla
+  con existencias sin caducidad, y ESO YA ESTÁ CORRIENDO EN PANTALLA.**
+  `consumido = Σ(lotes) − stock_físico`, pero `stock_fisico()` cuenta también
+  el stock inicial, las recepciones sin caducidad y los préstamos recibidos, y
+  nada de eso genera lote. Con 100 de inventario inicial y un lote de 10
+  vencido, `consumido` sale 0, el lote vencido "sobrevive" para siempre y
+  bloquea las 100 sanas. Hoy no muerde **porque no hay stock inicial cargado**
+  — y se carga justo antes de arrancar el piloto. Hay que arreglarlo en
+  `src/stock.js` con pruebas. Junto con eso, alinear los dos FIFO: la pantalla
+  ordena por `fecha_necesitada` y el SQL parado por `fecha_rq`, y el desempate
+  de lotes del mismo día tampoco coincide.
+- ~~El vencido solo bloquea en pantalla~~ → ~~**migración 81**~~ (ver arriba): La promesa de la migración 7, sin cumplir desde julio. Añade
+  `caducidad_viva(proyecto, codigo)` en SQL —el mismo FIFO por lotes que
+  `caducidadViva()` en `stock.js`, que se extrajo esta mañana justo para tener
+  una sola definición— y `trg_salidas_bi` la mira. **No se podía hacer antes**:
+  con el cálculo viejo habría bloqueado en el servidor las salidas de material
+  sano, y desde la base no hay quien lo esquive.
+  - **ANTES DE CORRERLA CON DATOS REALES**, correr la consulta 3 de su bloque
+    de comprobación: dice cuánto material quedaría atrapado. Con datos de
+    prueba da igual; con el inventario real, cada fila es material que ya no
+    podrá salir.
+  - **HALLAZGO NUEVO que abre esa migración: no existe DAR DE BAJA material
+    vencido.** La pantalla dice "dar de baja o corregir con Gerencia" y no hay
+    botón para lo primero. El callejón ya existía —la pantalla ya bloqueaba—,
+    pero la 81 lo sella. **Es lo siguiente que necesita Almacén.**
+  - **Decisión pendiente del dueño**: prestar material vencido sigue
+    permitido. Endosarle a otra obra lo que aquí no se puede usar
+    probablemente debería bloquearse, pero no se mete de tapadillo en una
+    migración sobre salidas.
 
 - **Los mensajes mandan a una puerta tapiada.** Al intentar devolver un
   préstamo consumido, la base dice "corresponde Transferir al costo"
