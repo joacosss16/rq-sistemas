@@ -15,8 +15,8 @@ trabajadores, 5 proyectos activos:
 | Código | Proyecto | Residente | Almacenero |
 |---|---|---|---|
 | 2501 | EMPERATRIZ | — | — |
-| 2502 | DANAUS | Andrés Chino (benchmark interno) | — |
-| 2503 | MAIA | Edwin Salas | Anton Taucca |
+| 2502 | DANAUS | Andrés Chino (benchmark interno) | Bryan Monzón |
+| 2503 | MAIA | Edwin Salas | Airton Tavera |
 | 2504 | LUZ | — | Brayan Huamán |
 | 2601 | TORRE COPACABANA | — | — |
 
@@ -68,13 +68,15 @@ nuevas rigen para todos de inmediato.
 **Variables de entorno** (`.env.local`, ver `src/supabaseClient.js`):
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` y `VITE_ENTORNO`. Esa última
 decide el banner: mientras no diga `produccion`, la aplicación muestra la
-franja "ENTORNO DE PRUEBAS · ESTOS NO SON LOS DATOS REALES". Al arrancar el
-piloto hay que cambiarla, o el equipo trabajará creyendo que practica.
+franja "ENTORNO DE PRUEBAS · ESTOS NO SON LOS DATOS REALES". **Se cambió a
+`produccion` en Vercel el 1 sep 2026**: desde entonces lo que se registra es
+real y no hay más resets planeados.
 
 ## Modelo de negocio del sistema
 
 ### Catálogo
-1,740 materiales y **58 familias** (tabla `familias`). Código de 6 dígitos:
+1,865 materiales y **82 familias** (tabla `familias`; recargado entero el
+1 sep 2026 — ojo: la familia 13 pasó de GRANITO a ASFALTO). Código de 6 dígitos:
 IU(2) + GRUPO(2) + correlativo(2); la familia se deriva de los 2 primeros
 dígitos. Solo la dueña del catálogo (Arana) aprueba materiales nuevos; los
 residentes los solicitan desde su vista, y Compras puede editar la solicitud
@@ -82,7 +84,9 @@ residentes los solicitan desde su vista, y Compras puede editar la solicitud
 recicla**: el correlativo y la unicidad miran todos los códigos jamás
 asignados, incluidos los desactivados. Un código desactivado no se puede pedir,
 pero su stock físico se sigue sacando y su historia conserva el nombre. Fuente:
-`datos/codificacion_de_almacen.xlsx`, hoja "Materiales 3.0".
+`datos/Materiales Final 31.07.xlsx`, hoja "Materiales 3.0" (los seeds:
+`seed_familias.sql` → `seed_catalogo.sql` → `seed_perecederos.sql`, en ese
+orden; el Excel viejo `codificacion_de_almacen.xlsx` queda solo de historia).
 
 ### Canales de RQ (el canal lo deriva el sistema de la fecha necesitada)
 - **URGENTE**: < 2 días → justificación obligatoria ("¿por qué no se previó?")
@@ -142,7 +146,7 @@ DOS números y no son intercambiables: `cant` = disponible (descuenta reservas),
 `fisico` = lo que está en el estante. El conteo ciego y el cierre valorizado
 usan el físico: a nadie se le pide contar material que sí está.
 
-### Roles (login real con Supabase Auth; cuentas de prueba @rq-test.com, contraseña compartida 1234 hasta el arranque)
+### Roles (login real con Supabase Auth; desde el 1 sep 2026 las 8 cuentas son reales — `inicial.apellido@<obra>.copa.rq` para obra, `@admin.copa.rq` para oficina, contraseña individual; las @rq-test.com se borraron)
 - `gerencia` → todas las vistas, entra al Tablero. Único con "Reiniciar datos".
   **Gerencia mira, no registra** (criterio del dueño, 26 ago): no recibe
   material, no factura, no paga. Sus vistas prestadas abren con contadores.

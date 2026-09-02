@@ -1,5 +1,5 @@
 # ESTADO DEL PROYECTO
-**Actualizado: 31 ago 2026.** Aquí vive todo lo que cambia cada semana: lo
+**Actualizado: 1 sep 2026 (noche).** Aquí vive todo lo que cambia cada semana: lo
 abierto, el plan, el backlog. Salió de CLAUDE.md el 30 ago para que el contexto
 maestro no envejezca con él.
 
@@ -409,27 +409,96 @@ anulada libera su número, que los RQ íntegramente rechazados eran inalcanzable
 contra la obra — hoy hay un aviso ⚠ en pantalla, pero **no bloquea**, y el
 servidor solo exige que no esté vacía.
 
-## CIERRE DEL 1 DE SEPTIEMBRE — POR DÓNDE SEGUIR
+## CIERRE DEL 1 DE SEPTIEMBRE (NOCHE) — SE CARGÓ TODO Y SE PROBÓ CON EL EQUIPO
 
-**Lo único que falta antes de meter dinero real NO es código:**
+**Los 4 pasos del cierre anterior se hicieron HOY, contra la base y
+verificando cada uno antes del siguiente:**
 
-1. **Correr `supabase/verificar_datos_reales.sql`.** Falla listando todo lo que
-   falta. Ya se sabe que saldrán al menos dos: **el almacenero de DANAUS** (sin
-   él, media obra del piloto no recibe ni saca material) y **los 255
-   proveedores** (`CONTROL_RQ_LUZ.xlsx` sigue sin estar en `datos/`).
-2. **Cargar**: familias → materiales → proveedores → cuentas bancarias reales
-   de 2502 y 2503 → usuarios → **stock inicial el último, el día del arranque**.
-3. **OJO CON EL STOCK INICIAL**: sin él el sistema dirá que no hay material y
-   tendrá razón; los almaceneros no podrán registrar salidas y pensarán que
-   está roto. Cargarlo ANTES de que entre nadie.
-4. `VITE_ENTORNO = produccion` en Vercel. Lo último que se toca.
+- **Reset completo** (curaduría de duplicados incluida: los códigos cambiaban).
+- **Catálogo v2**: 82 familias + 1,865 materiales + 205 perecederos, desde
+  `datos/Materiales Final 31.07.xlsx` (¡la familia 13 pasó de GRANITO a
+  ASFALTO!). Quedaron FUERA 7 materiales con código de 7 dígitos (el grupo
+  3901 se desbordó en el Excel — el desborde ya no es teórico) y 4 pares
+  duplicados para Lucía. Seeds nuevos: `seed_familias` → `seed_catalogo` →
+  `seed_perecederos`.
+- **309 proveedores** (no 255: la lista creció), todos con dígito verificador
+  válido. OJO: el RUC 20138651917 que el guardián acusaba como "de prueba" es
+  SANICENTER S.A.C., proveedor real — el guardián ahora busca 'PRUEBA' en el
+  nombre, porque un RUC real nunca identifica datos de prueba.
+- **Bancos**: 2502 Interbank · 2503 Scotiabank (las cuentas en soles; los
+  pares en dólares NO se cargaron a propósito — ver docs/ajustes_semana_dos).
+- **8 usuarios reales** (`inicial.apellido@<obra>.copa.rq` / `@admin.copa.rq`,
+  contraseñas individuales). Las @rq-test se borraron. Nombres REALES del
+  piloto: almacenero de MAIA es **Airton Tavera** (no "Anton Taucca") y el de
+  DANAUS es **Bryan Monzón** — el bloqueante de DANAUS quedó resuelto.
+  "Alexandra" = Lucía.
+- **Stock inicial cargado y verificado por recálculo independiente** de los
+  ~12,000 movimientos crudos de los dos Excel de obra: 2502 = 377 materiales /
+  44,548 und · 2503 = 219 / 14,409. Corte del **31 ago**. Se cazó antes de
+  cargar: el par duplicado 900117/900154 (se cargó 13, no 25).
+- **Guardián en verde** y **`VITE_ENTORNO = produccion`** en Vercel: la franja
+  amarilla ya no existe. Producción corre el código completo (main = rama en
+  `src/`).
 
-**Lo que quedó abierto no impide arrancar.** Todo falla hacia "alguien registra
-algo raro y se ve en el arqueo", no hacia "nadie puede trabajar". Por orden de
-lo que toca dinero: aprobar una jornada sin contar el efectivo · el aviso de
-saldo a Frank · las entregas duplicadas · la conciliación que existe pero nadie
-encuentra (está en Auditoría, y un revisor con instrucciones explícitas no dio
-con ella: el contador "sin conciliar" de Pagos no lleva a ninguna parte).
+**EL ANUNCIO SE MUEVE AL LUNES 7.** Esta semana el dueño tiene 2 h/día de
+jueves a domingo. Plan: jue = equivalencias + Supabase Pro + migración RQ por
+obra · vie = cargas de Lucía/almaceneros + merge a main · sáb = regenerar el
+corte de stock con los Excel actualizados + manuales · dom = guardián final +
+accesos + colchón. **Recomendado y pendiente de confirmar: el Excel de cada
+obra sigue mandando hasta el domingo** (camino B), y el corte se regenera el
+sábado — el enemigo es la doble contabilidad.
+
+**FEEDBACK DE LA PRIMERA PRUEBA CON EL EQUIPO** (residentes + almacenes + algo
+de Lucía; Frank/Mónica/gerencia SIN probar con cuentas reales — la primera
+jornada real de caja, hacerla acompañada):
+
+- **Equivalencias = URGENTE** (el almacén no despacha envases sin ellas).
+  `seed_equivalencias.sql` v2 listo SIN CORRER, tras auditar los movimientos
+  crudos: 22 identidades + 7 en base + 7 contadas en envase (stock × factor),
+  y **12 códigos a RECONTEO FÍSICO** (clavos/alcayatas: movimientos de -1 a
+  +1330 rotulados CAJA — ni cajas ni gramos; convertir ambigüedad fabrica
+  descuadre). `datos/reconteo_fisico_pendiente.csv` para los almaceneros;
+  `datos/equivalencias_pendientes_lucia.csv` (41) para Lucía. La v1 del seed
+  relabelaba todo y habría hecho "1 rollo" = "1 metro": la paró el dueño
+  pidiendo verificación al 100%.
+- **Número de RQ por obra**: pedido YA por el equipo. Formato propuesto
+  `2502-RQ-1` (pendiente de confirmar). Los RQ existentes conservan su orden.
+  Migración del jueves.
+- **Pantalla en BLANCO** al pasar de RQ a Aprobaciones (residente, 18:17). NO
+  fue internet: crash de React. `AprobacionesResidente.jsx` revisado y limpio;
+  falta el error de consola (F12) si se repite. Mitigación planificada:
+  ErrorBoundary para que una vista caída no tumbe la aplicación.
+- **Niveles**: la lista cerrada no cubre lija/pintura de fachada/soldadura.
+  Propuesta: añadir VARIOS NIVELES · FACHADA/EXTERIORES · TODA LA OBRA (no
+  texto libre, que mata los indicadores). Falta OK del dueño (vista residente).
+- **El vuelto de Frank**: ya tiene camino sin código — la entrega admite medio
+  'Efectivo' sin N° de operación; el vuelto se reingresa como primera entrega
+  del día siguiente rotulada "VUELTO dd-mm". Va al manual de Mónica.
+- **IGV incluido vs añadido**: regla interina para Frank — TODO se digita CON
+  IGV (si la factura lo añade al final: precio de lista × 1.18). El desglose
+  formal es el bloque SIRE, post-piloto.
+- **La cotización de Lucía crea materiales** — es el agujero abierto n°1 (RQ
+  fantasma por cotización + familia 97). Mitigación hasta el arreglo: **Lucía
+  no crea pedidos por cotización**.
+- **Verificar el uso**: no frena a nadie; se verifica al VERLO (2-3 días si
+  el lote era para 3 días). Materiales que piden caducidad sin tenerla: los
+  almaceneros reportan códigos y Lucía les quita la marca.
+- **UI**: el formulario de préstamo ya dice la unidad (commit de hoy, en la
+  rama). Pagos en dólares y subfamilias: `docs/ajustes_semana_dos/`.
+
+**Pendientes de decisión del dueño** (0 horas, solo mensajes): camino A/B del
+Excel · formato del RQ · OK a los niveles · tolerancia del arqueo (sigue en
+S/ 20 de fábrica) · la obra nueva que entraría al piloto (código ¿2602?,
+personas, cuenta) · enchapes familia 24 vs 97 (con Lucía).
+
+**La lista completa de Lucía**: `docs/pendientes_lucia_1sep.md` (7 puntos).
+
+**Lo que quedó abierto pre-lanzamiento no impide operar.** Todo falla hacia
+"alguien registra algo raro y se ve en el arqueo", no hacia "nadie puede
+trabajar". Por orden de lo que toca dinero: aprobar una jornada sin contar el
+efectivo · el aviso de saldo a Frank · las entregas duplicadas · la
+conciliación que existe pero nadie encuentra. Y **Supabase sigue SIN copias de
+seguridad con datos reales dentro**: Supabase Pro es lo primero del jueves.
 
 **LO QUE SE APRENDIÓ EL 31 DE AGOSTO, y conviene no olvidar:** de los ocho
 fallos que impedían trabajar encontrados en dos días, **ninguno salió de leer
