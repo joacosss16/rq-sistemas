@@ -1,0 +1,34 @@
+proyecto,obra,codigo,material,unidad,cant_en_envase,movimientos,factor_caja,und_base,nota
+2503,MAIA,020191,"ABRAZADERA UNISTRUT 1/2"" C/PERNO Y TUERCA",PAR,0.0,2,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,020417,"ALCAYATA ESTRIADA 1 1/2"" (3.5 x 40mm) 500gr",CAJA,508.0,5,500.0,GR,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)"
+2503,MAIA,020443,"CLAVO DE ACERO ESTRIADO VERTICAL 2"" (3.5 x 50mm) Cja x 500gr",CAJA,232.0,9,500.0,GR,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)"
+2503,MAIA,020444,"CLAVO DE ACERO ESTRIADO VERTICAL 2 1/2"" (3.5 x 63mm) Cja x 500gr",CAJA,0.0,2,500.0,GR,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)"
+2503,MAIA,020446,"CLAVO DE ACERO ESTRIADO VERTICAL 3"" (4.3 x 75mm) Cja x 500gr",CAJA,120.0,2,500.0,GR,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)"
+2503,MAIA,030101,"ACERO CORRUGADO G° 60 DE 1"" x 9M AA",VARILLA,0.0,15,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030102,"ACERO CORRUGADO G° 60 DE 3/4"" x 9M AA",VARILLA,5.0,37,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030103,"ACERO CORRUGADO G° 60 DE 5/8"" x 9M AA",VARILLA,4.0,41,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030104,"ACERO CORRUGADO G° 60 DE 1/2"" x 9M AA",VARILLA,0.0,46,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030106,"ACERO CORRUGADO G° 60 DE 3/8"" x 9M AA",VARILLA,0.0,54,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030107,"ACERO CORRUGADO G° 60 DE 1/4"" x 9M AA",VARILLA,37.0,20,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,030108,ACERO CORRUGADO G° 60 DE 6mm x 9M AA,VARILLA,0.0,2,1.0,UND,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)"
+2503,MAIA,040351,YESO EN SACO DE 28 kg,BLS,0.0,34,1.0,BLS,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)"
+2503,MAIA,260111,"BISAGRA PESADA 4X3"" PUERTA PRINCIPAL UYUSTOOLS NIQUELADO",PAR,0.0,2,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,390121,BOLSA DE BASURA DE 35LT,PQT,0.0,6,100.0,UND,Confirmado por Lucia: 100 UND (antes: 100.0 MTS)
+2503,MAIA,390177,VASOS DESCARTABLES,PQT,0.0,5,100.0,UND,Confirmado por Lucia: 100 UND (antes: 50.0 MTS)
+2503,MAIA,530101,PETROLEO,GLN,0.0,30,,,
+2503,MAIA,810131,ADITIVO IMPERMEABILIZANTE CHEMA-SEAL GRIS 1 GALÓN + COMPLEMENTO LIQUIDO DE 1/2 LITRO,GLN,0.0,2,,,
+2503,MAIA,810141,IMPERMEABILIZANTE PENETRON 22.7KG,BLS,0.0,2,1.0,BLS,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)"
+2503,MAIA,810142,CHEMA VISTA ECO 1GL,BLS,10.0,3,1.0,BLS,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)"
+2503,MAIA,830133,PAQUETE DE GUANTES QUIRURGICOS ,CAJA,0.0,2,100.0,PAR,"Lucia confirmo: se compra por caja, se consume por PAR. Cantidad de pares (100) tomada del dato previo del archivo, no confirmada explicitamente por Lucia -- verificar. (antes: 100.0 UND)"
+2503,MAIA,830233,GUANTES DE JEBE TALLA M,PAR,0.0,4,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,830235,GUANTES DE JEBE TALLA S,PAR,0.0,2,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,830239,GUANTES CORRUGADO M,PAR,0.0,13,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,830242,GUANTES DE PRECISIÓN GRIS/NEGRO,PAR,20.0,13,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,830243,GUANTES DE HILO CON PALMA DE GOMA ROJO/AMARILLO,PAR,24.0,9,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,830255,BARBIJO QUIRURGICO (MASCARILLA),CAJA,0.0,8,100.0,UND,
+2503,MAIA,830321,MALLA FAENA EN ROLLO NARANJA 50 YD. ,ROLLO,0.0,2,45.72,MTS,Confirmado por Lucia: convertir a metros. 50 YD x 0.9144 = 45.72 MTS (antes: 50.0 MTS)
+2503,MAIA,860111,BASE ZINCROMATO MAESTRO - PINTURA BASE PARA METAL,GLN,0.0,7,,,
+2503,MAIA,860261,PINTURA ESMALTE COLOR AZUL NAVAL EN PLANCHA PROVICIONALES,GLN,1.0,5,,,
+2503,MAIA,930261,PAPEL TOALLA RENDIPEL PRO DOBLE HOJA 100 M,ROLLO,0.0,2,100.0,MTS,
+2503,MAIA,950313,CONECTOR PLUG MACHO/HEMBRA ,PAR,0.0,2,1.0,PAR,"Confirmado por Lucia: el par se entrega completo, no se separa"
+2503,MAIA,990101,SAL INDUSTRIAL PARA POZO A TIERRA,BLS,0.0,2,1.0,BLS,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)"

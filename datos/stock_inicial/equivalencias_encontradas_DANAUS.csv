@@ -1,0 +1,38 @@
+codigo,material,und_base_equiv,factor_caja,nota_equiv,unidad_DANAUS,saldo_DANAUS
+020417,"ALCAYATA ESTRIADA 1 1/2"" (3.5 x 40mm) 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,661.0
+020418,"ALCAYATA ESTRIADA 2"" (3.5 x 50mm) 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,0.0
+020419,"ALCAYATA ESTRIADA 2"" (3.7 x 50mm) 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,20.0
+020442,"CLAVO DE ACERO ESTRIADO VERTICAL 1 1/2"" (2.7 x 40mm) Cja x 500gr ",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,33.0
+020443,"CLAVO DE ACERO ESTRIADO VERTICAL 2"" (3.5 x 50mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,88.0
+020444,"CLAVO DE ACERO ESTRIADO VERTICAL 2 1/2"" (3.5 x 63mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,0.0
+020446,"CLAVO DE ACERO ESTRIADO VERTICAL 3"" (4.3 x 75mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,0.0
+020447,"CLAVO DE ACERO ESTRIADO VERTICAL 4"" (4.3 x 100mm) Cja x 500gr ",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,54.0
+390123,BOLSA DE BASURA DE 75LT,UND,100.0,Confirmado por Lucia: 100 UND (antes: 100.0 MTS),PQT,1.0
+390124,BOLSA DE BASURA DE 140 LT,UND,100.0,Confirmado por Lucia: 100 UND (antes: 100.0 MTS),PQT,1.0
+830313,CINTA DE SEGURIDAD COLOR AMARILLO,MTS,100.0,,ROLLO,1.0
+830321,MALLA FAENA EN ROLLO NARANJA 50 YD. ,MTS,45.72,Confirmado por Lucia: convertir a metros. 50 YD x 0.9144 = 45.72 MTS (antes: 50.0 MTS),ROLLO,1.0
+020192,"ABRAZADERA UNISTRUT 3/4"" C/PERNO Y TUERCA",PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,24.0
+020193,"ABRAZADERA UNISTRUT 1"" C/PERNO Y TUERCA",PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+260111,"BISAGRA PESADA 4X3"" PUERTA PRINCIPAL UYUSTOOLS NIQUELADO",PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+260178,BISAGRA OMEGA 4”X 4” INOX ,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,70.0
+830233,GUANTES DE JEBE TALLA M,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,2.0
+830239,GUANTES CORRUGADO M,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+830242,GUANTES DE PRECISIÓN GRIS/NEGRO,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,3.0
+830243,GUANTES DE HILO CON PALMA DE GOMA ROJO/AMARILLO,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,4.0
+030101,"ACERO CORRUGADO G° 60 DE 1"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030102,"ACERO CORRUGADO G° 60 DE 3/4"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030103,"ACERO CORRUGADO G° 60 DE 5/8"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030104,"ACERO CORRUGADO G° 60 DE 1/2"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030106,"ACERO CORRUGADO G° 60 DE 3/8"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030107,"ACERO CORRUGADO G° 60 DE 1/4"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+040351,YESO EN SACO DE 28 kg,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,0.0
+810141,IMPERMEABILIZANTE PENETRON 22.7KG,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,0.0
+020492,"CLAVIJA DE IMPACTO PARA DRYWALL 1"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+020493,"CLAVIJA DE IMPACTO PARA DRYWALL 1-1/4"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,100.0
+020494,"CLAVIJA DE IMPACTO PARA DRYWALL 1-1/2"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+020561,TORNILLO AUTOAVELLANANTE PUNTA FINA 6X1-1/4 FIBROCEMENTO x 100und,UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,1000.0
+180121,CABLE UTP CAT 6 x 305 m,MTS,305.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",MTS,250.0
+270111,FULMINANTE MARRÓN CAL. 22 x 100 und,UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,100.0
+370322,CUCHILLA PARA CEPILLO ELECTRICO BOSH X 2UND,UND,2.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+370615,ESPONJA ALAMBRADA X 10UND,UND,10.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,5.0
+390152,CAJA TIZA COLORES X 50 UND,UND,50.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,64.0

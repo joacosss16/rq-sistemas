@@ -123,10 +123,16 @@ begin
 
   select count(*) into v_n from public.proveedores;
   if v_n < 50 then
-    v_faltan := v_faltan || ('Solo hay ' || v_n || ' PROVEEDORES. Faltan los 255 de CONTROL_RQ_LUZ.xlsx; sin ellos cada compra da de alta uno a mano y el maestro nace sucio.');
+    v_faltan := v_faltan || ('Solo hay ' || v_n || ' PROVEEDORES. Faltan los 309 de seed_proveedores.sql; sin ellos cada compra da de alta uno a mano y el maestro nace sucio.');
   end if;
-  if exists (select 1 from public.proveedores where ruc = '20138651917') then
-    v_faltan := v_faltan || 'El proveedor de PRUEBA (RUC 20138651917) sigue cargado.';
+  -- OJO (1 sep 2026): antes se buscaba el RUC 20138651917, que era el del
+  -- harness de pruebas — pero ese RUC es de SANICENTER S.A.C., proveedor
+  -- REAL de la lista de Lucia. Un RUC de verdad nunca identifica datos de
+  -- prueba; el nombre inventado si.
+  select string_agg(ruc || ' · ' || razon_social, ', ') into v_x
+    from public.proveedores where razon_social ilike '%PRUEBA%';
+  if v_x is not null then
+    v_faltan := v_faltan || ('Proveedor(es) de PRUEBA todavia cargados: ' || v_x);
   end if;
 
   -- Equivalencias de caja: sin ellas el stock de esos materiales se cuenta en

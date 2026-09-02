@@ -6,7 +6,7 @@ Contenido:
   migrations/20260717000002_rls.sql              -> Row Level Security por rol y proyecto
   migrations/20260718000003_familias.sql         -> tabla familias + familia derivada del codigo
   seed.sql                                       -> proyectos + plantilla de usuarios
-  seed_catalogo.sql                              -> 58 familias + 1,740 materiales (generado del Excel)
+  seed_familias.sql / seed_catalogo.sql          -> 82 familias + 1,865 materiales (Materiales Final 31.07.xlsx), EN ESE ORDEN
   reset_pruebas.sql                              -> limpia movimientos de prueba
 
 COMO APLICAR (opcion simple, sin instalar nada):

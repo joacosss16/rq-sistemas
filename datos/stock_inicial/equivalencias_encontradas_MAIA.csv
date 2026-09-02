@@ -1,0 +1,38 @@
+codigo,material,und_base_equiv,factor_caja,nota_equiv,unidad_MAIA,saldo_MAIA
+020417,"ALCAYATA ESTRIADA 1 1/2"" (3.5 x 40mm) 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,508.0
+020443,"CLAVO DE ACERO ESTRIADO VERTICAL 2"" (3.5 x 50mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,232.0
+020444,"CLAVO DE ACERO ESTRIADO VERTICAL 2 1/2"" (3.5 x 63mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,0.0
+020446,"CLAVO DE ACERO ESTRIADO VERTICAL 3"" (4.3 x 75mm) Cja x 500gr",GR,500.0,"antes: 50.0 UND (pieza) -> ahora: 500.0 GR (peso de caja, no pieza)",CAJA,120.0
+390121,BOLSA DE BASURA DE 35LT,UND,100.0,Confirmado por Lucia: 100 UND (antes: 100.0 MTS),PQT,0.0
+390177,VASOS DESCARTABLES,UND,100.0,Confirmado por Lucia: 100 UND (antes: 50.0 MTS),PQT,0.0
+830133,PAQUETE DE GUANTES QUIRURGICOS ,PAR,100.0,"Lucia confirmo: se compra por caja, se consume por PAR. Cantidad de pares (100) tomada del dato previo del archivo, no confirmada explicitamente por Lucia -- verificar. (antes: 100.0 UND)",CAJA,0.0
+830255,BARBIJO QUIRURGICO (MASCARILLA),UND,100.0,,CAJA,0.0
+830321,MALLA FAENA EN ROLLO NARANJA 50 YD. ,MTS,45.72,Confirmado por Lucia: convertir a metros. 50 YD x 0.9144 = 45.72 MTS (antes: 50.0 MTS),ROLLO,0.0
+930261,PAPEL TOALLA RENDIPEL PRO DOBLE HOJA 100 M,MTS,100.0,,ROLLO,0.0
+020191,"ABRAZADERA UNISTRUT 1/2"" C/PERNO Y TUERCA",PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+260111,"BISAGRA PESADA 4X3"" PUERTA PRINCIPAL UYUSTOOLS NIQUELADO",PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+830233,GUANTES DE JEBE TALLA M,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+830235,GUANTES DE JEBE TALLA S,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+830239,GUANTES CORRUGADO M,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+830242,GUANTES DE PRECISIÓN GRIS/NEGRO,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,20.0
+830243,GUANTES DE HILO CON PALMA DE GOMA ROJO/AMARILLO,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,24.0
+950313,CONECTOR PLUG MACHO/HEMBRA ,PAR,1.0,"Confirmado por Lucia: el par se entrega completo, no se separa",PAR,0.0
+030101,"ACERO CORRUGADO G° 60 DE 1"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030102,"ACERO CORRUGADO G° 60 DE 3/4"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,5.0
+030103,"ACERO CORRUGADO G° 60 DE 5/8"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,4.0
+030104,"ACERO CORRUGADO G° 60 DE 1/2"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030106,"ACERO CORRUGADO G° 60 DE 3/8"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+030107,"ACERO CORRUGADO G° 60 DE 1/4"" x 9M AA",UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,37.0
+030108,ACERO CORRUGADO G° 60 DE 6mm x 9M AA,UND,1.0,"Confirmado por Lucia: la varilla no se corta, se entrega completa (1 UND)",VARILLA,0.0
+040351,YESO EN SACO DE 28 kg,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,0.0
+810141,IMPERMEABILIZANTE PENETRON 22.7KG,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,0.0
+810142,CHEMA VISTA ECO 1GL,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,10.0
+990101,SAL INDUSTRIAL PARA POZO A TIERRA,BLS,1.0,"Confirmado por Lucia: no se pesan, se entrega la bolsa completa (1 BLS)",BLS,0.0
+020492,"CLAVIJA DE IMPACTO PARA DRYWALL 1"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+020493,"CLAVIJA DE IMPACTO PARA DRYWALL 1-1/4"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+020494,"CLAVIJA DE IMPACTO PARA DRYWALL 1-1/2"" Cja x 100 und",UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,600.0
+020561,TORNILLO AUTOAVELLANANTE PUNTA FINA 6X1-1/4 FIBROCEMENTO x 100und,UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+180121,CABLE UTP CAT 6 x 305 m,MTS,305.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",MTS,0.0
+270111,FULMINANTE MARRÓN CAL. 22 x 100 und,UND,100.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,600.0
+370615,ESPONJA ALAMBRADA X 10UND,UND,10.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0
+390152,CAJA TIZA COLORES X 50 UND,UND,50.0,"Confirmado por Lucia: se compra en caja, equivalencia tomada del propio nombre del material",UND,0.0

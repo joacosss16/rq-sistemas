@@ -904,10 +904,10 @@ export function Almacen({ user, db, api, obraGlobal }) {
           <div className="md:col-span-2"><label className={lblCls}>Material (con stock)</label>
             <select value={fPres.cod} onChange={e => setFPres({ ...fPres, cod: e.target.value })} disabled={!esAlm} className={`w-full ${inputCls}`}>
               <option value="">— Elegir —</option>
-              {stockTodo.filter(s => s.disponible > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (disp: {s.disponible})</option>)}</select></div>
-          <div><label className={lblCls}>Cantidad</label>
+              {stockTodo.filter(s => s.disponible > 0).map(s => <option key={s.cod} value={s.cod}>{s.desc} (disp: {s.disponible} {s.und})</option>)}</select></div>
+          <div><label className={lblCls}>Cantidad{matPres ? ` (en ${matPres.und})` : ''}</label>
             <input type="number" min="1" step="any" value={fPres.cant} onChange={e => { const v = e.target.value; if (v === '' || Number(v) > 0) setFPres({ ...fPres, cant: v }); }} disabled={!esAlm} className={`w-full ${inputCls}`} />
-            {matPres && Number(fPres.cant) > matPres.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({matPres.disponible})</div>}</div>
+            {matPres && Number(fPres.cant) > matPres.disponible && <div className="text-[9px] text-red-400 mt-1">Excede disponible ({matPres.disponible} {matPres.und})</div>}</div>
           <div><label className={lblCls}>Almacén destino</label>
             <FiltroProyecto value={fPres.destino} onChange={v => setFPres({ ...fPres, destino: v })} excluir={proy} /></div>
         </div>

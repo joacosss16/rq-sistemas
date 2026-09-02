@@ -1,10 +1,16 @@
 -- ============================================================
--- MARCADO DE PERECEDEROS — 205 de 1740 materiales
--- Clasificacion por vida util tipica de cada categoria, con
--- verificacion externa de casos dudosos (electrodos: si vencen;
--- cintas 3M: 5 anios de vida util, NO marcadas).
--- Compras puede ajustar cualquier material desde la vista
--- Catalogo (checkbox Perecedero).
+-- MARCADO DE PERECEDEROS v2 — ajustado el 1 sep 2026 al catalogo
+-- 'Materiales Final 31.07.xlsx': 200 codigos (eran 205; cinco ya
+-- no existen: 130101-130104 —la familia 13 paso de GRANITO a
+-- ASFALTO— y 860272) MAS cinco materiales NUEVOS del 31.07 que
+-- caen en categorias ya marcadas — cuatro son el correlativo
+-- siguiente de un rango marcado: 310201 (resina), 550101 (temple),
+-- 810143 (curador), 810235 (sikaflex), 860352 (sellador epoxico).
+-- Total: 205.
+-- OJO: los materiales NUEVOS de este catalogo (los que no estaban
+-- en el del 18 jul) NADIE los ha clasificado. Lucia debe repasar
+-- perecederos desde la vista Catalogo (checkbox por material).
+-- Correr DESPUES de seed_catalogo.sql.
 -- ============================================================
 
 -- combustibles y lubricantes: 5
@@ -17,7 +23,7 @@ update public.materiales set perecedero = true where codigo in ('040331', '04033
 update public.materiales set perecedero = true where codigo in ('060311', '060321');
 
 -- resinas y catalizadores (6-12 meses): 4
-update public.materiales set perecedero = true where codigo in ('130101', '130102', '130103', '130104');
+-- (bloque eliminado: sus codigos ya no existen en el catalogo v2)
 
 -- explosivos (fulminantes): 1
 update public.materiales set perecedero = true where codigo in ('270111');
@@ -31,8 +37,8 @@ update public.materiales set perecedero = true where codigo in ('390166', '39016
 -- botiquin y limpieza (vencimiento impreso): 10
 update public.materiales set perecedero = true where codigo in ('390176', '830113', '830115', '830129', '830137', '830139', '830144', '830145', '830147', '830151');
 
--- pinturas y recubrimientos (2-3 años): 44
-update public.materiales set perecedero = true where codigo in ('540111', '540211', '540212', '540213', '540221', '540223', '540224', '540310', '540311', '540312', '540313', '540314', '540315', '540316', '540350', '540511', '860111', '860112', '860113', '860211', '860212', '860213', '860214', '860215', '860241', '860242', '860251', '860252', '860261', '860262', '860263', '860271', '860272', '860273', '860274', '860275', '860276', '860277', '860278', '860279', '860280', '860311', '860321', '860331');
+-- pinturas y recubrimientos (2-3 años): 43
+update public.materiales set perecedero = true where codigo in ('540111', '540211', '540212', '540213', '540221', '540223', '540224', '540310', '540311', '540312', '540313', '540314', '540315', '540316', '540350', '540511', '860111', '860112', '860113', '860211', '860212', '860213', '860214', '860215', '860241', '860242', '860251', '860252', '860261', '860262', '860263', '860271', '860273', '860274', '860275', '860276', '860277', '860278', '860279', '860280', '860311', '860321', '860331');
 
 -- adhesivos y selladores (1-2 años): 41
 update public.materiales set perecedero = true where codigo in ('540410', '540411', '540412', '540413', '590126', '600310', '600311', '600312', '600313', '600314', '600315', '600316', '600317', '600318', '600319', '600320', '600321', '600323', '810211', '810212', '810213', '810231', '810232', '810233', '810234', '810511', '810512', '810513', '810514', '810515', '810516', '810552', '810711', '810712', '860351', '860451', '860452', '860453', '860454', '860455', '930421');
@@ -45,6 +51,9 @@ update public.materiales set perecedero = true where codigo in ('830229');
 
 -- sprays y aerosoles: 5
 update public.materiales set perecedero = true where codigo in ('830333', '830334', '830335', '830336', '830337');
+
+-- nuevos del catalogo 31.07 en categorias ya marcadas: 5
+update public.materiales set perecedero = true where codigo in ('310201', '550101', '810143', '810235', '860352');
 
 -- verificacion
 select count(*) filter (where perecedero) as perecederos, count(*) as total from public.materiales;
